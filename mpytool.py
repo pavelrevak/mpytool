@@ -59,6 +59,14 @@ class SerialConn():
     def __init__(self, log=None, **serial_config):
         self._log = log
         self._serial = _serial.Serial(**serial_config)
+        self._buffer = b''
+
+    def _read_to_buffer(self):
+        in_waiting = self._serial.in_waiting
+        if in_waiting > 0:
+            self._buffer += self._serial.read(in_waiting)
+            return True
+        return False
 
     def write(self, data):
         if self._log:
@@ -66,29 +74,27 @@ class SerialConn():
         self._serial.write(data)
 
     def read_until(self, end, timeout=1):
-        data = b''
-        max_time = time.time() + timeout
-        while not data.endswith(end):
-            in_waiting = self._serial.in_waiting
-            if in_waiting > 0:
-                max_time = time.time() + timeout
-                data += self._serial.read()
-            elif max_time < time.time():
-                if data:
-                    raise Timeout(f"During timeout received: {data}")
+        self._log.debug(f'wait for {end}')
+        start_time = time.time()
+        while True:
+            if self._read_to_buffer():
+                start_time = time.time()
+            if end in self._buffer:
+                break
+            if timeout is not None and start_time + timeout < time.time():
+                if self._buffer:
+                    raise Timeout(
+                        f"During timeout received: {bytes(self._buffer)}")
                 raise Timeout("No data received")
-            else:
-                time.sleep(.01)
+            time.sleep(.01)
+        data, self._buffer = self._buffer.split(end, 1)
         if self._log:
             self._log.debug(f"rd: {data}")
         data = data.rstrip(end)
         return data
 
-    def read_line(self, timeout):
-        if timeout:
-            line = self.read_until(b'\n', timeout)
-        else:
-            line = self._serial.read_line()
+    def read_line(self, timeout=None):
+        line = self.read_until(b'\n', timeout)
         return line.strip(b'\r')
 
 
@@ -122,7 +128,7 @@ class MpyComm():
         self._repl_mode = True
 
     def exit_raw_repl(self):
-        if self._repl_mode is False:
+        if not self._repl_mode:
             return
         if self._log:
             self._log.info('EXIT RAW REPL')
@@ -243,6 +249,9 @@ class MpyTool():
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
+    def put(self, *files):
+        print(files)
+
     def dump_log(self):
         try:
             while True:
@@ -267,10 +276,13 @@ class MpyTool():
                         self.get(*commands)
                         break
                     self.ls('/')
+                elif command == 'put':
+                    self.put(*commands)
                 elif command == 'reset':
                     self._mpy.comm.soft_reset()
                 elif command == 'dump_log':
                     self.dump_log()
+
         except CmdError as err:
             print(err)
         self._mpy.comm.exit_raw_repl()
@@ -309,6 +321,8 @@ def main():
         '-v', '--verbose', default=0, action='count', help='verbose output')
     parser.add_argument('commands', nargs='*', help='commands')
     args = parser.parse_args()
+
+    print(args)
 
     log = SimpleColorLogger(args.debug + 1)
     serial_conn = SerialConn(port=args.port, baudrate=115200, log=log)
