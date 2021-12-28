@@ -1,5 +1,6 @@
 """MicroPython tool"""
 
+import os
 import sys
 import time
 import argparse as _argparse
@@ -7,6 +8,10 @@ import serial as _serial
 
 
 class Timeout(Exception):
+    """Timeout"""
+
+
+class ParamsError(Exception):
     """Timeout"""
 
 
@@ -162,7 +167,7 @@ class MpyComm():
             self._log.info(f"CMD: {command}")
         self._conn.write(bytes(command, 'utf-8'))
         self._conn.write(b'\x04')
-        self._conn.read_until(b'OK')
+        self._conn.read_until(b'OK', timeout)
         result = self._conn.read_until(b'\x04', timeout)
         if result:
             if self._log:
@@ -172,11 +177,18 @@ class MpyComm():
             raise CmdError(command, result, err)
         return result
 
+    def exec_eval(self, command, timeout=1):
+        result = self.exec(f'print({command})', timeout)
+        return eval(result)
+
 
 class Mpy():
-    def __init__(self, conn, chunk=256, log=None):
+    ATTR_DIR = 0x4000
+    ATTR_FILE = 0x8000
+
+    def __init__(self, conn, chunk_size=128, log=None):
         self._conn = conn
-        self._chunk = chunk
+        self._chunk_size = chunk_size
         self._log = log
         self._mpy_comm = MpyComm(conn, log=log)
         self._imported = []
@@ -194,55 +206,107 @@ class Mpy():
             self._mpy_comm.exec(f'import {module}')
             self._imported.append(module)
 
-    def ls(self, dir_name):
+    def ls(self, dir_name, recursive=False):
         self.import_module('os')
         try:
-            result = self._mpy_comm.exec(
-                f"print(os.listdir('{dir_name}'))")
+            result = self._mpy_comm.exec_eval(
+                f"tuple(os.ilistdir('{dir_name}'))")
+            res_dir = []
+            res_file = []
+            for name, attr, _inode, size in result:
+                if attr == self.ATTR_DIR:
+                    res_dir.append(f'             {name}/')
+                elif attr == self.ATTR_FILE:
+                    res_file.append(f'{size:12} {name}')
         except CmdError as err:
             raise DirNotFound(dir_name) from err
-        return eval(result)
+        return res_dir + res_file
+
+    def tree(self, dir_name, recursive=False):
+        self.import_module('os')
+        try:
+            result = self._mpy_comm.exec_eval(
+                f"tuple(os.ilistdir('{dir_name}'))")
+            res_dir = []
+            res_file = []
+            dir_size = 0
+            for name, attr, _inode, size in result:
+                if attr == self.ATTR_DIR:
+                    sub_dir_name = f'{dir_name}{name}/'
+                    sub_dir_size, sub_dir = self.tree(
+                        f'{sub_dir_name}', recursive)
+                    dir_size += sub_dir_size
+                    if recursive:
+                        res_dir += sub_dir
+                    else:
+                        res_dir.append(f'{sub_dir_size:12} {sub_dir_name}')
+                elif attr == self.ATTR_FILE:
+                    file_name = f'{dir_name}{name}'
+                    res_file.append(f'{size:12} {file_name}')
+                    dir_size += size
+            res_file.append(f'{dir_size:12} {dir_name}')
+        except CmdError as err:
+            raise DirNotFound(dir_name) from err
+        return dir_size, res_dir + res_file
 
     def get(self, file_name):
-        result = self._mpy_comm.exec(
-            f"f = open('{file_name}', 'rb')")
+        self._mpy_comm.exec(f"f = open('{file_name}', 'rb')")
         data = b''
         while True:
-            result = self._mpy_comm.exec(
-                f"print(f.read({self._chunk}))")
-            result_eval = eval(result)
-            if not result_eval:
+            result = self._mpy_comm.exec_eval(f"f.read({self._chunk_size})")
+            if not result:
                 break
-            data += result_eval
+            data += result
         self._mpy_comm.exec(f"f.close()")
         return data
+
+    def put(self, data, file_name):
+        self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
+        while data:
+            chunk = data[:self._chunk_size]
+            count = self._mpy_comm.exec_eval(f"f.write({chunk})", timeout=10)
+            data = data[count:]
+        self._mpy_comm.exec("f.close()")
 
 
 class MpyTool():
     def __init__(self, conn, log=None, verbose=0):
         self._conn = conn
         self._log = log
-        self._mpy = Mpy(conn, chunk=4096, log=log)
+        self._mpy = Mpy(conn, chunk_size=128, log=log)
 
-    def ls(self, *dir_names):
-        for dir_name in dir_names:
-            if not dir_name.startswith('/'):
-                dir_name = '/' + dir_name
-            if not dir_name.endswith('/'):
-                dir_name = dir_name + '/'
-            if len(dir_names) > 1:
-                print(f"{dir_name}:")
-            try:
-                result = self._mpy.ls(dir_name)
-            except FileNotFound as err:
-                self._log.error(err)
-            else:
-                for i in result:
-                    print(f"{i}")
-            if len(dir_names) > 1:
-                print()
+    def ls(self, dir_name):
+        self._mpy.comm.enter_raw_repl()
+        dir_name = dir_name.strip('/')
+        if dir_name:
+            dir_name = f'/{dir_name}/'
+        else:
+            dir_name = '/'
+        try:
+            result = self._mpy.ls(dir_name)
+        except FileNotFound as err:
+            self._log.error(err)
+        else:
+            for i in result:
+                print(f"{i}")
+
+    def tree(self, dir_name):
+        self._mpy.comm.enter_raw_repl()
+        dir_name = dir_name.strip('/')
+        if dir_name:
+            dir_name = f'/{dir_name}/'
+        else:
+            dir_name = '/'
+        try:
+            _size, result = self._mpy.tree(dir_name, recursive=True)
+        except FileNotFound as err:
+            self._log.error(err)
+        else:
+            for i in result:
+                print(f"{i}")
 
     def get(self, *file_names):
+        self._mpy.comm.enter_raw_repl()
         for file_name in file_names:
             if not file_name.startswith('/'):
                 file_name = '/' + file_name
@@ -250,7 +314,17 @@ class MpyTool():
             print(data.decode('utf-8'))
 
     def put(self, *files):
-        print(files)
+        self._mpy.comm.enter_raw_repl()
+        if len(files) not in (1, 2):
+            return ParamsError('Bad Params for put command')
+        src_file_name = os.path.abspath(files[0])
+        dst_file_name = files[-1]
+        if not dst_file_name.startswith('/'):
+            dst_file_name = '/' + dst_file_name
+        print(f"PUT: '{src_file_name}' to '{dst_file_name}'")
+        with open(src_file_name, 'rb') as src_file:
+            data = src_file.read()
+            self._mpy.put(data, dst_file_name)
 
     def dump_log(self):
         try:
@@ -259,18 +333,22 @@ class MpyTool():
                 line = line.decode('utf-8')
                 print(line)
         except KeyboardInterrupt:
-            return
+            return self._mpy.comm.enter_raw_repl()
 
     def process_commands(self, commands):
-        self._mpy.comm.enter_raw_repl()
         try:
             while commands:
                 command = commands.pop(0)
                 if command == 'ls':
                     if commands:
-                        self.ls(*commands)
+                        self.ls(commands.pop(0))
                         break
                     self.ls('/')
+                if command == 'tree':
+                    if commands:
+                        self.tree(commands.pop(0))
+                        break
+                    self.tree('/')
                 elif command == 'get':
                     if commands:
                         self.get(*commands)
@@ -321,8 +399,6 @@ def main():
         '-v', '--verbose', default=0, action='count', help='verbose output')
     parser.add_argument('commands', nargs='*', help='commands')
     args = parser.parse_args()
-
-    print(args)
 
     log = SimpleColorLogger(args.debug + 1)
     serial_conn = SerialConn(port=args.port, baudrate=115200, log=log)
