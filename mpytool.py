@@ -7,15 +7,19 @@ import argparse as _argparse
 import serial as _serial
 
 
-class Timeout(Exception):
+class MpyError(Exception):
+    """General MPY error"""
+
+
+class Timeout(MpyError):
     """Timeout"""
 
 
-class ParamsError(Exception):
+class ParamsError(MpyError):
     """Timeout"""
 
 
-class CmdError(Exception):
+class CmdError(MpyError):
     """Timeout"""
     def __init__(self, cmd, result, error):
         self._cmd = cmd
@@ -44,7 +48,7 @@ class CmdError(Exception):
         return self._error
 
 
-class FileNotFound(Exception):
+class FileNotFound(MpyError):
     """File not found"""
     def __init__(self, file_name):
         self._file_name = file_name
@@ -316,10 +320,17 @@ class Mpy():
         return data
 
     def put(self, data, file_name):
+        dir_name = file_name.rsplit('/', 1)[0]
+        try:
+            result = self._mpy_comm.exec_eval(f"os.stat('{dir_name}')")
+            if result[0] == self.ATTR_FILE:
+                raise MpyError(
+                    f'Error creating file under file: {dir_name}')
+        except CmdError:
+            self.mkdir(dir_name)
         try:
             self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
         except CmdError as err:
-            dir_name = file_name.rsplit('/')[0]
             raise DirNotFound(dir_name) from err
         while data:
             chunk = data[:self._chunk_size]
@@ -328,10 +339,24 @@ class Mpy():
         self._mpy_comm.exec("f.close()")
 
     def mkdir(self, dir_name):
-        try:
-            self._mpy_comm.exec(f"os.mkdir('{dir_name}')")
-        except CmdError as err:
-            raise DirNotFound(dir_name) from err
+        check_dir_name = ''
+        found = True
+        for dir_part in dir_name.split('/'):
+            if check_dir_name:
+                check_dir_name += '/'
+            check_dir_name += dir_part
+            if found:
+                try:
+                    result = self._mpy_comm.exec_eval(
+                        f"os.stat('{check_dir_name}')")
+                    if result[0] == self.ATTR_FILE:
+                        raise MpyError(
+                            f'Error creating directory, this is file: {check_dir_name}')
+                    continue
+                except CmdError:
+                    # directory was not found, create sub-directories
+                    found = False
+            self._mpy_comm.exec(f"os.mkdir('{check_dir_name}')")
 
     def _rmdir(self, dir_name):
         result = self._mpy_comm.exec_eval(f"tuple(os.ilistdir('{dir_name}'))")
@@ -484,6 +509,10 @@ class MpyTool():
                         dst_file_name = src_file_name
                         if commands:
                             dst_file_name = commands.pop(0)
+                            if dst_file_name.endswith('/'):
+                                # take file_name from source
+                                file_name = src_file_name.rsplit('/')[-1]
+                                dst_file_name += file_name
                         self.cmd_put(src_file_name, dst_file_name)
                     else:
                         raise ParamsError('missing file name for put command')
@@ -500,7 +529,7 @@ class MpyTool():
                     break
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
-        except (FileNotFound, CmdError, ParamsError) as err:
+        except MpyError as err:
             self._log.error(err)
         self._mpy.comm.exit_raw_repl()
 
