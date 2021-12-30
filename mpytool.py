@@ -1,8 +1,8 @@
 """MicroPython tool"""
 
-import os
-import sys
-import time
+import os as _os
+import sys as _sys
+import time as _time
 import argparse as _argparse
 import serial as _serial
 
@@ -80,18 +80,18 @@ class SerialConn():
 
     def read_until(self, end, timeout=1):
         self._log.debug(f'wait for {end}')
-        start_time = time.time()
+        start_time = _time.time()
         while True:
             if self._read_to_buffer():
-                start_time = time.time()
+                start_time = _time.time()
             if end in self._buffer:
                 break
-            if timeout is not None and start_time + timeout < time.time():
+            if timeout is not None and start_time + timeout < _time.time():
                 if self._buffer:
                     raise Timeout(
                         f"During timeout received: {bytes(self._buffer)}")
                 raise Timeout("No data received")
-            time.sleep(.01)
+            _time.sleep(.01)
         data, self._buffer = self._buffer.split(end, 1)
         if self._log:
             self._log.debug(f"rd: {data}")
@@ -206,7 +206,7 @@ class Mpy():
             self._mpy_comm.exec(f'import {module}')
             self._imported.append(module)
 
-    def ls(self, dir_name, recursive=False):
+    def ls(self, dir_name):
         self.import_module('os')
         try:
             result = self._mpy_comm.exec_eval(
@@ -215,14 +215,53 @@ class Mpy():
             res_file = []
             for name, attr, _inode, size in result:
                 if attr == self.ATTR_DIR:
-                    res_dir.append(f'             {name}/')
+                    res_dir.append((name, None))
                 elif attr == self.ATTR_FILE:
-                    res_file.append(f'{size:12} {name}')
+                    res_file.append((name, size))
         except CmdError as err:
             raise DirNotFound(dir_name) from err
         return res_dir + res_file
 
-    def tree(self, dir_name, recursive=False):
+    def _tree(self, dir_name):
+        self.import_module('os')
+        result = self._mpy_comm.exec_eval(f"tuple(os.ilistdir('{dir_name}'))")
+        res_dir = []
+        res_file = []
+        dir_size = 0
+        for name, attr, _inode, size in result:
+            if attr == self.ATTR_FILE:
+                res_file.append((name, size, None))
+                dir_size += size
+            elif attr == self.ATTR_DIR:
+                sub_dir_name = f'{dir_name}/{name}'
+                _sub_dir_name, sub_dir_size, sub_tree = self._tree(sub_dir_name)
+                res_dir.append((name, sub_dir_size, sub_tree))
+                dir_size += sub_dir_size
+        return dir_name, dir_size, res_dir + res_file
+
+    def tree(self, name):
+        """Tree of directory structure with sizes
+
+        Returns: entry of directory or file
+            for directory:
+                (dir_name, size, [list of sub-entries])
+            for empty directory:
+                (dir_name, size, [])
+            for file:
+                (dir_name, size, None)
+        """
+        self.import_module('os')
+        try:
+            result = self._mpy_comm.exec_eval(f"os.stat('{name}')")
+            if result[0] == self.ATTR_FILE:
+                return((name, result[6], None))
+            if result[0] == self.ATTR_DIR:
+                return self._tree(name)
+        except CmdError as err:
+            raise DirNotFound(name) from err
+        return None
+
+    def tree_old(self, dir_name):
         self.import_module('os')
         try:
             result = self._mpy_comm.exec_eval(
@@ -233,18 +272,15 @@ class Mpy():
             for name, attr, _inode, size in result:
                 if attr == self.ATTR_DIR:
                     sub_dir_name = f'{dir_name}{name}/'
-                    sub_dir_size, sub_dir = self.tree(
-                        f'{sub_dir_name}', recursive)
+                    sub_dir_size, sub_dir = self.tree_old(
+                        f'{sub_dir_name}')
                     dir_size += sub_dir_size
-                    if recursive:
-                        res_dir += sub_dir
-                    else:
-                        res_dir.append(f'{sub_dir_size:12} {sub_dir_name}')
+                    res_dir += sub_dir
                 elif attr == self.ATTR_FILE:
                     file_name = f'{dir_name}{name}'
-                    res_file.append(f'{size:12} {file_name}')
+                    res_file.append((size, file_name))
                     dir_size += size
-            res_file.append(f'{dir_size:12} {dir_name}')
+            res_file.append((dir_size, dir_name))
         except CmdError as err:
             raise DirNotFound(dir_name) from err
         return dir_size, res_dir + res_file
@@ -268,6 +304,32 @@ class Mpy():
             data = data[count:]
         self._mpy_comm.exec("f.close()")
 
+    def mkdir(self, dir_name):
+        try:
+            self._mpy_comm.exec_eval(f"os.mkdir('{dir_name}')")
+        except CmdError as err:
+            raise DirNotFound(dir_name) from err
+
+    def _rmdir(self, dir_name):
+        result = self._mpy_comm.exec_eval(f"tuple(os.ilistdir('{dir_name}'))")
+        for name, attr, _inode, _size in result:
+            if attr == self.ATTR_FILE:
+                self._mpy_comm.exec(f"os.remove('{dir_name}/{name}')")
+            elif attr == self.ATTR_DIR:
+                self._rmdir(f'{dir_name}/{name}')
+        self._mpy_comm.exec(f"os.rmdir('{dir_name}')")
+
+    def delete(self, name):
+        self.import_module('os')
+        try:
+            result = self._mpy_comm.exec_eval(f"os.stat('{name}')")
+        except CmdError as err:
+            raise FileNotFound(name) from err
+        if result[0] == self.ATTR_FILE:
+            self._mpy_comm.exec(f"os.remove('{name}')")
+        elif result[0] == self.ATTR_DIR:
+            self._rmdir(name)
+
 
 class MpyTool():
     def __init__(self, conn, log=None, verbose=0):
@@ -275,37 +337,81 @@ class MpyTool():
         self._log = log
         self._mpy = Mpy(conn, chunk_size=128, log=log)
 
-    def ls(self, dir_name):
+    @staticmethod
+    def _print_ls(ls):
+        for name, size in ls:
+            if size is not None:
+                print(f'{size:8d} {name}')
+            else:
+                print(f'{"":8} {name}/')
+
+    def cmd_ls(self, dir_name):
         self._mpy.comm.enter_raw_repl()
         dir_name = dir_name.strip('/')
         if dir_name:
             dir_name = f'/{dir_name}/'
         else:
             dir_name = '/'
-        try:
-            result = self._mpy.ls(dir_name)
-        except FileNotFound as err:
-            self._log.error(err)
-        else:
-            for i in result:
-                print(f"{i}")
+        result = self._mpy.ls(dir_name)
+        self._print_ls(result)
 
-    def tree(self, dir_name):
+    SPACE = '   '
+    BRANCH = '│  '
+    TEE = '├─ '
+    LAST = '└─ '
+
+    @classmethod
+    def _print_tree(cls, tree, prefix='', print_size=True, first=True, last=True):
+        """Print tree of files
+        """
+        name, size, sub_tree = tree
+        this_prefix = ''
+        if not first:
+            if last:
+                this_prefix = cls.LAST
+            else:
+                this_prefix = cls.TEE
+        sufix = ''
+        if sub_tree is not None and name != '/':
+            sufix = '/'
+        line = ''
+        if print_size:
+            line += f'{size:8d} '
+        line += prefix + this_prefix + name + sufix
+        print(line)
+        if not sub_tree:
+            return
+        sub_prefix = ''
+        if not first:
+            if last:
+                sub_prefix = cls.SPACE
+            else:
+                sub_prefix = cls.BRANCH
+        for entry in sub_tree[:-1]:
+            cls._print_tree(
+                entry,
+                prefix=prefix + sub_prefix,
+                print_size=print_size,
+                first=False,
+                last=False)
+        cls._print_tree(
+            sub_tree[-1],
+            prefix=prefix + sub_prefix,
+            print_size=print_size,
+            first=False,
+            last=True)
+
+    def cmd_tree(self, dir_name):
         self._mpy.comm.enter_raw_repl()
         dir_name = dir_name.strip('/')
         if dir_name:
-            dir_name = f'/{dir_name}/'
+            dir_name = f'/{dir_name}'
         else:
             dir_name = '/'
-        try:
-            _size, result = self._mpy.tree(dir_name, recursive=True)
-        except FileNotFound as err:
-            self._log.error(err)
-        else:
-            for i in result:
-                print(f"{i}")
+        tree = self._mpy.tree(dir_name)
+        self._print_tree(tree)
 
-    def get(self, *file_names):
+    def cmd_get(self, *file_names):
         self._mpy.comm.enter_raw_repl()
         for file_name in file_names:
             if not file_name.startswith('/'):
@@ -313,11 +419,11 @@ class MpyTool():
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
-    def put(self, *files):
+    def cmd_put(self, *files):
         self._mpy.comm.enter_raw_repl()
         if len(files) not in (1, 2):
             return ParamsError('Bad Params for put command')
-        src_file_name = os.path.abspath(files[0])
+        src_file_name = _os.path.abspath(files[0])
         dst_file_name = files[-1]
         if not dst_file_name.startswith('/'):
             dst_file_name = '/' + dst_file_name
@@ -326,7 +432,21 @@ class MpyTool():
             data = src_file.read()
             self._mpy.put(data, dst_file_name)
 
-    def dump_log(self):
+    def cmd_mkdir(self, *dir_names):
+        self._mpy.comm.enter_raw_repl()
+        for dir_name in dir_names:
+            if not dir_name.startswith('/'):
+                dir_name = '/' + dir_name
+            self._mpy.mkdir(dir_name)
+
+    def cmd_delete(self, *file_names):
+        self._mpy.comm.enter_raw_repl()
+        for file_name in file_names:
+            if not file_name.startswith('/'):
+                file_name = '/' + file_name
+            self._mpy.delete(file_name)
+
+    def cmd_log(self):
         try:
             while True:
                 line = self._conn.read_line()
@@ -341,28 +461,33 @@ class MpyTool():
                 command = commands.pop(0)
                 if command == 'ls':
                     if commands:
-                        self.ls(commands.pop(0))
+                        self.cmd_ls(commands.pop(0))
                         break
-                    self.ls('/')
-                if command == 'tree':
+                    self.cmd_ls('/')
+                elif command == 'tree':
                     if commands:
-                        self.tree(commands.pop(0))
+                        self.cmd_tree(commands.pop(0))
                         break
-                    self.tree('/')
+                    self.cmd_tree('/')
                 elif command == 'get':
                     if commands:
-                        self.get(*commands)
+                        self.cmd_get(*commands)
                         break
-                    self.ls('/')
+                    self.cmd_ls('/')
                 elif command == 'put':
-                    self.put(*commands)
+                    self.cmd_put(*commands)
+                elif command == 'mkdir':
+                    self.cmd_mkdir(*commands)
+                elif command == 'delete':
+                    self.cmd_delete(*commands)
                 elif command == 'reset':
                     self._mpy.comm.soft_reset()
                 elif command == 'dump_log':
-                    self.dump_log()
-
-        except CmdError as err:
-            print(err)
+                    self.cmd_log()
+                else:
+                    raise ParamsError(f"unknown command: '{command}'")
+        except (FileNotFound, CmdError, ParamsError) as err:
+            self._log.error(err)
         self._mpy.comm.exit_raw_repl()
 
 
@@ -371,7 +496,7 @@ class SimpleColorLogger():
         self._loglevel = loglevel
 
     def log(self, msg):
-        print(msg, file=sys.stderr)
+        print(msg, file=_sys.stderr)
 
     def error(self, msg):
         if self._loglevel >= 1:
