@@ -48,17 +48,23 @@ class CmdError(MpyError):
         return self._error
 
 
-class FileNotFound(MpyError):
+class PathNotFound(MpyError):
     """File not found"""
     def __init__(self, file_name):
         self._file_name = file_name
         super().__init__(self.__str__())
 
     def __str__(self):
+        return f"Path '{self._file_name}' was not found"
+
+
+class FileNotFound(PathNotFound):
+    """Folder not found"""
+    def __str__(self):
         return f"File '{self._file_name}' was not found"
 
 
-class DirNotFound(FileNotFound):
+class DirNotFound(PathNotFound):
     """Folder not found"""
     def __str__(self):
         return f"Dir '{self._file_name}' was not found"
@@ -77,10 +83,14 @@ class SerialConn():
             return True
         return False
 
-    def write(self, data):
+    def write(self, data, chunk_size=128, delay=0.01):
         if self._log:
             self._log.debug(f"wr: {data}")
-        self._serial.write(data)
+        while data:
+            chunk = data[:chunk_size]
+            count = self._serial.write(chunk)
+            data = data[count:]
+            _time.sleep(delay)
 
     def read_until(self, end, timeout=1):
         self._log.debug(f'wait for {end}')
@@ -194,15 +204,87 @@ class MpyComm():
 
 
 class Mpy():
-    ATTR_DIR = 0x4000
-    ATTR_FILE = 0x8000
+    _CHUNK = 4096
+    _ATTR_DIR = 0x4000
+    _ATTR_FILE = 0x8000
+    _HELPERS = {
+        'stat': f"""
+def _mpytool_stat(path):
+    try:
+        res = os.stat(path)
+        if res[0] == {_ATTR_DIR}:
+            return -1
+        if res[0] == {_ATTR_FILE}:
+            return res[6]
+    except:
+        return None
+    return None
+""",
+        'tree': f"""
+def _mpytool_tree(path):
+    res_dir = []
+    res_file = []
+    dir_size = 0
+    for entry in os.ilistdir(path):
+        name, attr = entry[:2]
+        if attr == {_ATTR_FILE}:
+            size = entry[3]
+            res_file.append((name, size, None))
+            dir_size += size
+        elif attr == {_ATTR_DIR}:
+            if path in ('', '/'):
+                sub_path = path + name
+            else:
+                sub_path = path + '/' + name
+            _sub_path, sub_dir_size, sub_tree = tree(sub_path)
+            res_dir.append((name, sub_dir_size, sub_tree))
+            dir_size += sub_dir_size
+    return path, dir_size, res_dir + res_file
+""",
+        'mkdir': f"""
+def _mpytool_mkdir(path):
+    check_path = ''
+    found = True
+    for dir_part in path.split('/'):
+        if check_path:
+            check_path += '/'
+        check_path += dir_part
+        if found:
+            try:
+                result = os.stat(check_path)
+                if result[0] == {_ATTR_FILE}:
+                    return True
+                continue
+            except:
+                found = False
+        os.mkdir(check_path)
+""",
+        'rmdir': f"""
+def _mpytool_rmdir(path):
+    for name, attr, _inode, _size in os.ilistdir(path):
+        if attr == {_ATTR_FILE}:
+            os.remove(path + '/' + name)
+        elif attr == {_ATTR_DIR}:
+            rmdir(path + '/' + name)
+    os.rmdir(path)
+""",
+        'get': f"""
+def _mpytool_get(path):
+    f = open(path, 'rb')
+    for name, attr, _inode, _size in os.ilistdir(path):
+        if attr == {_ATTR_FILE}:
+            os.remove(path + '/' + name)
+        elif attr == {_ATTR_DIR}:
+            rmdir(path + '/' + name)
+    os.rmdir(path)
+"""}
 
-    def __init__(self, conn, chunk_size=128, log=None):
+    def __init__(self, conn, log=None):
         self._conn = conn
-        self._chunk_size = chunk_size
         self._log = log
         self._mpy_comm = MpyComm(conn, log=log)
         self._imported = []
+        self._load_helpers = []
 
     @property
     def conn(self):
@@ -212,10 +294,22 @@ class Mpy():
     def comm(self):
         return self._mpy_comm
 
+    def load_helper(self, helper):
+        if helper not in self._load_helpers:
+            if helper not in self._HELPERS:
+                raise MpyError(f'Helper {helper} not defined')
+            self._mpy_comm.exec(self._HELPERS[helper])
+            self._load_helpers.append(helper)
+
     def import_module(self, module):
         if module not in self._imported:
             self._mpy_comm.exec(f'import {module}')
             self._imported.append(module)
+
+    def stat(self, path):
+        self.import_module('os')
+        self.load_helper('stat')
+        return self._mpy_comm.exec_eval(f"_mpytool_stat('{path}')")
 
     def ls(self, dir_name):
         self.import_module('os')
@@ -226,38 +320,16 @@ class Mpy():
             res_file = []
             for entry in result:
                 name, attr = entry[:2]
-                if attr == self.ATTR_DIR:
+                if attr == self._ATTR_DIR:
                     res_dir.append((name, None))
-                elif attr == self.ATTR_FILE:
+                elif attr == self._ATTR_FILE:
                     size = entry[3]
                     res_file.append((name, size))
         except CmdError as err:
             raise DirNotFound(dir_name) from err
         return res_dir + res_file
 
-    def _tree(self, dir_name):
-        self.import_module('os')
-        result = self._mpy_comm.exec_eval(f"tuple(os.ilistdir('{dir_name}'))")
-        res_dir = []
-        res_file = []
-        dir_size = 0
-        for entry in result:
-            name, attr = entry[:2]
-            if attr == self.ATTR_FILE:
-                size = entry[3]
-                res_file.append((name, size, None))
-                dir_size += size
-            elif attr == self.ATTR_DIR:
-                if dir_name in ('/', ''):
-                    sub_dir_name = f'{dir_name}{name}'
-                else:
-                    sub_dir_name = f'{dir_name}/{name}'
-                _sub_dir_name, sub_dir_size, sub_tree = self._tree(sub_dir_name)
-                res_dir.append((name, sub_dir_size, sub_tree))
-                dir_size += sub_dir_size
-        return dir_name, dir_size, res_dir + res_file
-
-    def tree(self, name):
+    def tree(self, path):
         """Tree of directory structure with sizes
 
         Returns: entry of directory or file
@@ -269,41 +341,33 @@ class Mpy():
                 (dir_name, size, None)
         """
         self.import_module('os')
-        try:
-            if name in ('', '.', '/'):
-                return self._tree(name)
-            result = self._mpy_comm.exec_eval(f"os.stat('{name}')")
-            if result[0] == self.ATTR_FILE:
-                return((name, result[6], None))
-            if result[0] == self.ATTR_DIR:
-                return self._tree(name)
-        except CmdError as err:
-            raise DirNotFound(name) from err
-        return None
+        self.load_helper('tree')
+        if path in ('', '.', '/'):
+            return self._mpy_comm.exec_eval(f"_mpytool_tree('{path}')")
+        # check if path exists
+        result = self.stat(path)
+        if result is None:
+            raise DirNotFound(path)
+        if result == -1:
+            return self._mpy_comm.exec_eval(f"_mpytool_tree('{path}')")
+        return((path, result[6], None))
 
-    def tree_old(self, dir_name):
+    def mkdir(self, path):
         self.import_module('os')
-        try:
-            result = self._mpy_comm.exec_eval(
-                f"tuple(os.ilistdir('{dir_name}'))")
-            res_dir = []
-            res_file = []
-            dir_size = 0
-            for name, attr, _inode, size in result:
-                if attr == self.ATTR_DIR:
-                    sub_dir_name = f'{dir_name}{name}/'
-                    sub_dir_size, sub_dir = self.tree_old(
-                        f'{sub_dir_name}')
-                    dir_size += sub_dir_size
-                    res_dir += sub_dir
-                elif attr == self.ATTR_FILE:
-                    file_name = f'{dir_name}{name}'
-                    res_file.append((size, file_name))
-                    dir_size += size
-            res_file.append((dir_size, dir_name))
-        except CmdError as err:
-            raise DirNotFound(dir_name) from err
-        return dir_size, res_dir + res_file
+        self.load_helper('mkdir')
+        if self._mpy_comm.exec_eval(f"_mpytool_mkdir('{path}')"):
+            raise MpyError(f'Error creating directory, this is file: {path}')
+
+    def delete(self, path):
+        result = self.stat(path)
+        if result is None:
+            raise PathNotFound(path)
+        if result == -1:
+            self.import_module('os')
+            self.load_helper('rmdir')
+            self._mpy_comm.exec(f"_mpytool_rmdir('{path}')")
+        else:
+            self._mpy_comm.exec(f"os.remove('{path}')")
 
     def get(self, file_name):
         try:
@@ -312,7 +376,7 @@ class Mpy():
             raise FileNotFound(file_name) from err
         data = b''
         while True:
-            result = self._mpy_comm.exec_eval(f"f.read({self._chunk_size})")
+            result = self._mpy_comm.exec_eval(f"f.read({self._CHUNK})")
             if not result:
                 break
             data += result
@@ -320,63 +384,19 @@ class Mpy():
         return data
 
     def put(self, data, file_name):
-        dir_name = file_name.rsplit('/', 1)[0]
-        try:
-            result = self._mpy_comm.exec_eval(f"os.stat('{dir_name}')")
-            if result[0] == self.ATTR_FILE:
-                raise MpyError(
-                    f'Error creating file under file: {dir_name}')
-        except CmdError:
-            self.mkdir(dir_name)
-        try:
-            self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
-        except CmdError as err:
-            raise DirNotFound(dir_name) from err
+        path = file_name.rsplit('/', 1)[0]
+        result = self.stat(path)
+        if result is None:
+            self.mkdir(path)
+        elif result >= 0:
+            raise MpyError(
+                f'Error creating file under file: {path}')
+        self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
         while data:
-            chunk = data[:self._chunk_size]
+            chunk = data[:self._CHUNK]
             count = self._mpy_comm.exec_eval(f"f.write({chunk})", timeout=10)
             data = data[count:]
         self._mpy_comm.exec("f.close()")
-
-    def mkdir(self, dir_name):
-        check_dir_name = ''
-        found = True
-        for dir_part in dir_name.split('/'):
-            if check_dir_name:
-                check_dir_name += '/'
-            check_dir_name += dir_part
-            if found:
-                try:
-                    result = self._mpy_comm.exec_eval(
-                        f"os.stat('{check_dir_name}')")
-                    if result[0] == self.ATTR_FILE:
-                        raise MpyError(
-                            f'Error creating directory, this is file: {check_dir_name}')
-                    continue
-                except CmdError:
-                    # directory was not found, create sub-directories
-                    found = False
-            self._mpy_comm.exec(f"os.mkdir('{check_dir_name}')")
-
-    def _rmdir(self, dir_name):
-        result = self._mpy_comm.exec_eval(f"tuple(os.ilistdir('{dir_name}'))")
-        for name, attr, _inode, _size in result:
-            if attr == self.ATTR_FILE:
-                self._mpy_comm.exec(f"os.remove('{dir_name}/{name}')")
-            elif attr == self.ATTR_DIR:
-                self._rmdir(f'{dir_name}/{name}')
-        self._mpy_comm.exec(f"os.rmdir('{dir_name}')")
-
-    def delete(self, name):
-        self.import_module('os')
-        try:
-            result = self._mpy_comm.exec_eval(f"os.stat('{name}')")
-        except CmdError as err:
-            raise FileNotFound(name) from err
-        if result[0] == self.ATTR_FILE:
-            self._mpy_comm.exec(f"os.remove('{name}')")
-        elif result[0] == self.ATTR_DIR:
-            self._rmdir(name)
 
 
 class MpyTool():
@@ -384,7 +404,7 @@ class MpyTool():
         self._conn = conn
         self._log = log
         self._verbose = verbose
-        self._mpy = Mpy(conn, chunk_size=128, log=log)
+        self._mpy = Mpy(conn, log=log)
 
     @staticmethod
     def _print_ls(ls):
