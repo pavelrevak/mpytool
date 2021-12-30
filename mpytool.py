@@ -94,7 +94,7 @@ class SerialConn():
             _time.sleep(.01)
         data, self._buffer = self._buffer.split(end, 1)
         if self._log:
-            self._log.debug(f"rd: {data}")
+            self._log.debug(f"rd: {data + end}")
         data = data.rstrip(end)
         return data
 
@@ -113,21 +113,26 @@ class MpyComm():
     def conn(self):
         return self._conn
 
-    def enter_raw_repl(self):
-        if self._repl_mode is True:
+    def stop_current_operation(self):
+        if self._repl_mode is not None:
             return
         if self._log:
-            self._log.info('ENTER RAW REPL')
-        # stop current operations (in case if app running)
+            self._log.info('STOP CURRENT OPERATION')
         self._conn.write(b'\x03')
         try:
             # wait for prompt
-            self._conn.read_until(b'\r\n>>> ', timeout=.2)
+            self._conn.read_until(b'\r\n>>> ', timeout=1)
         except Timeout:
             # probably is in RAW repl
             self._log.warning("Timeout while stopping program")
             self.exit_raw_repl()
-        # enter raw repl
+
+    def enter_raw_repl(self):
+        if self._repl_mode is True:
+            return
+        self.stop_current_operation()
+        if self._log:
+            self._log.info('ENTER RAW REPL')
         self._conn.write(b'\x01')
         self._conn.read_until(b'\r\n>')
         self._repl_mode = True
@@ -142,14 +147,15 @@ class MpyComm():
         self._repl_mode = False
 
     def soft_reset(self):
-        if self._repl_mode is True:
-            self.exit_raw_repl()
+        self.stop_current_operation()
+        self.exit_raw_repl()
         if self._log:
             self._log.info('SOFT RESET')
         self._conn.write(b'\x04')
+        self._conn.read_until(b'soft reboot', timeout=1)
         self._repl_mode = None
 
-    def exec(self, command, timeout=1):
+    def exec(self, command, timeout=5):
         """Execute command
 
         Arguments:
@@ -163,6 +169,7 @@ class MpyComm():
             CmdError when command return error
         """
         # wait for prompt
+        self.enter_raw_repl()
         if self._log:
             self._log.info(f"CMD: {command}")
         self._conn.write(bytes(command, 'utf-8'))
@@ -177,7 +184,7 @@ class MpyComm():
             raise CmdError(command, result, err)
         return result
 
-    def exec_eval(self, command, timeout=1):
+    def exec_eval(self, command, timeout=5):
         result = self.exec(f'print({command})', timeout)
         return eval(result)
 
@@ -213,10 +220,12 @@ class Mpy():
                 f"tuple(os.ilistdir('{dir_name}'))")
             res_dir = []
             res_file = []
-            for name, attr, _inode, size in result:
+            for entry in result:
+                name, attr = entry[:2]
                 if attr == self.ATTR_DIR:
                     res_dir.append((name, None))
                 elif attr == self.ATTR_FILE:
+                    size = entry[3]
                     res_file.append((name, size))
         except CmdError as err:
             raise DirNotFound(dir_name) from err
@@ -228,12 +237,17 @@ class Mpy():
         res_dir = []
         res_file = []
         dir_size = 0
-        for name, attr, _inode, size in result:
+        for entry in result:
+            name, attr = entry[:2]
             if attr == self.ATTR_FILE:
+                size = entry[3]
                 res_file.append((name, size, None))
                 dir_size += size
             elif attr == self.ATTR_DIR:
-                sub_dir_name = f'{dir_name}/{name}'
+                if dir_name in ('/', ''):
+                    sub_dir_name = f'{dir_name}{name}'
+                else:
+                    sub_dir_name = f'{dir_name}/{name}'
                 _sub_dir_name, sub_dir_size, sub_tree = self._tree(sub_dir_name)
                 res_dir.append((name, sub_dir_size, sub_tree))
                 dir_size += sub_dir_size
@@ -252,6 +266,8 @@ class Mpy():
         """
         self.import_module('os')
         try:
+            if name in ('', '.', '/'):
+                return self._tree(name)
             result = self._mpy_comm.exec_eval(f"os.stat('{name}')")
             if result[0] == self.ATTR_FILE:
                 return((name, result[6], None))
@@ -286,18 +302,25 @@ class Mpy():
         return dir_size, res_dir + res_file
 
     def get(self, file_name):
-        self._mpy_comm.exec(f"f = open('{file_name}', 'rb')")
+        try:
+            self._mpy_comm.exec(f"f = open('{file_name}', 'rb')")
+        except CmdError as err:
+            raise FileNotFound(file_name) from err
         data = b''
         while True:
             result = self._mpy_comm.exec_eval(f"f.read({self._chunk_size})")
             if not result:
                 break
             data += result
-        self._mpy_comm.exec(f"f.close()")
+        self._mpy_comm.exec("f.close()")
         return data
 
     def put(self, data, file_name):
-        self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
+        try:
+            self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
+        except CmdError as err:
+            dir_name = file_name.rsplit('/')[0]
+            raise DirNotFound(dir_name) from err
         while data:
             chunk = data[:self._chunk_size]
             count = self._mpy_comm.exec_eval(f"f.write({chunk})", timeout=10)
@@ -306,7 +329,7 @@ class Mpy():
 
     def mkdir(self, dir_name):
         try:
-            self._mpy_comm.exec_eval(f"os.mkdir('{dir_name}')")
+            self._mpy_comm.exec(f"os.mkdir('{dir_name}')")
         except CmdError as err:
             raise DirNotFound(dir_name) from err
 
@@ -335,6 +358,7 @@ class MpyTool():
     def __init__(self, conn, log=None, verbose=0):
         self._conn = conn
         self._log = log
+        self._verbose = verbose
         self._mpy = Mpy(conn, chunk_size=128, log=log)
 
     @staticmethod
@@ -346,12 +370,6 @@ class MpyTool():
                 print(f'{"":8} {name}/')
 
     def cmd_ls(self, dir_name):
-        self._mpy.comm.enter_raw_repl()
-        dir_name = dir_name.strip('/')
-        if dir_name:
-            dir_name = f'/{dir_name}/'
-        else:
-            dir_name = '/'
         result = self._mpy.ls(dir_name)
         self._print_ls(result)
 
@@ -372,7 +390,7 @@ class MpyTool():
             else:
                 this_prefix = cls.TEE
         sufix = ''
-        if sub_tree is not None and name != '/':
+        if sub_tree is not None and name != ('/'):
             sufix = '/'
         line = ''
         if print_size:
@@ -402,48 +420,27 @@ class MpyTool():
             last=True)
 
     def cmd_tree(self, dir_name):
-        self._mpy.comm.enter_raw_repl()
-        dir_name = dir_name.strip('/')
-        if dir_name:
-            dir_name = f'/{dir_name}'
-        else:
-            dir_name = '/'
         tree = self._mpy.tree(dir_name)
         self._print_tree(tree)
 
     def cmd_get(self, *file_names):
-        self._mpy.comm.enter_raw_repl()
         for file_name in file_names:
-            if not file_name.startswith('/'):
-                file_name = '/' + file_name
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
-    def cmd_put(self, *files):
-        self._mpy.comm.enter_raw_repl()
-        if len(files) not in (1, 2):
-            return ParamsError('Bad Params for put command')
-        src_file_name = _os.path.abspath(files[0])
-        dst_file_name = files[-1]
-        if not dst_file_name.startswith('/'):
-            dst_file_name = '/' + dst_file_name
+    def cmd_put(self, src_file_name, dst_file_name):
+        src_file_name = _os.path.abspath(src_file_name)
         print(f"PUT: '{src_file_name}' to '{dst_file_name}'")
         with open(src_file_name, 'rb') as src_file:
             data = src_file.read()
             self._mpy.put(data, dst_file_name)
 
     def cmd_mkdir(self, *dir_names):
-        self._mpy.comm.enter_raw_repl()
         for dir_name in dir_names:
-            if not dir_name.startswith('/'):
-                dir_name = '/' + dir_name
             self._mpy.mkdir(dir_name)
 
     def cmd_delete(self, *file_names):
-        self._mpy.comm.enter_raw_repl()
         for file_name in file_names:
-            if not file_name.startswith('/'):
-                file_name = '/' + file_name
             self._mpy.delete(file_name)
 
     def cmd_log(self):
@@ -453,7 +450,8 @@ class MpyTool():
                 line = line.decode('utf-8')
                 print(line)
         except KeyboardInterrupt:
-            return self._mpy.comm.enter_raw_repl()
+            self._log.warning(' Exiting..')
+            return
 
     def process_commands(self, commands):
         try:
@@ -461,29 +459,45 @@ class MpyTool():
                 command = commands.pop(0)
                 if command == 'ls':
                     if commands:
-                        self.cmd_ls(commands.pop(0))
-                        break
-                    self.cmd_ls('/')
+                        dir_name = commands.pop(0)
+                        if dir_name != '/':
+                            dir_name = dir_name.rstrip('/')
+                        self.cmd_ls(dir_name)
+                        continue
+                    self.cmd_ls('.')
                 elif command == 'tree':
                     if commands:
-                        self.cmd_tree(commands.pop(0))
-                        break
-                    self.cmd_tree('/')
+                        dir_name = commands.pop(0)
+                        if dir_name != '/':
+                            dir_name = dir_name.rstrip('/')
+                        self.cmd_tree(dir_name)
+                        continue
+                    self.cmd_tree('.')
                 elif command == 'get':
                     if commands:
                         self.cmd_get(*commands)
                         break
-                    self.cmd_ls('/')
+                    raise ParamsError('missing file name for get command')
                 elif command == 'put':
-                    self.cmd_put(*commands)
+                    if commands:
+                        src_file_name = commands.pop(0)
+                        dst_file_name = src_file_name
+                        if commands:
+                            dst_file_name = commands.pop(0)
+                        self.cmd_put(src_file_name, dst_file_name)
+                    else:
+                        raise ParamsError('missing file name for put command')
                 elif command == 'mkdir':
                     self.cmd_mkdir(*commands)
+                    break
                 elif command == 'delete':
                     self.cmd_delete(*commands)
+                    break
                 elif command == 'reset':
                     self._mpy.comm.soft_reset()
-                elif command == 'dump_log':
+                elif command == 'log':
                     self.cmd_log()
+                    break
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (FileNotFound, CmdError, ParamsError) as err:
