@@ -9,7 +9,7 @@ Target of this project is to make more clean code, faster, better verbose output
 ## Installation
 
 ```
-pip3 install https://github.com/pavelrevak/mpytool.git
+pip3 install mpytool
 ```
 
 ## Examples:
