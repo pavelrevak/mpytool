@@ -50,7 +50,7 @@ $ mpytool -p /dev/ttyACM0 mkdir a/b/c/d xyz/abc
 $ mpytool -p /dev/ttyACM0 delete a xyz
 ```
 
-## using API from Python
+## Examples using API from Python
 
 ```
 >>> import mpytool
@@ -70,17 +70,23 @@ b"import time\nimport net\n\nwlan = net.Wlan()\nwlan.refresh_network()\n\nwhile 
 ```
 
 ## Requirements
-- python v3.5+
+
+- Working only with MicroPython boards, not with CircuitPython
+
+- python v3.6+
 - pyserial v3.0+
 
 ### Running on:
+
 - Linux
 - MacOS
 - Windows
 
 ## Credits
+
 (c) 2022 by Pavel Revak
 
 ### Support
+
 - Basic support is free over GitHub issues.
 - Professional support is available over email: [Pavel Revak](mailto:pavel.revak@gmail.com?subject=[GitHub]%20mpytool).
