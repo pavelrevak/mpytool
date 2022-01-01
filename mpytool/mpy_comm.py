@@ -57,7 +57,8 @@ class MpyComm():
             self._conn.read_until(b'\r\n>>> ', timeout=1)
         except _conn.Timeout:
             # probably is in RAW repl
-            self._log.warning("Timeout while stopping program")
+            if self._log:
+                self._log.warning("Timeout while stopping program")
             self.exit_raw_repl()
 
     def enter_raw_repl(self):

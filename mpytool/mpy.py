@@ -111,7 +111,7 @@ def _mpytool_rmdir(path):
     def load_helper(self, helper):
         if helper not in self._load_helpers:
             if helper not in self._HELPERS:
-                raise MpyError(f'Helper {helper} not defined')
+                raise _mpy_comm.MpyError(f'Helper {helper} not defined')
             self._mpy_comm.exec(self._HELPERS[helper])
             self._load_helpers.append(helper)
 
@@ -125,11 +125,13 @@ def _mpytool_rmdir(path):
         self.load_helper('stat')
         return self._mpy_comm.exec_eval(f"_mpytool_stat('{path}')")
 
-    def ls(self, dir_name):
+    def ls(self, path=None):
         self.import_module('os')
+        if path is None:
+            path = ''
         try:
             result = self._mpy_comm.exec_eval(
-                f"tuple(os.ilistdir('{dir_name}'))")
+                f"tuple(os.ilistdir('{path}'))")
             res_dir = []
             res_file = []
             for entry in result:
@@ -140,22 +142,24 @@ def _mpytool_rmdir(path):
                     size = entry[3]
                     res_file.append((name, size))
         except _mpy_comm.CmdError as err:
-            raise DirNotFound(dir_name) from err
+            raise DirNotFound(path) from err
         return res_dir + res_file
 
-    def tree(self, path):
+    def tree(self, path=None):
         """Tree of directory structure with sizes
 
         Returns: entry of directory or file
             for directory:
-                (dir_name, size, [list of sub-entries])
+                (dir_path, size, [list of sub-entries])
             for empty directory:
-                (dir_name, size, [])
+                (dir_path, size, [])
             for file:
-                (dir_name, size, None)
+                (file_path, size, None)
         """
         self.import_module('os')
         self.load_helper('tree')
+        if path is None:
+            path = ''
         if path in ('', '.', '/'):
             return self._mpy_comm.exec_eval(f"_mpytool_tree('{path}')")
         # check if path exists
@@ -170,7 +174,7 @@ def _mpytool_rmdir(path):
         self.import_module('os')
         self.load_helper('mkdir')
         if self._mpy_comm.exec_eval(f"_mpytool_mkdir('{path}')"):
-            raise MpyError(f'Error creating directory, this is file: {path}')
+            raise _mpy_comm.MpyError(f'Error creating directory, this is file: {path}')
 
     def delete(self, path):
         result = self.stat(path)

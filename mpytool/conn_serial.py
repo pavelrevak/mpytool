@@ -28,7 +28,8 @@ class ConnSerial(_conn.Conn):
             _time.sleep(delay)
 
     def read_until(self, end, timeout=1):
-        self._log.debug(f'wait for {end}')
+        if self._log:
+            self._log.debug(f'wait for {end}')
         start_time = _time.time()
         while True:
             if self._read_to_buffer():

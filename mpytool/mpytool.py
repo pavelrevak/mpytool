@@ -178,7 +178,8 @@ class MpyTool():
                 line = line.decode('utf-8', 'backslashreplace')
                 print(line)
         except KeyboardInterrupt:
-            self._log.warning(' Exiting..')
+            if self._log:
+                self._log.warning(' Exiting..')
             return
 
     def process_commands(self, commands):
@@ -229,7 +230,10 @@ class MpyTool():
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except _mpy_comm.MpyError as err:
-            self._log.error(err)
+            if self._log:
+                self._log.error(err)
+            else:
+                print(err)
         self._mpy.comm.exit_raw_repl()
 
 
@@ -285,10 +289,10 @@ def main():
     args = parser.parse_args()
 
     log = SimpleColorLogger(args.debug + 1)
-    serial_conn = _conn_serial.ConnSerial(
+    conn = _conn_serial.ConnSerial(
         port=args.port, baudrate=115200, log=log)
     mpy_tool = MpyTool(
-        serial_conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
+        conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
     mpy_tool.process_commands(args.commands)
 
 
