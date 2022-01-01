@@ -4,14 +4,16 @@
 import setuptools
 
 
+_DESCRIPTION = "MPY tool - manage files on devices running MicroPython"
+_LONG_DESCRIPTION = _DESCRIPTION + """
+
+https://github.com/pavelrevak/mpytool"""
+
 setuptools.setup(
     name="mpytool",
-    version="1.0",
-    description="MicroPython tool",
-    long_description=(
-        "Control device running MicroPython over serial line. "
-        "Allow list files, upload, download, delete, ... "
-        "Project page: https://github.com/pavelrevak/mpytool"),
+    version="1.0.0",
+    description=_DESCRIPTION,
+    long_description=_LONG_DESCRIPTION,
     url="https://github.com/pavelrevak/mpytool",
     author="Pavel Revak",
     author_email="pavel.revak@gmail.com",

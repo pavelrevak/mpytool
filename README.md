@@ -1,12 +1,10 @@
 # mpytool
 
-MicroPython tool
-
-Control device running MicroPython over serial line. Allow list files, upload, download, delete, ...
+MPY tool - manage files on devices running MicroPython
 
 It is an alternative to [ampy](https://github.com/scientifichackers/ampy)
 
-Target of this project is to make it more clean code, faster, better verbose output...
+Target of this project is to make more clean code, faster, better verbose output...
 
 ## Installation
 
@@ -76,6 +74,8 @@ normally print only errors (red)
 `-d` print warnings (yellow)
 `-dd` print info messages (purple)
 `-ddd` print debug messages (blue)
+
+for reporting bugs, please provide in to issue also -ddd messages
 
 ## MPYTOOL vs AMPY
 
