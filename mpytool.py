@@ -607,8 +607,23 @@ class SimpleColorLogger():
             self.log(f"\033[1;34m{msg}\033[0m")
 
 
+_COMMANDS_HELP_STR = """
+list of available commands:
+  ls [{path}]                   list files and its sizes
+  tree [{path}]                 list tree of structure and sizes
+  get {path} [...]              get file and print it
+  put {src_path} [{dst_path}]   put file or directory to destination
+  mkdir {path} [...]            create directory (also create all parent)
+  delete {path} [...]           remove file or directory (recursively)
+  reset                         soft reset
+  log                           print log of running program
+"""
+
+
 def main():
-    parser = _argparse.ArgumentParser()
+    parser = _argparse.ArgumentParser(
+        formatter_class=_argparse.RawTextHelpFormatter,
+        epilog=_COMMANDS_HELP_STR)
     parser.add_argument('-p', '--port', required=True, help="serial port")
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
