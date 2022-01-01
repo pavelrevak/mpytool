@@ -69,6 +69,14 @@ $ mpytool -p /dev/ttyACM0 delete a xyz
 b"import time\nimport net\n\nwlan = net.Wlan()\nwlan.refresh_network()\n\nwhile wlan.ifconfig()[0] == '0.0.0.0':\n    time.sleep(.1)\n\nprint('IP: ' + wlan.ifconfig()[0])\n\nimport ehome.ehome\n\nehome.ehome.start('project.json')\n"
 ```
 
+## MPYTOOL vs AMPY
+
+for test used: ESP32S2 over USB 2MB RAM and 2MB FLASH:
+recursive put of 30 files in 4 folders, 70KB total:
+
+- mpytool: 12.3s
+- ampy: 79.3s
+
 ## Requirements
 
 - Working only with MicroPython boards, not with CircuitPython
