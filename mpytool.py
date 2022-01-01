@@ -236,13 +236,14 @@ def _mpytool_tree(path):
                 sub_path = path + name
             else:
                 sub_path = path + '/' + name
-            _sub_path, sub_dir_size, sub_tree = tree(sub_path)
+            _sub_path, sub_dir_size, sub_tree = _mpytool_tree(sub_path)
             res_dir.append((name, sub_dir_size, sub_tree))
             dir_size += sub_dir_size
     return path, dir_size, res_dir + res_file
 """,
         'mkdir': f"""
 def _mpytool_mkdir(path):
+    path = path.rstrip('/')
     check_path = ''
     found = True
     for dir_part in path.split('/'):
@@ -258,6 +259,7 @@ def _mpytool_mkdir(path):
             except:
                 found = False
         os.mkdir(check_path)
+    return False
 """,
         'rmdir': f"""
 def _mpytool_rmdir(path):
@@ -265,17 +267,7 @@ def _mpytool_rmdir(path):
         if attr == {_ATTR_FILE}:
             os.remove(path + '/' + name)
         elif attr == {_ATTR_DIR}:
-            rmdir(path + '/' + name)
-    os.rmdir(path)
-""",
-        'get': f"""
-def _mpytool_get(path):
-    f = open(path, 'rb')
-    for name, attr, _inode, _size in os.ilistdir(path):
-        if attr == {_ATTR_FILE}:
-            os.remove(path + '/' + name)
-        elif attr == {_ATTR_DIR}:
-            rmdir(path + '/' + name)
+            _mpytool_rmdir(path + '/' + name)
     os.rmdir(path)
 """}
 
@@ -384,13 +376,6 @@ def _mpytool_get(path):
         return data
 
     def put(self, data, file_name):
-        path = file_name.rsplit('/', 1)[0]
-        result = self.stat(path)
-        if result is None:
-            self.mkdir(path)
-        elif result >= 0:
-            raise MpyError(
-                f'Error creating file under file: {path}')
         self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
         while data:
             chunk = data[:self._CHUNK]
@@ -400,31 +385,34 @@ def _mpytool_get(path):
 
 
 class MpyTool():
-    def __init__(self, conn, log=None, verbose=0):
-        self._conn = conn
-        self._log = log
-        self._verbose = verbose
-        self._mpy = Mpy(conn, log=log)
-
-    @staticmethod
-    def _print_ls(ls):
-        for name, size in ls:
-            if size is not None:
-                print(f'{size:8d} {name}')
-            else:
-                print(f'{"":8} {name}/')
-
-    def cmd_ls(self, dir_name):
-        result = self._mpy.ls(dir_name)
-        self._print_ls(result)
-
     SPACE = '   '
     BRANCH = '│  '
     TEE = '├─ '
     LAST = '└─ '
 
+    def __init__(self, conn, log=None, verbose=0, exclude_dirs=None):
+        self._conn = conn
+        self._log = log
+        self._verbose = verbose
+        self._exclude_dirs = {'__pycache__', '.git', '.svn'}
+        if exclude_dirs:
+            self._exclude_dirs.update(exclude_dirs)
+        self._mpy = Mpy(conn, log=log)
+
+    def verbose(self, msg, level=1):
+        if self._verbose >= level:
+            print(msg, file=_sys.stderr)
+
+    def cmd_ls(self, dir_name):
+        result = self._mpy.ls(dir_name)
+        for name, size in result:
+            if size is not None:
+                print(f'{size:8d} {name}')
+            else:
+                print(f'{"":8} {name}/')
+
     @classmethod
-    def _print_tree(cls, tree, prefix='', print_size=True, first=True, last=True):
+    def print_tree(cls, tree, prefix='', print_size=True, first=True, last=True):
         """Print tree of files
         """
         name, size, sub_tree = tree
@@ -451,13 +439,13 @@ class MpyTool():
             else:
                 sub_prefix = cls.BRANCH
         for entry in sub_tree[:-1]:
-            cls._print_tree(
+            cls.print_tree(
                 entry,
                 prefix=prefix + sub_prefix,
                 print_size=print_size,
                 first=False,
                 last=False)
-        cls._print_tree(
+        cls.print_tree(
             sub_tree[-1],
             prefix=prefix + sub_prefix,
             print_size=print_size,
@@ -466,33 +454,78 @@ class MpyTool():
 
     def cmd_tree(self, dir_name):
         tree = self._mpy.tree(dir_name)
-        self._print_tree(tree)
+        self.print_tree(tree)
 
     def cmd_get(self, *file_names):
         for file_name in file_names:
+            self.verbose(f"GET: {file_name}")
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
-    def cmd_put(self, src_file_name, dst_file_name):
-        src_file_name = _os.path.abspath(src_file_name)
-        print(f"PUT: '{src_file_name}' to '{dst_file_name}'")
-        with open(src_file_name, 'rb') as src_file:
+    def _put_dir(self, src_path, dst_path):
+        basename = _os.path.basename(src_path)
+        if basename:
+            dst_path = _os.path.join(dst_path, basename)
+        self.verbose(f"PUT_DIR: {src_path} -> {dst_path}")
+        for path, _dirs, files in _os.walk(src_path):
+            basename = _os.path.basename(path)
+            if basename in self._exclude_dirs:
+                continue
+            rel_path = _os.path.relpath(path, src_path)
+            if rel_path == '.':
+                rel_path = ''
+            rel_path = _os.path.join(dst_path, rel_path)
+            if rel_path:
+                self.verbose(f'mkdir: {rel_path}', 2)
+                self._mpy.mkdir(rel_path)
+            for file_name in files:
+                spath = _os.path.join(path, file_name)
+                dpath = _os.path.join(rel_path, file_name)
+                self.verbose(f"  {dpath}")
+                with open(spath, 'rb') as src_file:
+                    data = src_file.read()
+                    self._mpy.put(data, dpath)
+
+    def _put_file(self, src_path, dst_path):
+        basename = _os.path.basename(src_path)
+        if basename and not _os.path.basename(dst_path):
+            dst_path = _os.path.join(dst_path, basename)
+        self.verbose(f"PUT_FILE: {src_path} -> {dst_path}")
+        path = _os.path.dirname(dst_path)
+        result = self._mpy.stat(path)
+        if result is None:
+            self._mpy.mkdir(path)
+        elif result >= 0:
+            raise MpyError(
+                f'Error creating file under file: {path}')
+        with open(src_path, 'rb') as src_file:
             data = src_file.read()
-            self._mpy.put(data, dst_file_name)
+            self._mpy.put(data, dst_path)
+
+    def cmd_put(self, src_path, dst_path):
+        if _os.path.isdir(src_path):
+            self._put_dir(src_path, dst_path)
+        elif _os.path.isfile(src_path):
+            self._put_file(src_path, dst_path)
+        else:
+            raise ParamsError(f'No file or directory to upload: {src_path}')
 
     def cmd_mkdir(self, *dir_names):
         for dir_name in dir_names:
+            self.verbose(f"MKDIR: {dir_name}")
             self._mpy.mkdir(dir_name)
 
-    def cmd_delete(self, *file_names):
+    def cmd_del(self, *file_names):
         for file_name in file_names:
+            self.verbose(f"DELETE: {file_name}")
             self._mpy.delete(file_name)
 
     def cmd_log(self):
+        self.verbose("LOG:")
         try:
             while True:
                 line = self._conn.read_line()
-                line = line.decode('utf-8')
+                line = line.decode('utf-8', 'backslashreplace')
                 print(line)
         except KeyboardInterrupt:
             self._log.warning(' Exiting..')
@@ -502,7 +535,7 @@ class MpyTool():
         try:
             while commands:
                 command = commands.pop(0)
-                if command == 'ls':
+                if command in ('ls', 'dir'):
                     if commands:
                         dir_name = commands.pop(0)
                         if dir_name != '/':
@@ -518,33 +551,29 @@ class MpyTool():
                         self.cmd_tree(dir_name)
                         continue
                     self.cmd_tree('.')
-                elif command == 'get':
+                elif command in ('get', 'cat'):
                     if commands:
                         self.cmd_get(*commands)
                         break
                     raise ParamsError('missing file name for get command')
                 elif command == 'put':
                     if commands:
-                        src_file_name = commands.pop(0)
-                        dst_file_name = src_file_name
+                        src_path = commands.pop(0)
+                        dst_path = ''
                         if commands:
-                            dst_file_name = commands.pop(0)
-                            if dst_file_name.endswith('/'):
-                                # take file_name from source
-                                file_name = src_file_name.rsplit('/')[-1]
-                                dst_file_name += file_name
-                        self.cmd_put(src_file_name, dst_file_name)
+                            dst_path = commands.pop(0)
+                        self.cmd_put(src_path, dst_path)
                     else:
                         raise ParamsError('missing file name for put command')
                 elif command == 'mkdir':
                     self.cmd_mkdir(*commands)
                     break
-                elif command == 'delete':
-                    self.cmd_delete(*commands)
+                elif command in ('del', 'delete'):
+                    self.cmd_del(*commands)
                     break
                 elif command == 'reset':
                     self._mpy.comm.soft_reset()
-                elif command == 'log':
+                elif command in ('log', 'dump'):
                     self.cmd_log()
                     break
                 else:
@@ -585,12 +614,14 @@ def main():
         '-d', '--debug', default=0, action='count', help='set debug level')
     parser.add_argument(
         '-v', '--verbose', default=0, action='count', help='verbose output')
+    parser.add_argument(
+        "-e", "--exclude-dir", type=str, action='append', help='exclude dir')
     parser.add_argument('commands', nargs='*', help='commands')
     args = parser.parse_args()
 
     log = SimpleColorLogger(args.debug + 1)
     serial_conn = SerialConn(port=args.port, baudrate=115200, log=log)
-    mpy_tool = MpyTool(serial_conn, log=log, verbose=args.verbose)
+    mpy_tool = MpyTool(serial_conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
     mpy_tool.process_commands(args.commands)
 
 
