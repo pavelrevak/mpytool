@@ -59,8 +59,8 @@ $ mpytool -p /dev/ttyACM0 restart follow
 
 ```
 >>> import mpytool
->>> conn = mpytool.conn_serial.ConnSerial(port='/dev/ttyACM0', baudrate=115200)
->>> mpy = mpytool.mpy.Mpy(conn)
+>>> conn = mpytool.ConnSerial(port='/dev/ttyACM0', baudrate=115200)
+>>> mpy = mpytool.Mpy(conn)
 >>> mpy.ls()
 [('ehome', None), ('boot.py', 215), ('net.py', 2938), ('project.json', 6404)]
 >>> mpy.mkdir('a/b/c')
