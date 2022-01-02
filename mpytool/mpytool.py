@@ -3,18 +3,15 @@
 import os as _os
 import sys as _sys
 import argparse as _argparse
-# import mpytool.conn_serial as _conn_serial
-# import mpytool.mpy_comm as _mpy_comm
-# import mpytool.mpy as _mpy
-# from mpytool import __VERSION__
 import mpytool as _mpytool
+import mpytool.__about__ as _about
 
 
-class ParamsError(_mpytool.mpy_comm.MpyError):
+class ParamsError(_mpytool.MpyError):
     """Timeout"""
 
 
-class PathNotFound(_mpytool.mpy_comm.MpyError):
+class PathNotFound(_mpytool.MpyError):
     """File not found"""
     def __init__(self, file_name):
         self._file_name = file_name
@@ -49,7 +46,7 @@ class MpyTool():
         self._exclude_dirs = {'__pycache__', '.git', '.svn'}
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
-        self._mpy = _mpytool.mpy.Mpy(conn, log=log)
+        self._mpy = _mpytool.Mpy(conn, log=log)
 
     def verbose(self, msg, level=1):
         if self._verbose >= level:
@@ -148,7 +145,7 @@ class MpyTool():
         if result is None:
             self._mpy.mkdir(path)
         elif result >= 0:
-            raise _mpy_comm.MpyError(
+            raise _mpytool.MpyError(
                 f'Error creating file under file: {path}')
         with open(src_path, 'rb') as src_file:
             data = src_file.read()
@@ -231,7 +228,7 @@ class MpyTool():
                     break
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
-        except _mpy_comm.MpyError as err:
+        except _mpytool.MpyError as err:
             if self._log:
                 self._log.error(err)
             else:
@@ -263,8 +260,13 @@ class SimpleColorLogger():
             self.log(f"\033[1;34m{msg}\033[0m")
 
 
+_VERSION_STR = "%s %s (%s <%s>)" % (
+    _about.APP_NAME,
+    _about.VERSION,
+    _about.AUTHOR,
+    _about.AUTHOR_EMAIL)
 _COMMANDS_HELP_STR = """
-list of available commands:
+List of available commands:
   ls [{path}]                   list files and its sizes
   tree [{path}]                 list tree of structure and sizes
   get {path} [...]              get file and print it
@@ -273,7 +275,7 @@ list of available commands:
   delete {path} [...]           remove file or directory (recursively)
   reset                         soft reset
   follow                        print log of running program
-aliases:
+Aliases:
   dir                           alias to ls
   cat                           alias to get
   del                           alias to delete
@@ -281,11 +283,12 @@ aliases:
 
 
 def main():
+    """Main"""
     parser = _argparse.ArgumentParser(
         formatter_class=_argparse.RawTextHelpFormatter,
         epilog=_COMMANDS_HELP_STR)
     parser.add_argument(
-        "-V", "--version", action='version', version=__VERSION__)
+        "-V", "--version", action='version', version=_VERSION_STR)
     parser.add_argument('-p', '--port', required=True, help="serial port")
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
@@ -298,7 +301,7 @@ def main():
     args = parser.parse_args()
 
     log = SimpleColorLogger(args.debug + 1)
-    conn = _conn_serial.ConnSerial(
+    conn = _mpytool.ConnSerial(
         port=args.port, baudrate=115200, log=log)
     mpy_tool = MpyTool(
         conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)

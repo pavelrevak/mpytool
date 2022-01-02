@@ -2,24 +2,23 @@
 """
 
 import setuptools
-from mpytool import __VERSION__
 
 
-_DESCRIPTION = "MPY tool - manage files on devices running MicroPython"
-_LONG_DESCRIPTION = _DESCRIPTION + """
+_ABOUT = {}
 
-https://github.com/pavelrevak/mpytool"""
+exec(open('mpytool/__about__.py').read(), _ABOUT)
+
 
 setuptools.setup(
-    name="mpytool",
-    version=__VERSION__,
-    description=_DESCRIPTION,
-    long_description=_LONG_DESCRIPTION,
-    url="https://github.com/pavelrevak/mpytool",
-    author="Pavel Revak",
-    author_email="pavel.revak@gmail.com",
-    license="MIT",
-    keywords="mpy micropython",
+    name=_ABOUT['APP_NAME'],
+    version=_ABOUT['VERSION'],
+    description=_ABOUT['DESCRIPTION'],
+    long_description=_ABOUT['LONG_DESCRIPTION'],
+    url=_ABOUT['URL'],
+    author=_ABOUT['AUTHOR'],
+    author_email=_ABOUT['AUTHOR_EMAIL'],
+    license=_ABOUT['LICENSE'],
+    keywords=_ABOUT['KEYWORDS'],
 
     classifiers=[
         # https://pypi.python.org/pypi?%3Aaction=list_classifiers

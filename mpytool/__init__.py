@@ -1,7 +1,6 @@
-import mpytool.conn as conn
-import mpytool.conn_serial as comm_serial
-import mpytool.mpy_comm as mpy_comm
-import mpytool.mpy as mpy
+"""MPYtool"""
 
-
-__VERSION__ = "1.1.0"
+from mpytool.conn import ConnError, Timeout
+from mpytool.conn_serial import ConnSerial
+from mpytool.mpy_comm import MpyError, CmdError
+from mpytool.mpy import Mpy
