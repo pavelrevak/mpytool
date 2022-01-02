@@ -2,6 +2,7 @@
 """
 
 import setuptools
+from mpytool import __VERSION__
 
 
 _DESCRIPTION = "MPY tool - manage files on devices running MicroPython"
@@ -11,7 +12,7 @@ https://github.com/pavelrevak/mpytool"""
 
 setuptools.setup(
     name="mpytool",
-    version="1.0.0",
+    version=__VERSION__,
     description=_DESCRIPTION,
     long_description=_LONG_DESCRIPTION,
     url="https://github.com/pavelrevak/mpytool",

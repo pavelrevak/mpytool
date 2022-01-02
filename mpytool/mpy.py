@@ -102,13 +102,22 @@ def _mpytool_rmdir(path):
 
     @property
     def conn(self):
+        """access to connector instance
+        """
         return self._conn
 
     @property
     def comm(self):
+        """access to MPY communication instance
+        """
         return self._mpy_comm
 
     def load_helper(self, helper):
+        """Load helper function to MicroPython
+
+        Arguments:
+            helper: helper function name
+        """
         if helper not in self._load_helpers:
             if helper not in self._HELPERS:
                 raise _mpy_comm.MpyError(f'Helper {helper} not defined')
@@ -116,16 +125,42 @@ def _mpytool_rmdir(path):
             self._load_helpers.append(helper)
 
     def import_module(self, module):
+        """Import module to MicroPython
+
+        Arguments:
+            module: module name to import
+        """
         if module not in self._imported:
             self._mpy_comm.exec(f'import {module}')
             self._imported.append(module)
 
     def stat(self, path):
+        """Stat path
+
+        Arguments:
+            path: path to stat
+
+        Returns:
+            None: if path not exists
+            -1: on folder
+            >= 0: on file and it's size
+        """
         self.import_module('os')
         self.load_helper('stat')
         return self._mpy_comm.exec_eval(f"_mpytool_stat('{path}')")
 
     def ls(self, path=None):
+        """List files on path
+
+        Arguments:
+            path: path to list, default: current path
+
+        Returns:
+            list of tuples, where each tuple for file:
+                ('file_name', size)
+            for directory:
+                ('dir_name', None)
+        """
         self.import_module('os')
         if path is None:
             path = ''
@@ -147,6 +182,9 @@ def _mpytool_rmdir(path):
 
     def tree(self, path=None):
         """Tree of directory structure with sizes
+
+        Arguments:
+            path: path to list, default: current path
 
         Returns: entry of directory or file
             for directory:
@@ -171,12 +209,22 @@ def _mpytool_rmdir(path):
         return((path, result[6], None))
 
     def mkdir(self, path):
+        """make directory (also create all parents)
+
+        Arguments:
+            path: new directory path
+        """
         self.import_module('os')
         self.load_helper('mkdir')
         if self._mpy_comm.exec_eval(f"_mpytool_mkdir('{path}')"):
             raise _mpy_comm.MpyError(f'Error creating directory, this is file: {path}')
 
     def delete(self, path):
+        """delete file or directory (recursively)
+
+        Arguments:
+            path: path to delete
+        """
         result = self.stat(path)
         if result is None:
             raise PathNotFound(path)
@@ -187,11 +235,19 @@ def _mpytool_rmdir(path):
         else:
             self._mpy_comm.exec(f"os.remove('{path}')")
 
-    def get(self, file_name):
+    def get(self, path):
+        """Read file
+
+        Arguments:
+            path: file path to read
+
+        Returns:
+            bytes with file content
+        """
         try:
-            self._mpy_comm.exec(f"f = open('{file_name}', 'rb')")
+            self._mpy_comm.exec(f"f = open('{path}', 'rb')")
         except _mpy_comm.CmdError as err:
-            raise FileNotFound(file_name) from err
+            raise FileNotFound(path) from err
         data = b''
         while True:
             result = self._mpy_comm.exec_eval(f"f.read({self._CHUNK})")
@@ -201,8 +257,14 @@ def _mpytool_rmdir(path):
         self._mpy_comm.exec("f.close()")
         return data
 
-    def put(self, data, file_name):
-        self._mpy_comm.exec(f"f = open('{file_name}', 'wb')")
+    def put(self, data, path):
+        """Read file
+
+        Arguments:
+            data: bytes with file content
+            path: file path to write
+        """
+        self._mpy_comm.exec(f"f = open('{path}', 'wb')")
         while data:
             chunk = data[:self._CHUNK]
             count = self._mpy_comm.exec_eval(f"f.write({chunk})", timeout=10)

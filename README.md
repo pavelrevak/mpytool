@@ -33,7 +33,8 @@ $ mpytool -p /dev/ttyACM0 tree
 upload file or whole directory:
 ```
 $ mpytool -p /dev/ttyACM0 put boot.py
-$ mpytool -vp /dev/ttyACM0 put app/libs lib
+$ mpytool -vp /dev/ttyACM0 put app/lib
+$ mpytool -vp /dev/ttyACM0 --exclude-dir build --exclude-dir dist put app/src light_control
 ```
 
 view content of file or download:
@@ -46,6 +47,12 @@ make directory, erase dir or files:
 ```
 $ mpytool -p /dev/ttyACM0 mkdir a/b/c/d xyz/abc
 $ mpytool -p /dev/ttyACM0 delete a xyz
+```
+
+restart only, restart and follow output:
+```
+$ mpytool -p /dev/ttyACM0 restart
+$ mpytool -p /dev/ttyACM0 restart follow
 ```
 
 ## Examples using API from Python
@@ -65,15 +72,16 @@ $ mpytool -p /dev/ttyACM0 delete a xyz
  ('project.json', 6404)]
 >>> mpy.get('boot.py')
 b"import time\nimport net\n\nwlan = net.Wlan()\nwlan.refresh_network()\n\nwhile wlan.ifconfig()[0] == '0.0.0.0':\n    time.sleep(.1)\n\nprint('IP: ' + wlan.ifconfig()[0])\n\nimport ehome.ehome\n\nehome.ehome.start('project.json')\n"
+>>> mpy.delete('a/b')
 ```
 
 ## Verbose and debug output
 
 use `-v` or `-vv` to show verbose output (like currently processing file, ..)
-normally print only errors (red)
-`-d` print warnings (yellow)
-`-dd` print info messages (purple)
-`-ddd` print debug messages (blue)
+- normally print only errors (red)
+- `-d` print warnings (yellow)
+- `-dd` print info messages (purple)
+- `-ddd` print debug messages (blue)
 
 for reporting bugs, please provide in to issue also -ddd messages
 
@@ -87,7 +95,7 @@ recursive put of 30 files in 4 folders, 70KB total:
 
 ## Requirements
 
-- Working only with MicroPython boards, not with CircuitPython
+Working only with MicroPython boards, not with CircuitPython
 
 - python v3.6+
 - pyserial v3.0+

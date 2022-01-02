@@ -3,16 +3,18 @@
 import os as _os
 import sys as _sys
 import argparse as _argparse
-import mpytool.conn_serial as _conn_serial
-import mpytool.mpy_comm as _mpy_comm
-import mpytool.mpy as _mpy
+# import mpytool.conn_serial as _conn_serial
+# import mpytool.mpy_comm as _mpy_comm
+# import mpytool.mpy as _mpy
+# from mpytool import __VERSION__
+import mpytool as _mpytool
 
 
-class ParamsError(_mpy_comm.MpyError):
+class ParamsError(_mpytool.mpy_comm.MpyError):
     """Timeout"""
 
 
-class PathNotFound(_mpy_comm.MpyError):
+class PathNotFound(_mpytool.mpy_comm.MpyError):
     """File not found"""
     def __init__(self, file_name):
         self._file_name = file_name
@@ -47,7 +49,7 @@ class MpyTool():
         self._exclude_dirs = {'__pycache__', '.git', '.svn'}
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
-        self._mpy = _mpy.Mpy(conn, log=log)
+        self._mpy = _mpytool.mpy.Mpy(conn, log=log)
 
     def verbose(self, msg, level=1):
         if self._verbose >= level:
@@ -165,13 +167,13 @@ class MpyTool():
             self.verbose(f"MKDIR: {dir_name}")
             self._mpy.mkdir(dir_name)
 
-    def cmd_del(self, *file_names):
+    def cmd_delete(self, *file_names):
         for file_name in file_names:
             self.verbose(f"DELETE: {file_name}")
             self._mpy.delete(file_name)
 
-    def cmd_log(self):
-        self.verbose("LOG:")
+    def cmd_follow(self):
+        self.verbose("FOLLOW:")
         try:
             while True:
                 line = self._conn.read_line()
@@ -220,12 +222,12 @@ class MpyTool():
                     self.cmd_mkdir(*commands)
                     break
                 elif command in ('del', 'delete'):
-                    self.cmd_del(*commands)
+                    self.cmd_delete(*commands)
                     break
                 elif command == 'reset':
                     self._mpy.comm.soft_reset()
-                elif command in ('log', 'dump'):
-                    self.cmd_log()
+                elif command == 'follow':
+                    self.cmd_follow()
                     break
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
@@ -267,10 +269,14 @@ list of available commands:
   tree [{path}]                 list tree of structure and sizes
   get {path} [...]              get file and print it
   put {src_path} [{dst_path}]   put file or directory to destination
-  mkdir {path} [...]            create directory (also create all parent)
+  mkdir {path} [...]            create directory (also create all parents)
   delete {path} [...]           remove file or directory (recursively)
   reset                         soft reset
-  log                           print log of running program
+  follow                        print log of running program
+aliases:
+  dir                           alias to ls
+  cat                           alias to get
+  del                           alias to delete
 """
 
 
@@ -278,13 +284,16 @@ def main():
     parser = _argparse.ArgumentParser(
         formatter_class=_argparse.RawTextHelpFormatter,
         epilog=_COMMANDS_HELP_STR)
+    parser.add_argument(
+        "-V", "--version", action='version', version=__VERSION__)
     parser.add_argument('-p', '--port', required=True, help="serial port")
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
     parser.add_argument(
         '-v', '--verbose', default=0, action='count', help='verbose output')
     parser.add_argument(
-        "-e", "--exclude-dir", type=str, action='append', help='exclude dir')
+        "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
+        'by default are excluded directories: __pycache__, .git, .svn')
     parser.add_argument('commands', nargs='*', help='commands')
     args = parser.parse_args()
 
