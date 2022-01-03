@@ -85,13 +85,16 @@ use `-v` or `-vv` to show verbose output (like currently processing file, ..)
 
 for reporting bugs, please provide in to issue also -ddd messages
 
-## MPYTOOL vs AMPY
+## MPYTOOL vs other tools
 
-for test used: ESP32S2 over USB 2MB RAM and 2MB FLASH:
+for test used: ESP32S2 over USB 2MB RAM and 4MB FLASH:
+
 recursive put of 30 files in 4 folders, 70KB total:
 
 - mpytool: 12.3s
+- mpremote: 16.5s
 - ampy: 79.3s
+- rshell: 81.1s
 
 ## Requirements
 
@@ -109,6 +112,10 @@ Working only with MicroPython boards, not with CircuitPython
 ## Credits
 
 (c) 2022 by Pavel Revak
+
+### License
+
+MIT
 
 ### Support
 
