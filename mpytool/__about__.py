@@ -2,7 +2,7 @@
 """
 
 APP_NAME = "mpytool"
-VERSION = "v1.1.0"
+VERSION = "v1.2.0"
 AUTHOR = "Pavel Revak"
 AUTHOR_EMAIL = "pavel.revak@gmail.com"
 URL = "https://github.com/pavelrevak/mpytool"
