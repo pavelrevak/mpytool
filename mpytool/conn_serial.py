@@ -9,7 +9,11 @@ class ConnSerial(_conn.Conn):
     def __init__(self, log=None, **serial_config):
         super().__init__(log)
         self._serial = _serial.Serial(**serial_config)
-        self._buffer = b''
+        self._buffer = bytearray(b'')
+
+    def __del__(self):
+        if self._serial:
+            self._serial.close()
 
     def _read_to_buffer(self):
         in_waiting = self._serial.in_waiting
@@ -17,6 +21,18 @@ class ConnSerial(_conn.Conn):
             self._buffer += self._serial.read(in_waiting)
             return True
         return False
+
+    @property
+    def fd(self):
+        return self._serial.fd
+
+    def read(self):
+        self._read_to_buffer()
+        if self._buffer:
+            data = self._buffer[:]
+            del self._buffer[:]
+            return data
+        return None
 
     def write(self, data, chunk_size=128, delay=0.01):
         if self._log:
@@ -42,8 +58,10 @@ class ConnSerial(_conn.Conn):
                         f"During timeout received: {bytes(self._buffer)}")
                 raise _conn.Timeout("No data received")
             _time.sleep(.01)
-        data, self._buffer = self._buffer.split(end, 1)
+        index = self._buffer.index(end)
+        data = self._buffer[:index]
+        del self._buffer[:index + len(end)]
+        # data, self._buffer = self._buffer.split(end, 1)
         if self._log:
             self._log.debug(f"rd: {data + end}")
-        data = data.rstrip(end)
         return data

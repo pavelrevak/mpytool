@@ -4,6 +4,7 @@ import os as _os
 import sys as _sys
 import argparse as _argparse
 import mpytool as _mpytool
+import mpytool.terminal as _terminal
 import mpytool.__about__ as _about
 
 
@@ -181,6 +182,17 @@ class MpyTool():
                 self._log.warning(' Exiting..')
             return
 
+    def cmd_repl(self):
+        self.verbose("REPL:")
+        self._mpy.comm.exit_raw_repl()
+        if not _terminal.AVAILABLE:
+            self._log.error("REPL not available on this platform")
+        print("Entering REPL mode, to exit press CTRL + ]")
+        terminal = _terminal.Terminal()
+        terminal.run(self._conn)
+        if self._log:
+            self._log.warning(' Exiting..')
+
     def process_commands(self, commands):
         try:
             while commands:
@@ -225,6 +237,9 @@ class MpyTool():
                     self._mpy.comm.soft_reset()
                 elif command == 'follow':
                     self.cmd_follow()
+                    break
+                elif command == 'repl':
+                    self.cmd_repl()
                     break
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
@@ -275,6 +290,7 @@ List of available commands:
   delete {path} [...]           remove file or directory (recursively)
   reset                         soft reset
   follow                        print log of running program
+  repl                          enter REPL mode [UNIX OS ONLY]
 Aliases:
   dir                           alias to ls
   cat                           alias to get
