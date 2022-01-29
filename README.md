@@ -49,10 +49,11 @@ $ mpytool -p /dev/ttyACM0 mkdir a/b/c/d xyz/abc
 $ mpytool -p /dev/ttyACM0 delete a xyz
 ```
 
-restart only, restart and follow output:
+reset only, reset and follow output, REPL mode:
 ```
-$ mpytool -p /dev/ttyACM0 restart
-$ mpytool -p /dev/ttyACM0 restart follow
+$ mpytool -p /dev/ttyACM0 reset
+$ mpytool -p /dev/ttyACM0 reset follow
+$ mpytool -p /dev/ttyACM0 repl
 ```
 
 ## Examples using API from Python
@@ -107,7 +108,7 @@ Working only with MicroPython boards, not with CircuitPython
 
 - Linux
 - MacOS
-- Windows
+- Windows (REPL mode is disabled)
 
 ## Credits
 
