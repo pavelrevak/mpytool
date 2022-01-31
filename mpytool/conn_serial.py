@@ -36,16 +36,17 @@ class ConnSerial(_conn.Conn):
 
     def write(self, data, chunk_size=128, delay=0.01):
         if self._log:
-            self._log.debug(f"wr: {data}")
+            self._log.debug("wr: %s", data)
         while data:
             chunk = data[:chunk_size]
             count = self._serial.write(chunk)
             data = data[count:]
-            _time.sleep(delay)
+            if data:
+                _time.sleep(delay)
 
     def read_until(self, end, timeout=1):
         if self._log:
-            self._log.debug(f'wait for {end}')
+            self._log.debug("wait for %s", end)
         start_time = _time.time()
         while True:
             if self._read_to_buffer():
@@ -61,7 +62,6 @@ class ConnSerial(_conn.Conn):
         index = self._buffer.index(end)
         data = self._buffer[:index]
         del self._buffer[:index + len(end)]
-        # data, self._buffer = self._buffer.split(end, 1)
         if self._log:
-            self._log.debug(f"rd: {data + end}")
+            self._log.debug("rd: %s", data + end)
         return data

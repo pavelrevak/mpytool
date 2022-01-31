@@ -11,7 +11,8 @@ try:
     AVAILABLE = True
 
     class Terminal:
-        def __init__(self):
+        def __init__(self, log):
+            self._log = log
             self._stdin_fd = _sys.stdin.fileno()
             self._last_attr = _termios.tcgetattr(self._stdin_fd)
 
@@ -29,15 +30,21 @@ try:
             _tty.setraw(self._stdin_fd)
             select_fds = [self._stdin_fd, conn.fd, ]
             while True:
-                ret = _select.select(select_fds, [], [], 1)
-                if self._stdin_fd in ret[0]:
-                    data = self.read()
-                    if 0x1d in data:
-                        break
-                    conn.write(data)
-                if conn.fd in ret[0]:
-                    data = conn.read()
-                    self.write(data)
+                try:
+                    ret = _select.select(select_fds, [], [], 1)
+                    if ret[0]:
+                        if self._stdin_fd in ret[0]:
+                            data = self.read()
+                            if 0x1d in data:
+                                break
+                            conn.write(data)
+                        if conn.fd in ret[0]:
+                            data = conn.read()
+                            self.write(data)
+                except OSError as err:
+                    if self._log:
+                        self._log.error("OSError: %s", err)
+                    break
             _termios.tcsetattr(self._stdin_fd, _termios.TCSANOW, self._last_attr)
             self._last_attr = None
             self.write(b'\r\n')

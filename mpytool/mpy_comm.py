@@ -105,14 +105,14 @@ class MpyComm():
         # wait for prompt
         self.enter_raw_repl()
         if self._log:
-            self._log.info(f"CMD: {command}")
+            self._log.info("CMD: %s", command)
         self._conn.write(bytes(command, 'utf-8'))
         self._conn.write(b'\x04')
         self._conn.read_until(b'OK', timeout)
         result = self._conn.read_until(b'\x04', timeout)
         if result:
             if self._log:
-                self._log.info(f'RES: {result}')
+                self._log.info('RES: %s', result)
         err = self._conn.read_until(b'\x04>', timeout)
         if err:
             raise CmdError(command, result, err)

@@ -188,7 +188,7 @@ class MpyTool():
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
         print("Entering REPL mode, to exit press CTRL + ]")
-        terminal = _terminal.Terminal()
+        terminal = _terminal.Terminal(self._log)
         terminal.run(self._conn)
         if self._log:
             self._log.warning(' Exiting..')
@@ -258,19 +258,27 @@ class SimpleColorLogger():
     def log(self, msg):
         print(msg, file=_sys.stderr)
 
-    def error(self, msg):
+    def error(self, msg, *args):
+        if args:
+            msg = msg % args
         if self._loglevel >= 1:
             self.log(f"\033[1;31m{msg}\033[0m")
 
-    def warning(self, msg):
+    def warning(self, msg, *args):
+        if args:
+            msg = msg % args
         if self._loglevel >= 2:
             self.log(f"\033[1;33m{msg}\033[0m")
 
-    def info(self, msg):
+    def info(self, msg, *args):
+        if args:
+            msg = msg % args
         if self._loglevel >= 3:
             self.log(f"\033[1;35m{msg}\033[0m")
 
-    def debug(self, msg):
+    def debug(self, msg, *args):
+        if args:
+            msg = msg % args
         if self._loglevel >= 4:
             self.log(f"\033[1;34m{msg}\033[0m")
 
