@@ -26,12 +26,15 @@ class ConnSerial(_conn.Conn):
     def fd(self):
         return self._serial.fd
 
+    def flush(self):
+        buffer = bytes(self._buffer)
+        del self._buffer[:]
+        return buffer
+
     def read(self):
-        self._read_to_buffer()
-        if self._buffer:
-            data = self._buffer[:]
-            del self._buffer[:]
-            return data
+        in_waiting = self._serial.in_waiting
+        if in_waiting > 0:
+            return self._serial.read(in_waiting)
         return None
 
     def write(self, data, chunk_size=128, delay=0.01):

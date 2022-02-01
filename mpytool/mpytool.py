@@ -188,8 +188,8 @@ class MpyTool():
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
         print("Entering REPL mode, to exit press CTRL + ]")
-        terminal = _terminal.Terminal(self._log)
-        terminal.run(self._conn)
+        terminal = _terminal.Terminal(self._conn, self._log)
+        terminal.run()
         if self._log:
             self._log.warning(' Exiting..')
 

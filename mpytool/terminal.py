@@ -11,10 +11,12 @@ try:
     AVAILABLE = True
 
     class Terminal:
-        def __init__(self, log):
+        def __init__(self, conn, log):
             self._log = log
+            self._conn = conn
             self._stdin_fd = _sys.stdin.fileno()
             self._last_attr = _termios.tcgetattr(self._stdin_fd)
+            self._running = None
 
         def __del__(self):
             if self._last_attr:
@@ -26,25 +28,41 @@ try:
         def write(self, buf):
             _sys.stdout.buffer.raw.write(buf)
 
-        def run(self, conn):
+        def _read_event_terminal(self):
+            data = self.read()
+            if 0x1d in data:  # CTRL + ]
+                self._running = False
+            self._conn.write(data)
+
+        def _read_event_device(self):
+            data = self._conn.read()
+            if data:
+                self.write(data)
+
+        def _flush_device(self):
+            data = self._conn.flush()
+            if data:
+                self.write(data)
+
+        def _read_event(self, event):
+            if self._stdin_fd in event:
+                self._read_event_terminal()
+            if self._conn.fd in event:
+                self._read_event_device()
+
+        def run(self):
             _tty.setraw(self._stdin_fd)
-            select_fds = [self._stdin_fd, conn.fd, ]
-            while True:
-                try:
+            self._running = True
+            try:
+                self._flush_device()
+                select_fds = [self._stdin_fd, self._conn.fd, ]
+                while self._running:
                     ret = _select.select(select_fds, [], [], 1)
                     if ret[0]:
-                        if self._stdin_fd in ret[0]:
-                            data = self.read()
-                            if 0x1d in data:
-                                break
-                            conn.write(data)
-                        if conn.fd in ret[0]:
-                            data = conn.read()
-                            self.write(data)
-                except OSError as err:
-                    if self._log:
-                        self._log.error("OSError: %s", err)
-                    break
+                        self._read_event(ret[0])
+            except OSError as err:
+                if self._log:
+                    self._log.error("OSError: %s", err)
             _termios.tcsetattr(self._stdin_fd, _termios.TCSANOW, self._last_attr)
             self._last_attr = None
             self.write(b'\r\n')
