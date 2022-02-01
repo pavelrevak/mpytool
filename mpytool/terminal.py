@@ -40,7 +40,8 @@ try:
                             conn.write(data)
                         if conn.fd in ret[0]:
                             data = conn.read()
-                            self.write(data)
+                            if data:
+                                self.write(data)
                 except OSError as err:
                     if self._log:
                         self._log.error("OSError: %s", err)
