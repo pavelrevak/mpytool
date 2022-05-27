@@ -117,7 +117,8 @@ class MpyTool():
         if basename:
             dst_path = _os.path.join(dst_path, basename)
         self.verbose(f"PUT_DIR: {src_path} -> {dst_path}")
-        for path, _dirs, files in _os.walk(src_path):
+        for path, dirs, files in _os.walk(src_path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
             basename = _os.path.basename(path)
             if basename in self._exclude_dirs:
                 continue
