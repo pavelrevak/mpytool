@@ -231,7 +231,7 @@ def _mpytool_rmdir(path):
         if result == -1:
             self.import_module('os')
             self.load_helper('rmdir')
-            self._mpy_comm.exec(f"_mpytool_rmdir('{path}')")
+            self._mpy_comm.exec(f"_mpytool_rmdir('{path}')", 20)
         else:
             self._mpy_comm.exec(f"os.remove('{path}')")
 
