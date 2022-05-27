@@ -65,6 +65,7 @@ class MpyComm():
         if self._repl_mode is True:
             return
         self.stop_current_operation()
+        self.stop_current_operation()
         if self._log:
             self._log.info('ENTER RAW REPL')
         self._conn.write(b'\x01')
@@ -112,7 +113,7 @@ class MpyComm():
         result = self._conn.read_until(b'\x04', timeout)
         if result:
             if self._log:
-                self._log.info('RES: %s', result)
+                self._log.info('RES: %s', bytes(result))
         err = self._conn.read_until(b'\x04>', timeout)
         if err:
             raise CmdError(command, result, err)
