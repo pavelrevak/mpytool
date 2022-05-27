@@ -325,8 +325,12 @@ def main():
     args = parser.parse_args()
 
     log = SimpleColorLogger(args.debug + 1)
-    conn = _mpytool.ConnSerial(
-        port=args.port, baudrate=115200, log=log)
+    try:
+        conn = _mpytool.ConnSerial(
+            port=args.port, baudrate=115200, log=log)
+    except _mpytool.ConnError as err:
+        log.error(err)
+        return
     mpy_tool = MpyTool(
         conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
     mpy_tool.process_commands(args.commands)

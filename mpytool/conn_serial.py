@@ -8,8 +8,13 @@ import mpytool.conn as _conn
 class ConnSerial(_conn.Conn):
     def __init__(self, log=None, **serial_config):
         super().__init__(log)
-        self._serial = _serial.Serial(**serial_config)
         self._buffer = bytearray(b'')
+        try:
+            self._serial = _serial.Serial(**serial_config)
+        except _serial.serialutil.SerialException as err:
+            self._serial = None
+            raise _conn.ConnError(
+                f"Error opening serial port {serial_config['port']}") from err
 
     def __del__(self):
         if self._serial:
@@ -39,7 +44,7 @@ class ConnSerial(_conn.Conn):
 
     def write(self, data, chunk_size=128, delay=0.01):
         if self._log:
-            self._log.debug("wr: %s", data)
+            self._log.debug("wr: %s", bytes(data))
         while data:
             chunk = data[:chunk_size]
             count = self._serial.write(chunk)
@@ -66,5 +71,5 @@ class ConnSerial(_conn.Conn):
         data = self._buffer[:index]
         del self._buffer[:index + len(end)]
         if self._log:
-            self._log.debug("rd: %s", data + end)
+            self._log.debug("rd: %s", bytes(data + end))
         return data
