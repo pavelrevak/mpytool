@@ -315,6 +315,7 @@ def main():
     parser.add_argument(
         "-V", "--version", action='version', version=_VERSION_STR)
     parser.add_argument('-p', '--port', required=True, help="serial port")
+    parser.add_argument('-b', '--baud', type=int, default=115200, help="serial port")
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
     parser.add_argument(
@@ -328,7 +329,7 @@ def main():
     log = SimpleColorLogger(args.debug + 1)
     try:
         conn = _mpytool.ConnSerial(
-            port=args.port, baudrate=115200, log=log)
+            port=args.port, baudrate=args.baud, log=log)
     except _mpytool.ConnError as err:
         log.error(err)
         return
