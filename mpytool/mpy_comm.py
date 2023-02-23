@@ -48,7 +48,7 @@ class MpyComm():
 
     def stop_current_operation(self):
         if self._repl_mode is not None:
-            return
+            return True
         if self._log:
             self._log.info('STOP CURRENT OPERATION')
         self._conn.write(b'\x03')
@@ -60,12 +60,15 @@ class MpyComm():
             if self._log:
                 self._log.warning("Timeout while stopping program")
             self.exit_raw_repl()
+            return False
+        return True
 
     def enter_raw_repl(self):
         if self._repl_mode is True:
             return
-        self.stop_current_operation()
-        self.stop_current_operation()
+        while not self.stop_current_operation():
+            if self._log:
+                self._log.warning('..retry')
         if self._log:
             self._log.info('ENTER RAW REPL')
         self._conn.write(b'\x01')
