@@ -30,12 +30,14 @@ try:
 
         def _read_event_terminal(self):
             data = self.read()
+            self._log.info('from terminal: %s', data)
             if 0x1d in data:  # CTRL + ]
                 self._running = False
             self._conn.write(data)
 
         def _read_event_device(self):
             data = self._conn.read()
+            self._log.info('from device: %s', data)
             if data:
                 self.write(data)
 
@@ -56,8 +58,10 @@ try:
             try:
                 self._flush_device()
                 select_fds = [self._stdin_fd, self._conn.fd, ]
+                self._log.info("select: %s", select_fds)
                 while self._running:
                     ret = _select.select(select_fds, [], [], 1)
+                    self._log.info("selected: %s", ret)
                     if ret[0]:
                         self._read_event(ret[0])
             except OSError as err:

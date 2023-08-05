@@ -26,7 +26,7 @@ class DirNotFound(PathNotFound):
 
 
 class Mpy():
-    _CHUNK = 4096
+    _CHUNK = 512
     _ATTR_DIR = 0x4000
     _ATTR_FILE = 0x8000
     _HELPERS = {

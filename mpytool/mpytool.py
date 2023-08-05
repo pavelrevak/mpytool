@@ -3,6 +3,7 @@
 import os as _os
 import sys as _sys
 import argparse as _argparse
+import logging as _logging
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.__about__ as _about
@@ -180,7 +181,7 @@ class MpyTool():
                 print(line)
         except KeyboardInterrupt:
             if self._log:
-                self._log.warning(' Exiting..')
+                self._log.info(' Exiting..')
             return
 
     def cmd_repl(self):
@@ -192,7 +193,7 @@ class MpyTool():
         terminal = _terminal.Terminal(self._conn, self._log)
         terminal.run()
         if self._log:
-            self._log.warning(' Exiting..')
+            self._log.info(' Exiting..')
 
     def process_commands(self, commands):
         try:
@@ -314,7 +315,8 @@ def main():
         epilog=_COMMANDS_HELP_STR)
     parser.add_argument(
         "-V", "--version", action='version', version=_VERSION_STR)
-    parser.add_argument('-p', '--port', required=True, help="serial port")
+    parser.add_argument('-p', '--port', help="serial port")
+    parser.add_argument('-a', '--address', help="network address")
     parser.add_argument('-b', '--baud', type=int, default=115200, help="serial port")
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
@@ -326,10 +328,20 @@ def main():
     parser.add_argument('commands', nargs='*', help='commands')
     args = parser.parse_args()
 
-    log = SimpleColorLogger(args.debug + 1)
+    # log = SimpleColorLogger(args.debug + 1)
+    _logging.basicConfig(format='%(levelname).1s: %(message)s (%(filename)s:%(lineno)s)')
+    log = _logging.getLogger('ser2tcp')
+    log.setLevel((30, 20, 10)[min(2, args.debug)])
+    if args.port and args.address:
+        log.error("You can select only serial port or network address")
+        return
     try:
-        conn = _mpytool.ConnSerial(
-            port=args.port, baudrate=args.baud, log=log)
+        if args.port:
+            conn = _mpytool.ConnSerial(
+                port=args.port, baudrate=args.baud, log=log)
+        if args.address:
+            conn = _mpytool.ConnSocket(
+                address=args.address, log=log)
     except _mpytool.ConnError as err:
         log.error(err)
         return
