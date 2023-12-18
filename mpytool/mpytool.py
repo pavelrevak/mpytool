@@ -339,9 +339,12 @@ def main():
         if args.port:
             conn = _mpytool.ConnSerial(
                 port=args.port, baudrate=args.baud, log=log)
-        if args.address:
+        elif args.address:
             conn = _mpytool.ConnSocket(
                 address=args.address, log=log)
+        else:
+            log.error("No port selected")
+            return
     except _mpytool.ConnError as err:
         log.error(err)
         return
