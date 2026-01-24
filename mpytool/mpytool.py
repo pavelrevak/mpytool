@@ -165,7 +165,9 @@ class MpyTool():
         except KeyboardInterrupt:
             if self._log:
                 self._log.info(' Exiting..')
-            return
+        except _mpytool.ConnError as err:
+            if self._log:
+                self._log.error(err)
 
     def cmd_repl(self):
         self.verbose("REPL:")
@@ -229,12 +231,15 @@ class MpyTool():
                     break
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
-        except _mpytool.MpyError as err:
+        except (_mpytool.MpyError, _mpytool.ConnError) as err:
             if self._log:
                 self._log.error(err)
             else:
                 print(err)
-        self._mpy.comm.exit_raw_repl()
+        try:
+            self._mpy.comm.exit_raw_repl()
+        except _mpytool.ConnError:
+            pass  # connection already lost
 
 
 class SimpleColorLogger():
