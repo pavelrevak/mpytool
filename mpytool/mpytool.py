@@ -3,7 +3,6 @@
 import os as _os
 import sys as _sys
 import argparse as _argparse
-import logging as _logging
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.utils as _utils
@@ -238,35 +237,84 @@ class MpyTool():
 
 
 class SimpleColorLogger():
-    def __init__(self, loglevel=0):
+    # ANSI color codes
+    _RESET = '\033[0m'
+    _BOLD_RED = '\033[1;31m'
+    _BOLD_YELLOW = '\033[1;33m'
+    _BOLD_MAGENTA = '\033[1;35m'
+    _BOLD_BLUE = '\033[1;34m'
+    _CLEAR_LINE = '\033[K'
+
+    # Progress bar characters
+    _BAR_FILLED = '█'
+    _BAR_EMPTY = '░'
+    _BAR_WIDTH = 30
+
+    def __init__(self, loglevel=1):
         self._loglevel = loglevel
+        self._is_tty = (
+            _sys.stderr.isatty()
+            and _os.environ.get('NO_COLOR') is None
+            and _os.environ.get('TERM') != 'dumb'
+            and _os.environ.get('CI') is None
+        )
+        self._progress_shown = False
 
     def log(self, msg):
+        if self._progress_shown:
+            print(f'\r{self._CLEAR_LINE}', end='', file=_sys.stderr)
+            self._progress_shown = False
         print(msg, file=_sys.stderr)
 
     def error(self, msg, *args):
         if args:
             msg = msg % args
         if self._loglevel >= 1:
-            self.log(f"\033[1;31m{msg}\033[0m")
+            if self._is_tty:
+                self.log(f"{self._BOLD_RED}{msg}{self._RESET}")
+            else:
+                self.log(f"E: {msg}")
 
     def warning(self, msg, *args):
         if args:
             msg = msg % args
         if self._loglevel >= 2:
-            self.log(f"\033[1;33m{msg}\033[0m")
+            if self._is_tty:
+                self.log(f"{self._BOLD_YELLOW}{msg}{self._RESET}")
+            else:
+                self.log(f"W: {msg}")
 
     def info(self, msg, *args):
         if args:
             msg = msg % args
         if self._loglevel >= 3:
-            self.log(f"\033[1;35m{msg}\033[0m")
+            if self._is_tty:
+                self.log(f"{self._BOLD_MAGENTA}{msg}{self._RESET}")
+            else:
+                self.log(f"I: {msg}")
 
     def debug(self, msg, *args):
         if args:
             msg = msg % args
         if self._loglevel >= 4:
-            self.log(f"\033[1;34m{msg}\033[0m")
+            if self._is_tty:
+                self.log(f"{self._BOLD_BLUE}{msg}{self._RESET}")
+            else:
+                self.log(f"D: {msg}")
+
+    def progress(self, current, total, msg=''):
+        """Show progress bar (only on TTY)"""
+        if not self._is_tty or self._loglevel < 1:
+            return
+        percent = current * 100 // total if total > 0 else 0
+        filled = self._BAR_WIDTH * current // total if total > 0 else 0
+        bar = self._BAR_FILLED * filled + self._BAR_EMPTY * (self._BAR_WIDTH - filled)
+        line = f"\r{bar} {percent:3d}% {msg}"
+        print(line, end='', file=_sys.stderr, flush=True)
+        self._progress_shown = True
+        if current >= total:
+            print(file=_sys.stderr)  # newline at end
+            self._progress_shown = False
 
 
 if _about:
@@ -315,10 +363,7 @@ def main():
     parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
     args = parser.parse_args()
 
-    # log = SimpleColorLogger(args.debug + 1)
-    _logging.basicConfig(format='%(levelname).1s: %(message)s (%(filename)s:%(lineno)s)')
-    log = _logging.getLogger('mpytool')
-    log.setLevel((30, 20, 10)[min(2, args.debug)])
+    log = SimpleColorLogger(args.debug + 1)
     if args.port and args.address:
         log.error("You can select only serial port or network address")
         return
