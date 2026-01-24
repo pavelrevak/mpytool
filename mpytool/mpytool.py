@@ -187,6 +187,81 @@ class MpyTool():
         if result:
             print(result.decode('utf-8', 'backslashreplace'), end='')
 
+    @staticmethod
+    def format_size(size):
+        """Format size in bytes to human readable format with 3+ digits"""
+        if size < 1000:
+            return f"{size} B"
+        for unit in ('KB', 'MB', 'GB', 'TB'):
+            size /= 1024
+            if size < 10:
+                return f"{size:.2f} {unit}"
+            if size < 100:
+                return f"{size:.1f} {unit}"
+            if size < 1000 or unit == 'TB':
+                return f"{size:.0f} {unit}"
+        return f"{size:.0f} TB"
+
+    def cmd_info(self):
+        self.verbose("INFO:")
+        self._mpy.comm.exec("import sys, gc, os")
+        platform = self._mpy.comm.exec_eval("repr(sys.platform)")
+        version = self._mpy.comm.exec_eval("repr(sys.version)")
+        impl = self._mpy.comm.exec_eval("repr(sys.implementation.name)")
+        gc_free = self._mpy.comm.exec_eval("gc.mem_free()")
+        gc_alloc = self._mpy.comm.exec_eval("gc.mem_alloc()")
+        gc_total = gc_free + gc_alloc
+        gc_pct = (gc_alloc / gc_total * 100) if gc_total > 0 else 0
+        try:
+            uname = self._mpy.comm.exec_eval("tuple(os.uname())")
+            machine = uname[4] if len(uname) > 4 else None
+        except _mpytool.MpyError:
+            machine = None
+        # Collect filesystem info - root and any different mount points
+        fs_info = []
+        try:
+            fs_stat = self._mpy.comm.exec_eval("os.statvfs('/')")
+            fs_total = fs_stat[0] * fs_stat[2]
+            fs_free = fs_stat[0] * fs_stat[3]
+            if fs_total > 0:
+                fs_info.append({
+                    'mount': '/', 'total': fs_total,
+                    'used': fs_total - fs_free,
+                    'pct': ((fs_total - fs_free) / fs_total * 100)
+                })
+        except _mpytool.MpyError:
+            pass
+        # Check subdirectories for additional mount points
+        try:
+            root_dirs = self._mpy.comm.exec_eval("[d[0] for d in os.ilistdir('/') if d[1] == 0x4000]")
+            for dirname in root_dirs:
+                try:
+                    path = '/' + dirname
+                    sub_stat = self._mpy.comm.exec_eval(f"os.statvfs('{path}')")
+                    sub_total = sub_stat[0] * sub_stat[2]
+                    sub_free = sub_stat[0] * sub_stat[3]
+                    # Skip if same as root or zero size
+                    if sub_total == 0 or any(f['total'] == sub_total for f in fs_info):
+                        continue
+                    fs_info.append({
+                        'mount': path, 'total': sub_total,
+                        'used': sub_total - sub_free,
+                        'pct': ((sub_total - sub_free) / sub_total * 100)
+                    })
+                except _mpytool.MpyError:
+                    pass
+        except _mpytool.MpyError:
+            pass
+        print(f"Platform:    {platform}")
+        print(f"Version:     {version}")
+        print(f"Impl:        {impl}")
+        if machine:
+            print(f"Machine:     {machine}")
+        print(f"Memory:      {self.format_size(gc_alloc)} / {self.format_size(gc_total)} ({gc_pct:.2f}%)")
+        for fs in fs_info:
+            label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
+            print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs['pct']:.2f}%)")
+
     def process_commands(self, commands):
         try:
             while commands:
@@ -241,6 +316,8 @@ class MpyTool():
                         self.cmd_exec(code)
                     else:
                         raise ParamsError('missing code for exec command')
+                elif command == 'info':
+                    self.cmd_info()
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
@@ -351,6 +428,7 @@ List of available commands:
   follow                        print log of running program
   repl                          enter REPL mode [UNIX OS ONLY]
   exec {code}                   execute Python code on device
+  info                          show device information
 Aliases:
   dir                           alias to ls
   cat                           alias to get

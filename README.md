@@ -62,6 +62,17 @@ $ mpytool exec "print('Hello!')"
 $ mpytool exec "import sys; print(sys.version)"
 ```
 
+show device information:
+```
+$ mpytool info
+Platform:    rp2
+Version:     3.4.0; MicroPython v1.27.0 on 2025-12-09
+Impl:        micropython
+Machine:     Raspberry Pi Pico with RP2040
+Memory:      36.4 KB / 240 KB (15.15%)
+Flash:       120 KB / 1.38 MB (8.52%)
+```
+
 multiple commands separated by `--`:
 ```
 $ mpytool -p /dev/ttyACM0 put main.py / -- reset -- follow
