@@ -56,6 +56,12 @@ $ mpytool -p /dev/ttyACM0 reset follow
 $ mpytool -p /dev/ttyACM0 repl
 ```
 
+execute Python code on device:
+```
+$ mpytool exec "print('Hello!')"
+$ mpytool exec "import sys; print(sys.version)"
+```
+
 multiple commands separated by `--`:
 ```
 $ mpytool -p /dev/ttyACM0 put main.py / -- reset -- follow

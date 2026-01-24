@@ -181,6 +181,12 @@ class MpyTool():
         if self._log:
             self._log.info(' Exiting..')
 
+    def cmd_exec(self, code):
+        self.verbose(f"EXEC: {code}")
+        result = self._mpy.comm.exec(code)
+        if result:
+            print(result.decode('utf-8', 'backslashreplace'), end='')
+
     def process_commands(self, commands):
         try:
             while commands:
@@ -229,6 +235,12 @@ class MpyTool():
                 elif command == 'repl':
                     self.cmd_repl()
                     break
+                elif command == 'exec':
+                    if commands:
+                        code = commands.pop(0)
+                        self.cmd_exec(code)
+                    else:
+                        raise ParamsError('missing code for exec command')
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
@@ -338,6 +350,7 @@ List of available commands:
   reset                         soft reset
   follow                        print log of running program
   repl                          enter REPL mode [UNIX OS ONLY]
+  exec {code}                   execute Python code on device
 Aliases:
   dir                           alias to ls
   cat                           alias to get
