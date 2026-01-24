@@ -145,6 +145,127 @@ class MpyTool():
         else:
             raise ParamsError(f'No file or directory to upload: {src_path}')
 
+    def _get_file(self, src_path, dst_path):
+        """Download single file from device"""
+        self.verbose(f"GET_FILE: {src_path} -> {dst_path}")
+        # Create destination directory if needed
+        dst_dir = _os.path.dirname(dst_path)
+        if dst_dir and not _os.path.exists(dst_dir):
+            _os.makedirs(dst_dir)
+        data = self._mpy.get(src_path)
+        with open(dst_path, 'wb') as dst_file:
+            dst_file.write(data)
+
+    def _get_dir(self, src_path, dst_path, copy_contents=False):
+        """Download directory from device"""
+        if not copy_contents:
+            basename = src_path.rstrip('/').split('/')[-1]
+            if basename:
+                dst_path = _os.path.join(dst_path, basename)
+        self.verbose(f"GET_DIR: {src_path} -> {dst_path}")
+        if not _os.path.exists(dst_path):
+            _os.makedirs(dst_path)
+        entries = self._mpy.ls(src_path)
+        for name, size in entries:
+            src_entry = src_path.rstrip('/') + '/' + name
+            dst_entry = _os.path.join(dst_path, name)
+            if size is None:  # directory
+                self._get_dir(src_entry, dst_entry, copy_contents=True)
+            else:  # file
+                self.verbose(f"  {dst_entry}")
+                self._get_file(src_entry, dst_entry)
+
+    def _cp_local_to_remote(self, src_path, dst_path, dst_is_dir):
+        """Upload local file/dir to device"""
+        src_is_dir = _os.path.isdir(src_path)
+        copy_contents = src_path.endswith('/')
+        src_path = src_path.rstrip('/')
+        if not _os.path.exists(src_path):
+            raise ParamsError(f'Source not found: {src_path}')
+        if dst_is_dir:
+            if not copy_contents:
+                basename = _os.path.basename(src_path)
+                dst_path = dst_path + basename
+            dst_path = dst_path.rstrip('/')
+        if src_is_dir:
+            if copy_contents:
+                # Copy contents of directory
+                for item in _os.listdir(src_path):
+                    item_src = _os.path.join(src_path, item)
+                    if _os.path.isdir(item_src):
+                        self._put_dir(item_src, dst_path)
+                    else:
+                        self._put_file(item_src, dst_path + '/')
+            else:
+                self._put_dir(src_path, _os.path.dirname(dst_path) or '/')
+        else:
+            self._put_file(src_path, dst_path)
+
+    def _cp_remote_to_local(self, src_path, dst_path, dst_is_dir):
+        """Download file/dir from device to local"""
+        copy_contents = src_path.endswith('/')
+        src_path = src_path.rstrip('/') or '/'
+        stat = self._mpy.stat(src_path)
+        if stat is None:
+            raise ParamsError(f'Source not found on device: {src_path}')
+        src_is_dir = (stat == -1)
+        if dst_is_dir:
+            if not _os.path.exists(dst_path):
+                _os.makedirs(dst_path)
+            if not copy_contents and src_path != '/':
+                basename = src_path.split('/')[-1]
+                dst_path = _os.path.join(dst_path, basename)
+        if src_is_dir:
+            self._get_dir(src_path, dst_path, copy_contents=copy_contents)
+        else:
+            if _os.path.isdir(dst_path):
+                basename = src_path.split('/')[-1]
+                dst_path = _os.path.join(dst_path, basename)
+            self._get_file(src_path, dst_path)
+
+    def _cp_remote_to_remote(self, src_path, dst_path, dst_is_dir):
+        """Copy file on device"""
+        src_path = src_path.rstrip('/') or '/'
+        stat = self._mpy.stat(src_path)
+        if stat is None:
+            raise ParamsError(f'Source not found on device: {src_path}')
+        if stat == -1:
+            raise ParamsError('Remote-to-remote directory copy not supported yet')
+        # File copy on device
+        if dst_is_dir:
+            basename = src_path.split('/')[-1]
+            dst_path = dst_path + basename
+        self.verbose(f"COPY: {src_path} -> {dst_path}")
+        data = self._mpy.get(src_path)
+        self._mpy.put(data, dst_path)
+
+    def cmd_cp(self, *args):
+        """Copy files between local and device"""
+        if len(args) < 2:
+            raise ParamsError('cp requires source and destination')
+        sources = list(args[:-1])
+        dest = args[-1]
+        dest_is_remote = dest.startswith(':')
+        dest_path = dest[1:] if dest_is_remote else dest
+        if not dest_path:
+            dest_path = '/'
+        dest_is_dir = dest_path.endswith('/')
+        if len(sources) > 1 and not dest_is_dir:
+            raise ParamsError('multiple sources require destination directory (ending with /)')
+        for src in sources:
+            src_is_remote = src.startswith(':')
+            src_path = src[1:] if src_is_remote else src
+            if not src_path:
+                src_path = '/'
+            if src_is_remote and dest_is_remote:
+                self._cp_remote_to_remote(src_path, dest_path, dest_is_dir)
+            elif src_is_remote:
+                self._cp_remote_to_local(src_path, dest_path, dest_is_dir)
+            elif dest_is_remote:
+                self._cp_local_to_remote(src_path, dest_path, dest_is_dir)
+            else:
+                self.verbose(f"Skipping local-to-local: {src} -> {dest}")
+
     def cmd_mkdir(self, *dir_names):
         for dir_name in dir_names:
             self.verbose(f"MKDIR: {dir_name}")
@@ -318,6 +439,11 @@ class MpyTool():
                         raise ParamsError('missing code for exec command')
                 elif command == 'info':
                     self.cmd_info()
+                elif command == 'cp':
+                    if len(commands) >= 2:
+                        self.cmd_cp(*commands)
+                        break
+                    raise ParamsError('cp requires source and destination')
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
@@ -420,6 +546,7 @@ _COMMANDS_HELP_STR = """
 List of available commands:
   ls [{path}]                   list files and its sizes
   tree [{path}]                 list tree of structure and sizes
+  cp {src} [...] {dst}          copy files (: prefix = device path)
   get {path} [...]              get file and print it
   put {src_path} [{dst_path}]   put file or directory to destination
   mkdir {path} [...]            create directory (also create all parents)

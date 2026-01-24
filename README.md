@@ -30,17 +30,21 @@ tree files:
 $ mpytool -p /dev/ttyACM0 tree
 ```
 
-upload file or whole directory:
+copy files (: prefix = device path):
 ```
-$ mpytool -p /dev/ttyACM0 put boot.py
-$ mpytool -vp /dev/ttyACM0 put app/lib
-$ mpytool -vp /dev/ttyACM0 --exclude-dir build --exclude-dir dist put app/src light_control
+$ mpytool cp main.py :/             # upload file to device root
+$ mpytool cp main.py lib.py :/lib/  # upload multiple files to directory
+$ mpytool cp myapp/ :/              # upload directory (creates /myapp/)
+$ mpytool cp myapp/ :/lib/          # upload directory into /lib/
+$ mpytool cp :/main.py ./           # download file to current directory
+$ mpytool cp :/ ./backup/           # download entire device to backup/
+$ mpytool cp :/old.py :/new.py      # copy file on device
 ```
 
-view content of file or download:
+legacy upload/download (still available):
 ```
-$ mpytool -p /dev/ttyACM0 get boot.py
-$ mpytool -p /dev/ttyACM0 get net.py >> net.py
+$ mpytool put boot.py /
+$ mpytool get boot.py >> boot.py
 ```
 
 make directory, erase dir or files:

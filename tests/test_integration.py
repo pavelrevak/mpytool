@@ -237,5 +237,121 @@ class TestDeviceInfo(unittest.TestCase):
         self.assertGreater(mem_free, 0)
 
 
+@requires_device
+class TestCpCommand(unittest.TestCase):
+    """Test cp command for file copying"""
+
+    TEST_DIR = "/_mpytool_cp_test"
+    LOCAL_DIR = "/tmp/_mpytool_cp_test"
+
+    @classmethod
+    def setUpClass(cls):
+        import os
+        import shutil
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        # Setup local test directory
+        if os.path.exists(cls.LOCAL_DIR):
+            shutil.rmtree(cls.LOCAL_DIR)
+        os.makedirs(cls.LOCAL_DIR)
+        # Setup remote test directory
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        import os
+        import shutil
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        if os.path.exists(cls.LOCAL_DIR):
+            shutil.rmtree(cls.LOCAL_DIR)
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_upload_file(self):
+        """Test cp local file to remote"""
+        import os
+        local_file = os.path.join(self.LOCAL_DIR, "upload.txt")
+        with open(local_file, 'w') as f:
+            f.write("upload test")
+        remote_file = self.TEST_DIR + "/upload.txt"
+        self.tool.cmd_cp(local_file, ':' + remote_file)
+        content = self.mpy.get(remote_file)
+        self.assertEqual(content, b"upload test")
+
+    def test_02_download_file(self):
+        """Test cp remote file to local"""
+        import os
+        remote_file = self.TEST_DIR + "/download.txt"
+        self.mpy.put(b"download test", remote_file)
+        local_file = os.path.join(self.LOCAL_DIR, "download.txt")
+        self.tool.cmd_cp(':' + remote_file, local_file)
+        with open(local_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, "download test")
+
+    def test_03_upload_to_dir(self):
+        """Test cp local file to remote directory"""
+        import os
+        local_file = os.path.join(self.LOCAL_DIR, "todir.txt")
+        with open(local_file, 'w') as f:
+            f.write("to dir test")
+        self.tool.cmd_cp(local_file, ':' + self.TEST_DIR + '/')
+        content = self.mpy.get(self.TEST_DIR + "/todir.txt")
+        self.assertEqual(content, b"to dir test")
+
+    def test_04_download_to_dir(self):
+        """Test cp remote file to local directory"""
+        import os
+        remote_file = self.TEST_DIR + "/fromdir.txt"
+        self.mpy.put(b"from dir test", remote_file)
+        self.tool.cmd_cp(':' + remote_file, self.LOCAL_DIR + '/')
+        local_file = os.path.join(self.LOCAL_DIR, "fromdir.txt")
+        with open(local_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, "from dir test")
+
+    def test_05_upload_multiple(self):
+        """Test cp multiple local files to remote directory"""
+        import os
+        file1 = os.path.join(self.LOCAL_DIR, "multi1.txt")
+        file2 = os.path.join(self.LOCAL_DIR, "multi2.txt")
+        with open(file1, 'w') as f:
+            f.write("multi1")
+        with open(file2, 'w') as f:
+            f.write("multi2")
+        subdir = self.TEST_DIR + "/multi"
+        self.tool.cmd_cp(file1, file2, ':' + subdir + '/')
+        self.assertEqual(self.mpy.get(subdir + "/multi1.txt"), b"multi1")
+        self.assertEqual(self.mpy.get(subdir + "/multi2.txt"), b"multi2")
+
+    def test_06_remote_to_remote(self):
+        """Test cp remote file to remote"""
+        src = self.TEST_DIR + "/src.txt"
+        dst = self.TEST_DIR + "/dst.txt"
+        self.mpy.put(b"remote copy", src)
+        self.tool.cmd_cp(':' + src, ':' + dst)
+        self.assertEqual(self.mpy.get(dst), b"remote copy")
+
+    def test_07_upload_directory(self):
+        """Test cp local directory to remote"""
+        import os
+        subdir = os.path.join(self.LOCAL_DIR, "subdir")
+        os.makedirs(subdir, exist_ok=True)
+        with open(os.path.join(subdir, "file.txt"), 'w') as f:
+            f.write("subdir file")
+        self.tool.cmd_cp(subdir, ':' + self.TEST_DIR + '/')
+        content = self.mpy.get(self.TEST_DIR + "/subdir/file.txt")
+        self.assertEqual(content, b"subdir file")
+
+
 if __name__ == "__main__":
     unittest.main()
