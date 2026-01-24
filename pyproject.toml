@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpytool"
+version = "1.2.0"
+description = "MPY tool - manage files on devices running MicroPython"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.6"
+authors = [
+    { name = "Pavel Revak", email = "pavel.revak@gmail.com" }
+]
+keywords = ["MPY", "micropython"]
+dependencies = [
+    "pyserial>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/pavelrevak/mpytool"
+
+[project.scripts]
+mpytool = "mpytool.mpytool:main"
