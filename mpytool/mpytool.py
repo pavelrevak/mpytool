@@ -32,10 +32,110 @@ class MpyTool():
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
         self._mpy = _mpytool.Mpy(conn, log=log)
+        # Progress tracking
+        self._progress_total_files = 0
+        self._progress_current_file = 0
+        self._progress_src = ''
+        self._progress_dst = ''
+        self._is_tty = _sys.stderr.isatty()
+        self._is_debug = self._log and self._log._loglevel >= 4
 
     def verbose(self, msg, level=1):
         if self._verbose >= level:
             print(msg, file=_sys.stderr)
+
+    @staticmethod
+    def _format_local_path(path):
+        """Format local path: relative from CWD, absolute if > 2 levels up"""
+        try:
+            rel_path = _os.path.relpath(path)
+            # Count leading ../
+            parts = rel_path.split(_os.sep)
+            up_count = 0
+            for part in parts:
+                if part == '..':
+                    up_count += 1
+                else:
+                    break
+            if up_count > 2:
+                return _os.path.abspath(path)
+            return rel_path
+        except ValueError:
+            # On Windows, relpath fails for different drives
+            return _os.path.abspath(path)
+
+    def _format_progress_line(self, percent, total):
+        """Format progress line: [2/5]  23% 24.1KB source -> dest"""
+        size_str = self.format_size(total).replace(' ', '')
+        if self._progress_total_files > 1:
+            prefix = f"[{self._progress_current_file}/{self._progress_total_files}]"
+        else:
+            prefix = ""
+        return f"{prefix:>7} {percent:3d}% {size_str:>7} {self._progress_src} -> {self._progress_dst}"
+
+    def _progress_callback(self, transferred, total):
+        """Callback for file transfer progress"""
+        if self._verbose < 1:
+            return
+        percent = (transferred * 100 // total) if total > 0 else 100
+        line = self._format_progress_line(percent, total)
+        if self._is_debug or not self._is_tty:
+            # Debug mode or non-TTY: always newlines
+            print(line, file=_sys.stderr)
+        else:
+            # Normal mode: overwrite line
+            print(f"\r\033[K{line}", end='', file=_sys.stderr, flush=True)
+
+    def _progress_complete(self, total):
+        """Mark current file as complete"""
+        if self._verbose < 1:
+            return
+        line = self._format_progress_line(100, total)
+        if self._is_debug or not self._is_tty:
+            # Already printed with newline in callback
+            pass
+        else:
+            # Print final line with newline
+            print(f"\r\033[K{line}", file=_sys.stderr)
+
+    def _set_progress_info(self, src, dst, is_src_remote, is_dst_remote):
+        """Set progress source and destination paths"""
+        if is_src_remote:
+            self._progress_src = ':' + src
+        else:
+            self._progress_src = self._format_local_path(src)
+        if is_dst_remote:
+            self._progress_dst = ':' + dst
+        else:
+            self._progress_dst = self._format_local_path(dst)
+
+    def _count_local_files(self, path):
+        """Count files in local directory (excluding excluded dirs)"""
+        if _os.path.isfile(path):
+            return 1
+        count = 0
+        for _, dirs, files in _os.walk(path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
+            count += len(files)
+        return count
+
+    def _count_remote_files(self, path):
+        """Count files on device"""
+        stat = self._mpy.stat(path)
+        if stat is None:
+            return 0
+        if stat >= 0:  # file
+            return 1
+        # directory - count recursively
+        count = 0
+        entries = self._mpy.ls(path)
+        for name, size in entries:
+            if size is None:  # directory
+                entry_path = path.rstrip('/') + '/' + name
+                count += self._count_remote_files(entry_path)
+            else:  # file
+                count += 1
+        return count
 
     def cmd_ls(self, dir_name):
         result = self._mpy.ls(dir_name)
@@ -96,11 +196,11 @@ class MpyTool():
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
-    def _put_dir(self, src_path, dst_path):
+    def _put_dir(self, src_path, dst_path, show_progress=True):
         basename = _os.path.basename(src_path)
         if basename:
             dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"PUT_DIR: {src_path} -> {dst_path}")
+        self.verbose(f"PUT_DIR: {src_path} -> {dst_path}", 2)
         for path, dirs, files in _os.walk(src_path, topdown=True):
             dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
             basename = _os.path.basename(path)
@@ -116,16 +216,21 @@ class MpyTool():
             for file_name in files:
                 spath = _os.path.join(path, file_name)
                 dpath = _os.path.join(rel_path, file_name)
-                self.verbose(f"  {dpath}")
                 with open(spath, 'rb') as src_file:
                     data = src_file.read()
-                    self._mpy.put(data, dpath)
+                    if show_progress and self._verbose >= 1:
+                        self._progress_current_file += 1
+                        self._set_progress_info(spath, dpath, False, True)
+                        self._mpy.put(data, dpath, self._progress_callback)
+                        self._progress_complete(len(data))
+                    else:
+                        self._mpy.put(data, dpath)
 
-    def _put_file(self, src_path, dst_path):
+    def _put_file(self, src_path, dst_path, show_progress=True):
         basename = _os.path.basename(src_path)
         if basename and not _os.path.basename(dst_path):
             dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"PUT_FILE: {src_path} -> {dst_path}")
+        self.verbose(f"PUT_FILE: {src_path} -> {dst_path}", 2)
         path = _os.path.dirname(dst_path)
         result = self._mpy.stat(path)
         if result is None:
@@ -135,9 +240,18 @@ class MpyTool():
                 f'Error creating file under file: {path}')
         with open(src_path, 'rb') as src_file:
             data = src_file.read()
-            self._mpy.put(data, dst_path)
+            if show_progress and self._verbose >= 1:
+                self._progress_current_file += 1
+                self._set_progress_info(src_path, dst_path, False, True)
+                self._mpy.put(data, dst_path, self._progress_callback)
+                self._progress_complete(len(data))
+            else:
+                self._mpy.put(data, dst_path)
 
     def cmd_put(self, src_path, dst_path):
+        if self._verbose >= 1:
+            self._progress_total_files = self._count_local_files(src_path)
+            self._progress_current_file = 0
         if _os.path.isdir(src_path):
             self._put_dir(src_path, dst_path)
         elif _os.path.isfile(src_path):
@@ -145,24 +259,30 @@ class MpyTool():
         else:
             raise ParamsError(f'No file or directory to upload: {src_path}')
 
-    def _get_file(self, src_path, dst_path):
+    def _get_file(self, src_path, dst_path, show_progress=True):
         """Download single file from device"""
-        self.verbose(f"GET_FILE: {src_path} -> {dst_path}")
+        self.verbose(f"GET_FILE: {src_path} -> {dst_path}", 2)
         # Create destination directory if needed
         dst_dir = _os.path.dirname(dst_path)
         if dst_dir and not _os.path.exists(dst_dir):
             _os.makedirs(dst_dir)
-        data = self._mpy.get(src_path)
+        if show_progress and self._verbose >= 1:
+            self._progress_current_file += 1
+            self._set_progress_info(src_path, dst_path, True, False)
+            data = self._mpy.get(src_path, self._progress_callback)
+            self._progress_complete(len(data))
+        else:
+            data = self._mpy.get(src_path)
         with open(dst_path, 'wb') as dst_file:
             dst_file.write(data)
 
-    def _get_dir(self, src_path, dst_path, copy_contents=False):
+    def _get_dir(self, src_path, dst_path, copy_contents=False, show_progress=True):
         """Download directory from device"""
         if not copy_contents:
             basename = src_path.rstrip('/').split('/')[-1]
             if basename:
                 dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"GET_DIR: {src_path} -> {dst_path}")
+        self.verbose(f"GET_DIR: {src_path} -> {dst_path}", 2)
         if not _os.path.exists(dst_path):
             _os.makedirs(dst_path)
         entries = self._mpy.ls(src_path)
@@ -170,10 +290,9 @@ class MpyTool():
             src_entry = src_path.rstrip('/') + '/' + name
             dst_entry = _os.path.join(dst_path, name)
             if size is None:  # directory
-                self._get_dir(src_entry, dst_entry, copy_contents=True)
+                self._get_dir(src_entry, dst_entry, copy_contents=True, show_progress=show_progress)
             else:  # file
-                self.verbose(f"  {dst_entry}")
-                self._get_file(src_entry, dst_entry)
+                self._get_file(src_entry, dst_entry, show_progress=show_progress)
 
     def _cp_local_to_remote(self, src_path, dst_path, dst_is_dir):
         """Upload local file/dir to device"""
@@ -235,9 +354,16 @@ class MpyTool():
         if dst_is_dir:
             basename = src_path.split('/')[-1]
             dst_path = dst_path + basename
-        self.verbose(f"COPY: {src_path} -> {dst_path}")
-        data = self._mpy.get(src_path)
-        self._mpy.put(data, dst_path)
+        self.verbose(f"COPY: {src_path} -> {dst_path}", 2)
+        if self._verbose >= 1:
+            self._progress_current_file += 1
+            self._set_progress_info(src_path, dst_path, True, True)
+            data = self._mpy.get(src_path, self._progress_callback)
+            self._mpy.put(data, dst_path)
+            self._progress_complete(len(data))
+        else:
+            data = self._mpy.get(src_path)
+            self._mpy.put(data, dst_path)
 
     def cmd_cp(self, *args):
         """Copy files between local and device"""
@@ -252,6 +378,21 @@ class MpyTool():
         dest_is_dir = dest_path.endswith('/')
         if len(sources) > 1 and not dest_is_dir:
             raise ParamsError('multiple sources require destination directory (ending with /)')
+        # Count total files for progress
+        if self._verbose >= 1:
+            total_files = 0
+            for src in sources:
+                src_is_remote = src.startswith(':')
+                src_path = src[1:] if src_is_remote else src
+                if not src_path:
+                    src_path = '/'
+                src_path_clean = src_path.rstrip('/') or '/'
+                if src_is_remote:
+                    total_files += self._count_remote_files(src_path_clean)
+                else:
+                    total_files += self._count_local_files(src_path_clean)
+            self._progress_total_files = total_files
+            self._progress_current_file = 0
         for src in sources:
             src_is_remote = src.startswith(':')
             src_path = src[1:] if src_is_remote else src
@@ -649,8 +790,7 @@ def main():
             return
         if len(ports) == 1:
             port = ports[0]
-            if args.verbose:
-                print(f"Using {port}", file=_sys.stderr)
+            print(f"Using {port}", file=_sys.stderr)
         else:
             log.error("Multiple serial ports found: %s. Use -p to specify one.", ", ".join(ports))
             return

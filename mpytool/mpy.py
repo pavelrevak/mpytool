@@ -240,15 +240,22 @@ def _mpytool_rmdir(path):
         else:
             self._mpy_comm.exec(f"os.remove('{_escape_path(path)}')")
 
-    def get(self, path):
+    def get(self, path, progress_callback=None):
         """Read file
 
         Arguments:
             path: file path to read
+            progress_callback: optional callback(transferred, total) for progress
 
         Returns:
             bytes with file content
         """
+        # Get file size first if callback provided
+        total_size = 0
+        if progress_callback:
+            total_size = self.stat(path)
+            if total_size is None or total_size < 0:
+                total_size = 0
         try:
             self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'rb')")
         except _mpy_comm.CmdError as err:
@@ -259,19 +266,27 @@ def _mpytool_rmdir(path):
             if not result:
                 break
             data += result
+            if progress_callback:
+                progress_callback(len(data), total_size)
         self._mpy_comm.exec("f.close()")
         return data
 
-    def put(self, data, path):
+    def put(self, data, path, progress_callback=None):
         """Write file to device
 
         Arguments:
             data: bytes with file content
             path: file path to write
+            progress_callback: optional callback(transferred, total) for progress
         """
+        total_size = len(data)
+        transferred = 0
         self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'wb')")
         while data:
             chunk = data[:self._CHUNK]
             count = self._mpy_comm.exec_eval(f"f.write({chunk})", timeout=10)
             data = data[count:]
+            transferred += count
+            if progress_callback:
+                progress_callback(transferred, total_size)
         self._mpy_comm.exec("f.close()")
