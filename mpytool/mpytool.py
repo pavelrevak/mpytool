@@ -37,8 +37,10 @@ class MpyTool():
         self._progress_current_file = 0
         self._progress_src = ''
         self._progress_dst = ''
+        self._progress_max_src_len = 0
         self._is_tty = _sys.stderr.isatty()
         self._is_debug = self._log and self._log._loglevel >= 4
+        self._batch_mode = False
 
     def verbose(self, msg, level=1):
         if self._verbose >= level:
@@ -71,7 +73,9 @@ class MpyTool():
             prefix = f"[{self._progress_current_file}/{self._progress_total_files}]"
         else:
             prefix = ""
-        return f"{prefix:>7} {percent:3d}% {size_str:>7} {self._progress_src} -> {self._progress_dst}"
+        # Pad source to align ->
+        src_width = max(len(self._progress_src), self._progress_max_src_len)
+        return f"{prefix:>7} {percent:3d}% {size_str:>7} {self._progress_src:<{src_width}} -> {self._progress_dst}"
 
     def _progress_callback(self, transferred, total):
         """Callback for file transfer progress"""
@@ -136,6 +140,84 @@ class MpyTool():
             else:  # file
                 count += 1
         return count
+
+    def _collect_source_paths(self, commands):
+        """Collect source paths for a cp/put command (for alignment calculation)"""
+        paths = []
+        if not commands:
+            return paths
+        cmd = commands[0]
+        if cmd == 'cp' and len(commands) >= 3:
+            sources = commands[1:-1]
+            for src in sources:
+                src_is_remote = src.startswith(':')
+                src_path = src[1:] if src_is_remote else src
+                if not src_path:
+                    src_path = '/'
+                src_path = src_path.rstrip('/') or '/'
+                if src_is_remote:
+                    # Collect all file paths from remote
+                    paths.extend(self._collect_remote_paths(src_path))
+                else:
+                    # Collect all file paths from local
+                    paths.extend(self._collect_local_paths(src_path))
+        elif cmd == 'put' and len(commands) >= 2:
+            src_path = commands[1]
+            paths.extend(self._collect_local_paths(src_path))
+        return paths
+
+    def _collect_local_paths(self, path):
+        """Collect all local file paths (formatted for display)"""
+        paths = []
+        if _os.path.isfile(path):
+            paths.append(self._format_local_path(path))
+        elif _os.path.isdir(path):
+            for root, dirs, files in _os.walk(path, topdown=True):
+                dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
+                for f in files:
+                    full_path = _os.path.join(root, f)
+                    paths.append(self._format_local_path(full_path))
+        return paths
+
+    def _collect_remote_paths(self, path):
+        """Collect all remote file paths (formatted for display)"""
+        paths = []
+        stat = self._mpy.stat(path)
+        if stat is None:
+            return paths
+        if stat >= 0:  # file
+            paths.append(':' + path)
+        else:  # directory
+            entries = self._mpy.ls(path)
+            for name, size in entries:
+                entry_path = path.rstrip('/') + '/' + name
+                if size is None:  # directory
+                    paths.extend(self._collect_remote_paths(entry_path))
+                else:  # file
+                    paths.append(':' + entry_path)
+        return paths
+
+    def count_files_for_command(self, commands):
+        """Count files that would be transferred by cp/put command.
+        Returns (is_copy_command, file_count, source_paths)"""
+        paths = self._collect_source_paths(commands)
+        if paths:
+            return True, len(paths), paths
+        return False, 0, []
+
+    def set_batch_progress(self, total_files, max_src_len=0):
+        """Set batch progress for consecutive copy commands"""
+        self._progress_total_files = total_files
+        self._progress_current_file = 0
+        self._progress_max_src_len = max_src_len
+        self._batch_mode = True
+
+    def reset_batch_progress(self):
+        """Reset batch progress mode"""
+        self._batch_mode = False
+        self._progress_total_files = 0
+        self._progress_current_file = 0
+        self._progress_max_src_len = 0
 
     def cmd_ls(self, dir_name):
         result = self._mpy.ls(dir_name)
@@ -249,7 +331,7 @@ class MpyTool():
                 self._mpy.put(data, dst_path)
 
     def cmd_put(self, src_path, dst_path):
-        if self._verbose >= 1:
+        if self._verbose >= 1 and not self._batch_mode:
             self._progress_total_files = self._count_local_files(src_path)
             self._progress_current_file = 0
         if _os.path.isdir(src_path):
@@ -378,8 +460,8 @@ class MpyTool():
         dest_is_dir = dest_path.endswith('/')
         if len(sources) > 1 and not dest_is_dir:
             raise ParamsError('multiple sources require destination directory (ending with /)')
-        # Count total files for progress
-        if self._verbose >= 1:
+        # Count total files for progress (only if not in batch mode)
+        if self._verbose >= 1 and not self._batch_mode:
             total_files = 0
             for src in sources:
                 src_is_remote = src.startswith(':')
@@ -771,12 +853,16 @@ def main():
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
     parser.add_argument(
-        '-v', '--verbose', default=0, action='count', help='verbose output')
+        '-v', '--verbose', default=1, action='count', help='verbose output (default: on)')
+    parser.add_argument(
+        '-q', '--quiet', action='store_true', help='quiet mode (no progress)')
     parser.add_argument(
         "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
         'by default are excluded directories: __pycache__, .git, .svn')
     parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
     args = parser.parse_args()
+    if args.quiet:
+        args.verbose = 0
 
     log = SimpleColorLogger(args.debug + 1)
     if args.port and args.address:
@@ -807,8 +893,39 @@ def main():
     mpy_tool = MpyTool(
         conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
     command_groups = _utils.split_commands(args.commands)
-    for commands in command_groups:
-        mpy_tool.process_commands(commands)
+    # Pre-scan to identify consecutive copy command batches
+    if args.verbose:
+        i = 0
+        while i < len(command_groups):
+            is_copy, count, paths = mpy_tool.count_files_for_command(command_groups[i])
+            if is_copy:
+                # Start a batch - collect consecutive copy commands
+                batch_total = count
+                all_paths = paths
+                batch_start = i
+                j = i + 1
+                while j < len(command_groups):
+                    is_copy_j, count_j, paths_j = mpy_tool.count_files_for_command(command_groups[j])
+                    if is_copy_j:
+                        batch_total += count_j
+                        all_paths.extend(paths_j)
+                        j += 1
+                    else:
+                        break
+                # Calculate max source path length for alignment
+                max_src_len = max(len(p) for p in all_paths) if all_paths else 0
+                # Execute batch with combined count
+                mpy_tool.set_batch_progress(batch_total, max_src_len)
+                for k in range(batch_start, j):
+                    mpy_tool.process_commands(command_groups[k])
+                mpy_tool.reset_batch_progress()
+                i = j
+            else:
+                mpy_tool.process_commands(command_groups[i])
+                i += 1
+    else:
+        for commands in command_groups:
+            mpy_tool.process_commands(commands)
 
 
 if __name__ == '__main__':

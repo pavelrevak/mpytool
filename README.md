@@ -95,7 +95,9 @@ $ mpytool -p /dev/ttyACM0 delete old.py -- put new.py / -- reset
 auto-detect serial port (if only one device is connected):
 ```
 $ mpytool ls
-$ mpytool -v put main.py /
+Using /dev/ttyACM0
+       215 boot.py
+      2938 net.py
 ```
 
 connect over network (TCP, default port 23):
@@ -139,10 +141,24 @@ b"import time\nimport net\n\nwlan = net.Wlan()\nwlan.refresh_network()\n\nwhile 
 >>> mpy.delete('a/b')
 ```
 
-## Verbose and debug output
+## Progress and verbose output
 
-use `-v` or `-vv` to show verbose output (like currently processing file, ..)
-- normally print only errors (red)
+Progress is shown by default during file transfers:
+```
+$ mpytool cp main.py lib.py :/lib/
+[1/2] 100%   1.2KB main.py -> :/lib/main.py
+[2/2] 100%   3.4KB lib.py  -> :/lib/lib.py
+```
+
+use `-q` or `--quiet` to disable progress output:
+```
+$ mpytool -q cp main.py :/
+```
+
+use `-v` or `-vv` for more verbose output
+
+## Debug output
+
 - `-d` print warnings (yellow)
 - `-dd` print info messages (purple)
 - `-ddd` print debug messages (blue)
