@@ -56,6 +56,18 @@ $ mpytool -p /dev/ttyACM0 reset follow
 $ mpytool -p /dev/ttyACM0 repl
 ```
 
+multiple commands separated by `--`:
+```
+$ mpytool -p /dev/ttyACM0 put main.py / -- reset -- follow
+$ mpytool -p /dev/ttyACM0 delete old.py -- put new.py / -- reset
+```
+
+auto-detect serial port (if only one device is connected):
+```
+$ mpytool ls
+$ mpytool -v put main.py /
+```
+
 ## Examples using API from Python
 
 ```
@@ -101,7 +113,7 @@ recursive put of 30 files in 4 folders, 70KB total:
 
 Working only with MicroPython boards, not with CircuitPython
 
-- python v3.6+
+- python v3.10+
 - pyserial v3.0+
 
 ### Running on:

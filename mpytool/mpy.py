@@ -206,7 +206,7 @@ def _mpytool_rmdir(path):
             raise DirNotFound(path)
         if result == -1:
             return self._mpy_comm.exec_eval(f"_mpytool_tree('{path}')")
-        return((path, result[6], None))
+        return (path, result, None)
 
     def mkdir(self, path):
         """make directory (also create all parents)

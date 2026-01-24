@@ -310,6 +310,8 @@ Aliases:
   dir                           alias to ls
   cat                           alias to get
   del                           alias to delete
+Use -- to separate multiple commands:
+  mpytool put main.py / -- reset -- follow
 """
 
 
@@ -332,7 +334,7 @@ def main():
     parser.add_argument(
         "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
         'by default are excluded directories: __pycache__, .git, .svn')
-    parser.add_argument('commands', nargs='*', help='commands')
+    parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
     args = parser.parse_args()
 
     # log = SimpleColorLogger(args.debug + 1)
@@ -367,7 +369,9 @@ def main():
         return
     mpy_tool = MpyTool(
         conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
-    mpy_tool.process_commands(args.commands)
+    command_groups = _utils.split_commands(args.commands)
+    for commands in command_groups:
+        mpy_tool.process_commands(commands)
 
 
 if __name__ == '__main__':

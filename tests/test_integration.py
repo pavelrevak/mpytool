@@ -94,6 +94,29 @@ class TestFileOperations(unittest.TestCase):
         self.assertEqual(path, self.TEST_DIR)
         self.assertIsInstance(children, list)
 
+    def test_05a_stat_file(self):
+        """Test stat on file returns size"""
+        result = self.mpy.stat(self.TEST_FILE)
+        self.assertIsInstance(result, int)
+        self.assertEqual(result, len(self.TEST_CONTENT))
+
+    def test_05b_stat_dir(self):
+        """Test stat on directory returns -1"""
+        result = self.mpy.stat(self.TEST_DIR)
+        self.assertEqual(result, -1)
+
+    def test_05c_stat_nonexistent(self):
+        """Test stat on nonexistent path returns None"""
+        result = self.mpy.stat("/nonexistent_path_12345")
+        self.assertIsNone(result)
+
+    def test_05d_tree_on_file(self):
+        """Test tree on file (not directory) returns file info"""
+        path, size, children = self.mpy.tree(self.TEST_FILE)
+        self.assertEqual(path, self.TEST_FILE)
+        self.assertEqual(size, len(self.TEST_CONTENT))
+        self.assertIsNone(children)  # file has no children
+
     def test_06_delete_file(self):
         """Test deleting file"""
         self.mpy.delete(self.TEST_FILE)
