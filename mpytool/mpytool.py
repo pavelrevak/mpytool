@@ -6,7 +6,12 @@ import argparse as _argparse
 import logging as _logging
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
-import mpytool.__about__ as _about
+import importlib.metadata as _metadata
+
+try:
+    _about = _metadata.metadata("mpytool")
+except _metadata.PackageNotFoundError:
+    _about = None
 
 
 class ParamsError(_mpytool.MpyError):
@@ -285,11 +290,10 @@ class SimpleColorLogger():
             self.log(f"\033[1;34m{msg}\033[0m")
 
 
-_VERSION_STR = "%s %s (%s <%s>)" % (
-    _about.APP_NAME,
-    _about.VERSION,
-    _about.AUTHOR,
-    _about.AUTHOR_EMAIL)
+if _about:
+    _VERSION_STR = "%s %s (%s)" % (_about["Name"], _about["Version"], _about["Author-email"])
+else:
+    _VERSION_STR = "mpytool (not installed version)"
 _COMMANDS_HELP_STR = """
 List of available commands:
   ls [{path}]                   list files and its sizes
