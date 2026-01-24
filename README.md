@@ -41,6 +41,13 @@ $ mpytool cp :/ ./backup/           # download entire device to backup/
 $ mpytool cp :/old.py :/new.py      # copy file on device
 ```
 
+move/rename on device:
+```
+$ mpytool mv :/old.py :/new.py      # rename file
+$ mpytool mv :/file.py :/lib/       # move file to directory
+$ mpytool mv :/a.py :/b.py :/lib/   # move multiple files to directory
+```
+
 legacy upload/download (still available):
 ```
 $ mpytool put boot.py /

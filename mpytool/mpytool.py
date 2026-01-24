@@ -266,6 +266,40 @@ class MpyTool():
             else:
                 self.verbose(f"Skipping local-to-local: {src} -> {dest}")
 
+    def cmd_mv(self, *args):
+        """Move/rename files on device"""
+        if len(args) < 2:
+            raise ParamsError('mv requires source and destination')
+        sources = list(args[:-1])
+        dest = args[-1]
+        # Validate all paths are remote
+        if not dest.startswith(':'):
+            raise ParamsError('mv destination must be device path (: prefix)')
+        for src in sources:
+            if not src.startswith(':'):
+                raise ParamsError('mv source must be device path (: prefix)')
+        dest_path = dest[1:] or '/'
+        dest_is_dir = dest_path.endswith('/')
+        if len(sources) > 1 and not dest_is_dir:
+            raise ParamsError('multiple sources require destination directory (ending with /)')
+        self._mpy.import_module('os')
+        for src in sources:
+            src_path = src[1:]
+            stat = self._mpy.stat(src_path)
+            if stat is None:
+                raise ParamsError(f'Source not found on device: {src_path}')
+            if dest_is_dir:
+                # Ensure destination directory exists
+                dst_dir = dest_path.rstrip('/')
+                if dst_dir and self._mpy.stat(dst_dir) is None:
+                    self._mpy.mkdir(dst_dir)
+                basename = src_path.rstrip('/').split('/')[-1]
+                final_dest = dest_path + basename
+            else:
+                final_dest = dest_path
+            self.verbose(f"MV: {src_path} -> {final_dest}")
+            self._mpy.comm.exec(f"os.rename('{src_path}', '{final_dest}')")
+
     def cmd_mkdir(self, *dir_names):
         for dir_name in dir_names:
             self.verbose(f"MKDIR: {dir_name}")
@@ -444,6 +478,11 @@ class MpyTool():
                         self.cmd_cp(*commands)
                         break
                     raise ParamsError('cp requires source and destination')
+                elif command == 'mv':
+                    if len(commands) >= 2:
+                        self.cmd_mv(*commands)
+                        break
+                    raise ParamsError('mv requires source and destination')
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
@@ -547,6 +586,7 @@ List of available commands:
   ls [{path}]                   list files and its sizes
   tree [{path}]                 list tree of structure and sizes
   cp {src} [...] {dst}          copy files (: prefix = device path)
+  mv {src} [...] {dst}          move/rename on device (: prefix required)
   get {path} [...]              get file and print it
   put {src_path} [{dst_path}]   put file or directory to destination
   mkdir {path} [...]            create directory (also create all parents)

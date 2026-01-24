@@ -353,5 +353,64 @@ class TestCpCommand(unittest.TestCase):
         self.assertEqual(content, b"subdir file")
 
 
+@requires_device
+class TestMvCommand(unittest.TestCase):
+    """Test mv command for moving/renaming files on device"""
+
+    TEST_DIR = "/_mpytool_mv_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_rename_file(self):
+        """Test mv rename file"""
+        src = self.TEST_DIR + "/old.txt"
+        dst = self.TEST_DIR + "/new.txt"
+        self.mpy.put(b"rename test", src)
+        self.tool.cmd_mv(':' + src, ':' + dst)
+        self.assertIsNone(self.mpy.stat(src))
+        self.assertEqual(self.mpy.get(dst), b"rename test")
+
+    def test_02_move_to_dir(self):
+        """Test mv file to directory"""
+        src = self.TEST_DIR + "/moveme.txt"
+        dst_dir = self.TEST_DIR + "/subdir"
+        self.mpy.put(b"move test", src)
+        self.tool.cmd_mv(':' + src, ':' + dst_dir + '/')
+        self.assertIsNone(self.mpy.stat(src))
+        self.assertEqual(self.mpy.get(dst_dir + "/moveme.txt"), b"move test")
+
+    def test_03_move_multiple(self):
+        """Test mv multiple files to directory"""
+        src1 = self.TEST_DIR + "/multi1.txt"
+        src2 = self.TEST_DIR + "/multi2.txt"
+        dst_dir = self.TEST_DIR + "/multidir"
+        self.mpy.put(b"multi1", src1)
+        self.mpy.put(b"multi2", src2)
+        self.tool.cmd_mv(':' + src1, ':' + src2, ':' + dst_dir + '/')
+        self.assertIsNone(self.mpy.stat(src1))
+        self.assertIsNone(self.mpy.stat(src2))
+        self.assertEqual(self.mpy.get(dst_dir + "/multi1.txt"), b"multi1")
+        self.assertEqual(self.mpy.get(dst_dir + "/multi2.txt"), b"multi2")
+
+
 if __name__ == "__main__":
     unittest.main()
