@@ -6,6 +6,7 @@ import argparse as _argparse
 import logging as _logging
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
+import mpytool.utils as _utils
 import importlib.metadata as _metadata
 
 try:
@@ -341,16 +342,26 @@ def main():
     if args.port and args.address:
         log.error("You can select only serial port or network address")
         return
+    port = args.port
+    if not port and not args.address:
+        ports = _utils.detect_serial_ports()
+        if not ports:
+            log.error("No serial port found. Use -p to specify port.")
+            return
+        if len(ports) == 1:
+            port = ports[0]
+            if args.verbose:
+                print(f"Using {port}", file=_sys.stderr)
+        else:
+            log.error("Multiple serial ports found: %s. Use -p to specify one.", ", ".join(ports))
+            return
     try:
-        if args.port:
+        if port:
             conn = _mpytool.ConnSerial(
-                port=args.port, baudrate=args.baud, log=log)
+                port=port, baudrate=args.baud, log=log)
         elif args.address:
             conn = _mpytool.ConnSocket(
                 address=args.address, log=log)
-        else:
-            log.error("No port selected")
-            return
     except _mpytool.ConnError as err:
         log.error(err)
         return
