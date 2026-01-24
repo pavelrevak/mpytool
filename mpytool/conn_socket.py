@@ -1,4 +1,4 @@
-"""MicroPython tool: serial connector"""
+"""MicroPython tool: socket connector"""
 
 import time as _time
 import socket as _socket
@@ -12,27 +12,25 @@ class ConnSocket(_conn.Conn):
         self._buffer = bytearray(b'')
         self._socket = None
         sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        sock.settimeout(.1)
+        sock.settimeout(5)
         if ':' in address:
-            address, port = address.split(':')
+            host, port = address.split(':')
             port = int(port)
         else:
+            host = address
             port = 23
-        log.info(f"Connecting to: {address}:{port}")
+        if log:
+            log.info(f"Connecting to: {host}:{port}")
         try:
-            sock.connect((address, port))
-        # except _serial.serialutil.SerialException as err:
-        #     self._serial = None
-        #     raise _conn.ConnError(
-        #         f"Error opening serial port {serial_config['port']}") from err
+            sock.connect((host, port))
         except _socket.timeout as err:
-            log.error("Timeout while connecting to terminal. %s", err)
+            raise _conn.ConnError(f"Timeout connecting to {host}:{port}") from err
         except _socket.error as err:
-            log.error("Can not connect to terminal. %s", err)
-        else:
-            sock.settimeout(None)
-            sock.setblocking(0)
-            self._socket = sock
+            raise _conn.ConnError(f"Cannot connect to {host}:{port}: {err}") from err
+        sock.settimeout(None)
+        sock.setblocking(False)
+        self._socket = sock
+        if log:
             log.info("connected")
 
     def __del__(self):
@@ -43,15 +41,38 @@ class ConnSocket(_conn.Conn):
     def fd(self):
         return self._socket.fileno() if self._socket else None
 
+    def _has_data(self, timeout=0):
+        """Check if socket has data available to read"""
+        if not self._socket:
+            return False
+        readable, _, _ = _select.select([self._socket], [], [], timeout)
+        return bool(readable)
+
+    def _read_to_buffer(self):
+        """Read available data from socket to buffer"""
+        if self._has_data():
+            try:
+                data = self._socket.recv(4096)
+                if data:
+                    self._buffer += data
+                    return True
+            except BlockingIOError:
+                pass
+        return False
+
     def flush(self):
         buffer = bytes(self._buffer)
         del self._buffer[:]
         return buffer
 
     def read(self):
-        buff = self._socket.recv(4096)
-        if buff:
-            return buff
+        if self._has_data():
+            try:
+                data = self._socket.recv(4096)
+                if data:
+                    return data
+            except BlockingIOError:
+                pass
         return None
 
     def write(self, data, chunk_size=128, delay=0.01):
@@ -69,7 +90,8 @@ class ConnSocket(_conn.Conn):
             self._log.debug("wait for %s", end)
         start_time = _time.time()
         while True:
-            self._buffer += self._socket.recv(4096)
+            if self._read_to_buffer():
+                start_time = _time.time()  # reset timeout on data received
             if end in self._buffer:
                 break
             if timeout is not None and start_time + timeout < _time.time():
