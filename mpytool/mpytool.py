@@ -274,7 +274,7 @@ class MpyTool():
 
     def cmd_get(self, *file_names):
         for file_name in file_names:
-            self.verbose(f"GET: {file_name}")
+            self.verbose(f"get: {file_name}", 2)
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
@@ -282,7 +282,7 @@ class MpyTool():
         basename = _os.path.basename(src_path)
         if basename:
             dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"PUT_DIR: {src_path} -> {dst_path}", 2)
+        self.verbose(f"put dir: {src_path} -> {dst_path}", 2)
         for path, dirs, files in _os.walk(src_path, topdown=True):
             dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
             basename = _os.path.basename(path)
@@ -312,7 +312,7 @@ class MpyTool():
         basename = _os.path.basename(src_path)
         if basename and not _os.path.basename(dst_path):
             dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"PUT_FILE: {src_path} -> {dst_path}", 2)
+        self.verbose(f"put file: {src_path} -> {dst_path}", 2)
         path = _os.path.dirname(dst_path)
         result = self._mpy.stat(path)
         if result is None:
@@ -343,7 +343,7 @@ class MpyTool():
 
     def _get_file(self, src_path, dst_path, show_progress=True):
         """Download single file from device"""
-        self.verbose(f"GET_FILE: {src_path} -> {dst_path}", 2)
+        self.verbose(f"get file: {src_path} -> {dst_path}", 2)
         # Create destination directory if needed
         dst_dir = _os.path.dirname(dst_path)
         if dst_dir and not _os.path.exists(dst_dir):
@@ -364,7 +364,7 @@ class MpyTool():
             basename = src_path.rstrip('/').split('/')[-1]
             if basename:
                 dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"GET_DIR: {src_path} -> {dst_path}", 2)
+        self.verbose(f"get dir: {src_path} -> {dst_path}", 2)
         if not _os.path.exists(dst_path):
             _os.makedirs(dst_path)
         entries = self._mpy.ls(src_path)
@@ -436,7 +436,7 @@ class MpyTool():
         if dst_is_dir:
             basename = src_path.split('/')[-1]
             dst_path = dst_path + basename
-        self.verbose(f"COPY: {src_path} -> {dst_path}", 2)
+        self.verbose(f"copy: {src_path} -> {dst_path}", 2)
         if self._verbose >= 1:
             self._progress_current_file += 1
             self._set_progress_info(src_path, dst_path, True, True)
@@ -487,7 +487,7 @@ class MpyTool():
             elif dest_is_remote:
                 self._cp_local_to_remote(src_path, dest_path, dest_is_dir)
             else:
-                self.verbose(f"Skipping local-to-local: {src} -> {dest}")
+                self.verbose(f"skip local-to-local: {src} -> {dest}", 2)
 
     def cmd_mv(self, *args):
         """Move/rename files on device"""
@@ -520,12 +520,12 @@ class MpyTool():
                 final_dest = dest_path + basename
             else:
                 final_dest = dest_path
-            self.verbose(f"MV: {src_path} -> {final_dest}")
+            self.verbose(f"mv: {src_path} -> {final_dest}", 2)
             self._mpy.comm.exec(f"os.rename('{src_path}', '{final_dest}')")
 
     def cmd_mkdir(self, *dir_names):
         for dir_name in dir_names:
-            self.verbose(f"MKDIR: {dir_name}")
+            self.verbose(f"mkdir: {dir_name}", 2)
             self._mpy.mkdir(dir_name)
 
     def cmd_delete(self, *file_names):
@@ -533,18 +533,18 @@ class MpyTool():
             contents_only = file_name.endswith('/')
             path = file_name.rstrip('/') or '/'
             if contents_only:
-                self.verbose(f"DELETE CONTENTS: {path}")
+                self.verbose(f"delete contents: {path}", 2)
                 entries = self._mpy.ls(path)
                 for name, size in entries:
                     entry_path = path + '/' + name if path != '/' else '/' + name
-                    self.verbose(f"  {entry_path}")
+                    self.verbose(f"  {entry_path}", 2)
                     self._mpy.delete(entry_path)
             else:
-                self.verbose(f"DELETE: {path}")
+                self.verbose(f"delete: {path}", 2)
                 self._mpy.delete(path)
 
     def cmd_follow(self):
-        self.verbose("FOLLOW:")
+        self.verbose("follow", 2)
         try:
             while True:
                 line = self._conn.read_line()
@@ -558,7 +558,7 @@ class MpyTool():
                 self._log.error(err)
 
     def cmd_repl(self):
-        self.verbose("REPL:")
+        self.verbose("repl", 2)
         self._mpy.comm.exit_raw_repl()
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
@@ -570,7 +570,7 @@ class MpyTool():
             self._log.info(' Exiting..')
 
     def cmd_exec(self, code):
-        self.verbose(f"EXEC: {code}")
+        self.verbose(f"exec: {code}", 2)
         result = self._mpy.comm.exec(code)
         if result:
             print(result.decode('utf-8', 'backslashreplace'), end='')
@@ -591,7 +591,7 @@ class MpyTool():
         return f"{size:.0f} TB"
 
     def cmd_info(self):
-        self.verbose("INFO:")
+        self.verbose("info", 2)
         self._mpy.comm.exec("import sys, gc, os")
         platform = self._mpy.comm.exec_eval("repr(sys.platform)")
         version = self._mpy.comm.exec_eval("repr(sys.version)")
@@ -691,7 +691,9 @@ class MpyTool():
                     self.cmd_delete(*commands)
                     break
                 elif command == 'reset':
+                    self.verbose("reset", 2)
                     self._mpy.comm.soft_reset()
+                    self._mpy.reset_state()
                 elif command == 'follow':
                     self.cmd_follow()
                     break
@@ -853,7 +855,7 @@ def main():
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='set debug level')
     parser.add_argument(
-        '-v', '--verbose', default=1, action='count', help='verbose output (default: on)')
+        '-v', '--verbose', action='store_true', help='verbose output (show commands)')
     parser.add_argument(
         '-q', '--quiet', action='store_true', help='quiet mode (no progress)')
     parser.add_argument(
@@ -861,8 +863,13 @@ def main():
         'by default are excluded directories: __pycache__, .git, .svn')
     parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
     args = parser.parse_args()
+    # Convert to numeric level: 0=quiet, 1=progress, 2=verbose
     if args.quiet:
         args.verbose = 0
+    elif args.verbose:
+        args.verbose = 2
+    else:
+        args.verbose = 1
 
     log = SimpleColorLogger(args.debug + 1)
     if args.port and args.address:
@@ -893,8 +900,8 @@ def main():
     mpy_tool = MpyTool(
         conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
     command_groups = _utils.split_commands(args.commands)
-    # Pre-scan to identify consecutive copy command batches
-    if args.verbose:
+    # Pre-scan to identify consecutive copy command batches (for progress)
+    if args.verbose >= 1:
         i = 0
         while i < len(command_groups):
             is_copy, count, paths = mpy_tool.count_files_for_command(command_groups[i])

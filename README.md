@@ -150,12 +150,16 @@ $ mpytool cp main.py lib.py :/lib/
 [2/2] 100%   3.4KB lib.py  -> :/lib/lib.py
 ```
 
-use `-q` or `--quiet` to disable progress output:
+use `-v` or `--verbose` to also show commands being executed:
+```
+$ mpytool -v rm /old.py
+delete: /old.py
+```
+
+use `-q` or `--quiet` to disable all output:
 ```
 $ mpytool -q cp main.py :/
 ```
-
-use `-v` or `-vv` for more verbose output
 
 ## Debug output
 

@@ -117,6 +117,14 @@ def _mpytool_rmdir(path):
         """
         return self._mpy_comm
 
+    def reset_state(self):
+        """Reset internal state after device reset
+
+        Call this after soft_reset() to clear cached helper/import state.
+        """
+        self._imported = []
+        self._load_helpers = []
+
     def load_helper(self, helper):
         """Load helper function to MicroPython
 
