@@ -54,10 +54,12 @@ $ mpytool put boot.py /
 $ mpytool get boot.py >> boot.py
 ```
 
-make directory, erase dir or files:
+make directory, delete files:
 ```
-$ mpytool -p /dev/ttyACM0 mkdir a/b/c/d xyz/abc
-$ mpytool -p /dev/ttyACM0 delete a xyz
+$ mpytool mkdir a/b/c/d xyz/abc   # create directories
+$ mpytool rm mydir                # delete directory and contents
+$ mpytool rm mydir/               # delete contents only, keep directory
+$ mpytool rm /                    # delete everything on device
 ```
 
 reset only, reset and follow output, REPL mode:

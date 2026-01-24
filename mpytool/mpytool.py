@@ -307,8 +307,18 @@ class MpyTool():
 
     def cmd_delete(self, *file_names):
         for file_name in file_names:
-            self.verbose(f"DELETE: {file_name}")
-            self._mpy.delete(file_name)
+            contents_only = file_name.endswith('/')
+            path = file_name.rstrip('/') or '/'
+            if contents_only:
+                self.verbose(f"DELETE CONTENTS: {path}")
+                entries = self._mpy.ls(path)
+                for name, size in entries:
+                    entry_path = path + '/' + name if path != '/' else '/' + name
+                    self.verbose(f"  {entry_path}")
+                    self._mpy.delete(entry_path)
+            else:
+                self.verbose(f"DELETE: {path}")
+                self._mpy.delete(path)
 
     def cmd_follow(self):
         self.verbose("FOLLOW:")
@@ -590,7 +600,7 @@ List of available commands:
   get {path} [...]              get file and print it
   put {src_path} [{dst_path}]   put file or directory to destination
   mkdir {path} [...]            create directory (also create all parents)
-  delete {path} [...]           remove file or directory (recursively)
+  delete {path} [...]           remove file/dir (path/ = contents only)
   reset                         soft reset
   follow                        print log of running program
   repl                          enter REPL mode [UNIX OS ONLY]
