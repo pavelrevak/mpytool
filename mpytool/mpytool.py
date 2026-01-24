@@ -224,7 +224,7 @@ class MpyTool():
                 elif command == 'mkdir':
                     self.cmd_mkdir(*commands)
                     break
-                elif command in ('del', 'delete'):
+                elif command in ('del', 'delete', 'rm'):
                     self.cmd_delete(*commands)
                     break
                 elif command == 'reset':
@@ -354,7 +354,7 @@ List of available commands:
 Aliases:
   dir                           alias to ls
   cat                           alias to get
-  del                           alias to delete
+  del, rm                       alias to delete
 Use -- to separate multiple commands:
   mpytool put main.py / -- reset -- follow
 """

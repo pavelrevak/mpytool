@@ -74,6 +74,27 @@ $ mpytool ls
 $ mpytool -v put main.py /
 ```
 
+connect over network (TCP, default port 23):
+```
+$ mpytool -a 192.168.1.100 ls
+$ mpytool -a 192.168.1.100:8266 tree
+```
+
+set baudrate (default 115200):
+```
+$ mpytool -p /dev/ttyACM0 -b 9600 ls
+```
+
+show version:
+```
+$ mpytool -V
+```
+
+command aliases:
+- `dir` = `ls`
+- `cat` = `get`
+- `del`, `rm` = `delete`
+
 ## Examples using API from Python
 
 ```
