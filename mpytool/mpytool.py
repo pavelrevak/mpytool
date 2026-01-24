@@ -314,7 +314,9 @@ Aliases:
 
 def main():
     """Main"""
+    _description = _about["Summary"] if _about else None
     parser = _argparse.ArgumentParser(
+        description=_description,
         formatter_class=_argparse.RawTextHelpFormatter,
         epilog=_COMMANDS_HELP_STR)
     parser.add_argument(
