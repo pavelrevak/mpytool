@@ -258,7 +258,7 @@ def _mpytool_rmdir(path):
         return data
 
     def put(self, data, path):
-        """Read file
+        """Write file to device
 
         Arguments:
             data: bytes with file content

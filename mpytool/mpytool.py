@@ -16,29 +16,7 @@ except _metadata.PackageNotFoundError:
 
 
 class ParamsError(_mpytool.MpyError):
-    """Timeout"""
-
-
-class PathNotFound(_mpytool.MpyError):
-    """File not found"""
-    def __init__(self, file_name):
-        self._file_name = file_name
-        super().__init__(self.__str__())
-
-    def __str__(self):
-        return f"Path '{self._file_name}' was not found"
-
-
-class FileNotFound(PathNotFound):
-    """Folder not found"""
-    def __str__(self):
-        return f"File '{self._file_name}' was not found"
-
-
-class DirNotFound(PathNotFound):
-    """Folder not found"""
-    def __str__(self):
-        return f"Dir '{self._file_name}' was not found"
+    """Invalid command parameters"""
 
 
 class MpyTool():
@@ -339,7 +317,7 @@ def main():
 
     # log = SimpleColorLogger(args.debug + 1)
     _logging.basicConfig(format='%(levelname).1s: %(message)s (%(filename)s:%(lineno)s)')
-    log = _logging.getLogger('ser2tcp')
+    log = _logging.getLogger('mpytool')
     log.setLevel((30, 20, 10)[min(2, args.debug)])
     if args.port and args.address:
         log.error("You can select only serial port or network address")

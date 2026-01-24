@@ -8,7 +8,7 @@ class MpyError(Exception):
 
 
 class CmdError(MpyError):
-    """Timeout"""
+    """Command execution error on device"""
     def __init__(self, cmd, result, error):
         self._cmd = cmd
         self._result = result
