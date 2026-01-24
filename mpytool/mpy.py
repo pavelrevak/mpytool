@@ -3,6 +3,11 @@
 import mpytool.mpy_comm as _mpy_comm
 
 
+def _escape_path(path: str) -> str:
+    """Escape path for use in Python string literal"""
+    return path.replace("\\", "\\\\").replace("'", "\\'")
+
+
 class PathNotFound(_mpy_comm.MpyError):
     """File not found"""
     def __init__(self, file_name):
@@ -147,7 +152,7 @@ def _mpytool_rmdir(path):
         """
         self.import_module('os')
         self.load_helper('stat')
-        return self._mpy_comm.exec_eval(f"_mpytool_stat('{path}')")
+        return self._mpy_comm.exec_eval(f"_mpytool_stat('{_escape_path(path)}')")
 
     def ls(self, path=None):
         """List files on path
@@ -166,7 +171,7 @@ def _mpytool_rmdir(path):
             path = ''
         try:
             result = self._mpy_comm.exec_eval(
-                f"tuple(os.ilistdir('{path}'))")
+                f"tuple(os.ilistdir('{_escape_path(path)}'))")
             res_dir = []
             res_file = []
             for entry in result:
@@ -199,13 +204,13 @@ def _mpytool_rmdir(path):
         if path is None:
             path = ''
         if path in ('', '.', '/'):
-            return self._mpy_comm.exec_eval(f"_mpytool_tree('{path}')")
+            return self._mpy_comm.exec_eval(f"_mpytool_tree('{_escape_path(path)}')")
         # check if path exists
         result = self.stat(path)
         if result is None:
             raise DirNotFound(path)
         if result == -1:
-            return self._mpy_comm.exec_eval(f"_mpytool_tree('{path}')")
+            return self._mpy_comm.exec_eval(f"_mpytool_tree('{_escape_path(path)}')")
         return (path, result, None)
 
     def mkdir(self, path):
@@ -216,7 +221,7 @@ def _mpytool_rmdir(path):
         """
         self.import_module('os')
         self.load_helper('mkdir')
-        if self._mpy_comm.exec_eval(f"_mpytool_mkdir('{path}')"):
+        if self._mpy_comm.exec_eval(f"_mpytool_mkdir('{_escape_path(path)}')"):
             raise _mpy_comm.MpyError(f'Error creating directory, this is file: {path}')
 
     def delete(self, path):
@@ -231,9 +236,9 @@ def _mpytool_rmdir(path):
         if result == -1:
             self.import_module('os')
             self.load_helper('rmdir')
-            self._mpy_comm.exec(f"_mpytool_rmdir('{path}')", 20)
+            self._mpy_comm.exec(f"_mpytool_rmdir('{_escape_path(path)}')", 20)
         else:
-            self._mpy_comm.exec(f"os.remove('{path}')")
+            self._mpy_comm.exec(f"os.remove('{_escape_path(path)}')")
 
     def get(self, path):
         """Read file
@@ -245,7 +250,7 @@ def _mpytool_rmdir(path):
             bytes with file content
         """
         try:
-            self._mpy_comm.exec(f"f = open('{path}', 'rb')")
+            self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'rb')")
         except _mpy_comm.CmdError as err:
             raise FileNotFound(path) from err
         data = b''
@@ -264,7 +269,7 @@ def _mpytool_rmdir(path):
             data: bytes with file content
             path: file path to write
         """
-        self._mpy_comm.exec(f"f = open('{path}', 'wb')")
+        self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'wb')")
         while data:
             chunk = data[:self._CHUNK]
             count = self._mpy_comm.exec_eval(f"f.write({chunk})", timeout=10)

@@ -172,6 +172,38 @@ class TestExec(unittest.TestCase):
 
 
 @requires_device
+class TestReplRecovery(unittest.TestCase):
+    """Test REPL state recovery after disconnect"""
+
+    def test_recovery_from_raw_repl(self):
+        """Test that we can reconnect when device was left in raw REPL mode"""
+        from mpytool import ConnSerial, Mpy
+
+        # First connection - enter raw REPL and disconnect without exiting
+        conn1 = ConnSerial(port=DEVICE_PORT)
+        mpy1 = Mpy(conn1)
+        mpy1.comm.enter_raw_repl()
+        self.assertTrue(mpy1.comm._repl_mode)
+
+        # Close connection WITHOUT exiting raw REPL
+        # This simulates a crash or unexpected disconnect
+        del mpy1
+        del conn1
+
+        # Second connection - device is still in raw REPL mode
+        conn2 = ConnSerial(port=DEVICE_PORT)
+        mpy2 = Mpy(conn2)
+
+        # This should recover and work
+        # With broken implementation, this will fail/timeout
+        try:
+            result = mpy2.comm.exec_eval("1 + 1")
+            self.assertEqual(result, 2)
+        finally:
+            mpy2.comm.exit_raw_repl()
+
+
+@requires_device
 class TestDeviceInfo(unittest.TestCase):
     """Test getting device information"""
 

@@ -47,28 +47,61 @@ class MpyComm():
         return self._conn
 
     def stop_current_operation(self):
+        """Stop any running operation and get to known REPL state.
+
+        Returns:
+            True if we're in a known REPL state, False if recovery failed
+        """
         if self._repl_mode is not None:
             return True
         if self._log:
             self._log.info('STOP CURRENT OPERATION')
+
+        # Flush any pending data first
+        self._conn.flush()
+
+        # Try CTRL-C to interrupt any running program
         self._conn.write(b'\x03')
         try:
-            # wait for prompt
             self._conn.read_until(b'\r\n>>> ', timeout=1)
+            self._repl_mode = False
+            return True
         except _conn.Timeout:
-            # probably is in RAW repl
-            if self._log:
-                self._log.warning("Timeout while stopping program")
-            self.exit_raw_repl()
-            return False
-        return True
+            pass
 
-    def enter_raw_repl(self):
+        # CTRL-C didn't work, maybe we're in raw REPL mode
+        # Try CTRL-B to exit raw REPL
+        if self._log:
+            self._log.debug("Trying CTRL-B to exit raw REPL")
+        self._conn.write(b'\x02')
+        try:
+            self._conn.read_until(b'\r\n>>> ', timeout=1)
+            self._repl_mode = False
+            return True
+        except _conn.Timeout:
+            pass
+
+        # Still not working, try CTRL-C again (device might have been mid-execution)
+        self._conn.write(b'\x03')
+        try:
+            self._conn.read_until(b'\r\n>>> ', timeout=1)
+            self._repl_mode = False
+            return True
+        except _conn.Timeout:
+            if self._log:
+                self._log.warning("Could not establish REPL state")
+            return False
+
+    def enter_raw_repl(self, max_retries=3):
         if self._repl_mode is True:
             return
+        retries = 0
         while not self.stop_current_operation():
+            retries += 1
+            if retries >= max_retries:
+                raise MpyError("Could not establish REPL connection")
             if self._log:
-                self._log.warning('..retry')
+                self._log.warning('..retry %d/%d', retries, max_retries)
         if self._log:
             self._log.info('ENTER RAW REPL')
         self._conn.write(b'\x01')
