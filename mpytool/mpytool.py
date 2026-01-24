@@ -6,6 +6,7 @@ import argparse as _argparse
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.utils as _utils
+from mpytool.logger import SimpleColorLogger
 import importlib.metadata as _metadata
 
 try:
@@ -24,27 +25,38 @@ class MpyTool():
     TEE = '├─ '
     LAST = '└─ '
 
-    def __init__(self, conn, log=None, verbose=0, exclude_dirs=None):
+    def __init__(self, conn, log=None, verbose=None, exclude_dirs=None):
         self._conn = conn
-        self._log = log
-        self._verbose = verbose
+        self._log = log if log is not None else SimpleColorLogger()
+        self._verbose_out = verbose  # None = no verbose output (API mode)
         self._exclude_dirs = {'__pycache__', '.git', '.svn'}
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
-        self._mpy = _mpytool.Mpy(conn, log=log)
+        self._mpy = _mpytool.Mpy(conn, log=self._log)
         # Progress tracking
         self._progress_total_files = 0
         self._progress_current_file = 0
         self._progress_src = ''
         self._progress_dst = ''
         self._progress_max_src_len = 0
-        self._is_tty = _sys.stderr.isatty()
-        self._is_debug = self._log and self._log._loglevel >= 4
+        self._is_debug = getattr(self._log, '_loglevel', 1) >= 4
         self._batch_mode = False
 
-    def verbose(self, msg, level=1):
-        if self._verbose >= level:
-            print(msg, file=_sys.stderr)
+    @property
+    def _is_tty(self):
+        if self._verbose_out is None:
+            return False
+        return self._verbose_out._is_tty
+
+    @property
+    def _verbose(self):
+        if self._verbose_out is None:
+            return 0
+        return self._verbose_out._verbose_level
+
+    def verbose(self, msg, level=1, color='green', end='\n', overwrite=False):
+        if self._verbose_out is not None:
+            self._verbose_out.verbose(msg, level, color, end, overwrite)
 
     @staticmethod
     def _format_local_path(path):
@@ -79,28 +91,24 @@ class MpyTool():
 
     def _progress_callback(self, transferred, total):
         """Callback for file transfer progress"""
-        if self._verbose < 1:
-            return
         percent = (transferred * 100 // total) if total > 0 else 100
         line = self._format_progress_line(percent, total)
-        if self._is_debug or not self._is_tty:
-            # Debug mode or non-TTY: always newlines
-            print(line, file=_sys.stderr)
+        if self._is_debug:
+            # Debug mode: always newlines
+            self.verbose(line, color='cyan')
         else:
             # Normal mode: overwrite line
-            print(f"\r\033[K{line}", end='', file=_sys.stderr, flush=True)
+            self.verbose(line, color='cyan', end='', overwrite=True)
 
     def _progress_complete(self, total):
         """Mark current file as complete"""
-        if self._verbose < 1:
-            return
         line = self._format_progress_line(100, total)
-        if self._is_debug or not self._is_tty:
+        if self._is_debug:
             # Already printed with newline in callback
             pass
         else:
             # Print final line with newline
-            print(f"\r\033[K{line}", file=_sys.stderr)
+            self.verbose(line, color='cyan', overwrite=True)
 
     def _set_progress_info(self, src, dst, is_src_remote, is_dst_remote):
         """Set progress source and destination paths"""
@@ -274,7 +282,7 @@ class MpyTool():
 
     def cmd_get(self, *file_names):
         for file_name in file_names:
-            self.verbose(f"get: {file_name}", 2)
+            self.verbose(f"GET: {file_name}", 2)
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
@@ -282,7 +290,7 @@ class MpyTool():
         basename = _os.path.basename(src_path)
         if basename:
             dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"put dir: {src_path} -> {dst_path}", 2)
+        self.verbose(f"PUT DIR: {src_path} -> {dst_path}", 2)
         for path, dirs, files in _os.walk(src_path, topdown=True):
             dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
             basename = _os.path.basename(path)
@@ -293,7 +301,7 @@ class MpyTool():
                 rel_path = ''
             rel_path = _os.path.join(dst_path, rel_path)
             if rel_path:
-                self.verbose(f'mkdir: {rel_path}', 2)
+                self.verbose(f'MKDIR: {rel_path}', 2)
                 self._mpy.mkdir(rel_path)
             for file_name in files:
                 spath = _os.path.join(path, file_name)
@@ -312,7 +320,7 @@ class MpyTool():
         basename = _os.path.basename(src_path)
         if basename and not _os.path.basename(dst_path):
             dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"put file: {src_path} -> {dst_path}", 2)
+        self.verbose(f"PUT FILE: {src_path} -> {dst_path}", 2)
         path = _os.path.dirname(dst_path)
         result = self._mpy.stat(path)
         if result is None:
@@ -343,7 +351,7 @@ class MpyTool():
 
     def _get_file(self, src_path, dst_path, show_progress=True):
         """Download single file from device"""
-        self.verbose(f"get file: {src_path} -> {dst_path}", 2)
+        self.verbose(f"GET FILE: {src_path} -> {dst_path}", 2)
         # Create destination directory if needed
         dst_dir = _os.path.dirname(dst_path)
         if dst_dir and not _os.path.exists(dst_dir):
@@ -364,7 +372,7 @@ class MpyTool():
             basename = src_path.rstrip('/').split('/')[-1]
             if basename:
                 dst_path = _os.path.join(dst_path, basename)
-        self.verbose(f"get dir: {src_path} -> {dst_path}", 2)
+        self.verbose(f"GET DIR: {src_path} -> {dst_path}", 2)
         if not _os.path.exists(dst_path):
             _os.makedirs(dst_path)
         entries = self._mpy.ls(src_path)
@@ -436,7 +444,7 @@ class MpyTool():
         if dst_is_dir:
             basename = src_path.split('/')[-1]
             dst_path = dst_path + basename
-        self.verbose(f"copy: {src_path} -> {dst_path}", 2)
+        self.verbose(f"COPY: {src_path} -> {dst_path}", 2)
         if self._verbose >= 1:
             self._progress_current_file += 1
             self._set_progress_info(src_path, dst_path, True, True)
@@ -551,23 +559,20 @@ class MpyTool():
                 line = line.decode('utf-8', 'backslashreplace')
                 print(line)
         except KeyboardInterrupt:
-            if self._log:
-                self._log.info(' Exiting..')
+            self.verbose('', level=0, overwrite=True)  # newline after ^C
         except _mpytool.ConnError as err:
             if self._log:
                 self._log.error(err)
 
     def cmd_repl(self):
-        self.verbose("REPL", 1)
         self._mpy.comm.exit_raw_repl()
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
             return
-        print("Entering REPL mode, to exit press CTRL + ]")
+        self.verbose("REPL (Ctrl+] to exit)", 1)
         terminal = _terminal.Terminal(self._conn, self._log)
         terminal.run()
-        if self._log:
-            self._log.info(' Exiting..')
+        self._log.info('Exiting..')
 
     def cmd_exec(self, code):
         self.verbose(f"EXEC: {code}", 1)
@@ -591,7 +596,7 @@ class MpyTool():
         return f"{size:.0f} TB"
 
     def cmd_info(self):
-        self.verbose("info", 2)
+        self.verbose("INFO", 2)
         self._mpy.comm.exec("import sys, gc, os")
         platform = self._mpy.comm.exec_eval("repr(sys.platform)")
         version = self._mpy.comm.exec_eval("repr(sys.version)")
@@ -721,95 +726,11 @@ class MpyTool():
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
-            if self._log:
-                self._log.error(err)
-            else:
-                print(err)
+            self._log.error(err)
         try:
             self._mpy.comm.exit_raw_repl()
         except _mpytool.ConnError:
             pass  # connection already lost
-
-
-class SimpleColorLogger():
-    # ANSI color codes
-    _RESET = '\033[0m'
-    _BOLD_RED = '\033[1;31m'
-    _BOLD_YELLOW = '\033[1;33m'
-    _BOLD_MAGENTA = '\033[1;35m'
-    _BOLD_BLUE = '\033[1;34m'
-    _CLEAR_LINE = '\033[K'
-
-    # Progress bar characters
-    _BAR_FILLED = '█'
-    _BAR_EMPTY = '░'
-    _BAR_WIDTH = 30
-
-    def __init__(self, loglevel=1):
-        self._loglevel = loglevel
-        self._is_tty = (
-            _sys.stderr.isatty()
-            and _os.environ.get('NO_COLOR') is None
-            and _os.environ.get('TERM') != 'dumb'
-            and _os.environ.get('CI') is None
-        )
-        self._progress_shown = False
-
-    def log(self, msg):
-        if self._progress_shown:
-            print(f'\r{self._CLEAR_LINE}', end='', file=_sys.stderr)
-            self._progress_shown = False
-        print(msg, file=_sys.stderr)
-
-    def error(self, msg, *args):
-        if args:
-            msg = msg % args
-        if self._loglevel >= 1:
-            if self._is_tty:
-                self.log(f"{self._BOLD_RED}{msg}{self._RESET}")
-            else:
-                self.log(f"E: {msg}")
-
-    def warning(self, msg, *args):
-        if args:
-            msg = msg % args
-        if self._loglevel >= 2:
-            if self._is_tty:
-                self.log(f"{self._BOLD_YELLOW}{msg}{self._RESET}")
-            else:
-                self.log(f"W: {msg}")
-
-    def info(self, msg, *args):
-        if args:
-            msg = msg % args
-        if self._loglevel >= 3:
-            if self._is_tty:
-                self.log(f"{self._BOLD_MAGENTA}{msg}{self._RESET}")
-            else:
-                self.log(f"I: {msg}")
-
-    def debug(self, msg, *args):
-        if args:
-            msg = msg % args
-        if self._loglevel >= 4:
-            if self._is_tty:
-                self.log(f"{self._BOLD_BLUE}{msg}{self._RESET}")
-            else:
-                self.log(f"D: {msg}")
-
-    def progress(self, current, total, msg=''):
-        """Show progress bar (only on TTY)"""
-        if not self._is_tty or self._loglevel < 1:
-            return
-        percent = current * 100 // total if total > 0 else 0
-        filled = self._BAR_WIDTH * current // total if total > 0 else 0
-        bar = self._BAR_FILLED * filled + self._BAR_EMPTY * (self._BAR_WIDTH - filled)
-        line = f"\r{bar} {percent:3d}% {msg}"
-        print(line, end='', file=_sys.stderr, flush=True)
-        self._progress_shown = True
-        if current >= total:
-            print(file=_sys.stderr)  # newline at end
-            self._progress_shown = False
 
 
 if _about:
@@ -868,6 +789,7 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
             j += 1
         # Execute batch with combined count
         max_src_len = max(len(p) for p in all_paths) if all_paths else 0
+        mpy_tool.verbose("COPY", 1)
         mpy_tool.set_batch_progress(batch_total, max_src_len)
         for k in range(batch_start, j):
             mpy_tool.process_commands(command_groups[k])
@@ -906,7 +828,7 @@ def main():
     else:
         args.verbose = 1
 
-    log = SimpleColorLogger(args.debug + 1)
+    log = SimpleColorLogger(args.debug + 1, verbose_level=args.verbose)
     if args.port and args.address:
         log.error("You can select only serial port or network address")
         return
@@ -918,7 +840,7 @@ def main():
             return
         if len(ports) == 1:
             port = ports[0]
-            print(f"Using {port}", file=_sys.stderr)
+            log.verbose(f"Using {port}", level=1)
         else:
             log.error("Multiple serial ports found: %s. Use -p to specify one.", ", ".join(ports))
             return
@@ -932,16 +854,13 @@ def main():
     except _mpytool.ConnError as err:
         log.error(err)
         return
-    mpy_tool = MpyTool(
-        conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
+    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir)
     command_groups = _utils.split_commands(args.commands)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))
     except KeyboardInterrupt:
         # Clear partial progress line and show clean message
-        if _sys.stderr.isatty():
-            print('\r\033[K', end='', file=_sys.stderr)
-        print('Interrupted', file=_sys.stderr)
+        log.verbose('Interrupted', level=0, overwrite=True)
 
 
 if __name__ == '__main__':
