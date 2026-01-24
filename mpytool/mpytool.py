@@ -520,12 +520,12 @@ class MpyTool():
                 final_dest = dest_path + basename
             else:
                 final_dest = dest_path
-            self.verbose(f"mv: {src_path} -> {final_dest}", 2)
+            self.verbose(f"MV: {src_path} -> {final_dest}", 1)
             self._mpy.comm.exec(f"os.rename('{src_path}', '{final_dest}')")
 
     def cmd_mkdir(self, *dir_names):
         for dir_name in dir_names:
-            self.verbose(f"mkdir: {dir_name}", 2)
+            self.verbose(f"MKDIR: {dir_name}", 1)
             self._mpy.mkdir(dir_name)
 
     def cmd_delete(self, *file_names):
@@ -533,18 +533,18 @@ class MpyTool():
             contents_only = file_name.endswith('/')
             path = file_name.rstrip('/') or '/'
             if contents_only:
-                self.verbose(f"delete contents: {path}", 2)
+                self.verbose(f"DELETE contents: {path}", 1)
                 entries = self._mpy.ls(path)
                 for name, size in entries:
                     entry_path = path + '/' + name if path != '/' else '/' + name
-                    self.verbose(f"  {entry_path}", 2)
+                    self.verbose(f"  {entry_path}", 1)
                     self._mpy.delete(entry_path)
             else:
-                self.verbose(f"delete: {path}", 2)
+                self.verbose(f"DELETE: {path}", 1)
                 self._mpy.delete(path)
 
     def cmd_follow(self):
-        self.verbose("follow", 2)
+        self.verbose("FOLLOW (Ctrl+C to stop)", 1)
         try:
             while True:
                 line = self._conn.read_line()
@@ -558,7 +558,7 @@ class MpyTool():
                 self._log.error(err)
 
     def cmd_repl(self):
-        self.verbose("repl", 2)
+        self.verbose("REPL", 1)
         self._mpy.comm.exit_raw_repl()
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
@@ -570,7 +570,7 @@ class MpyTool():
             self._log.info(' Exiting..')
 
     def cmd_exec(self, code):
-        self.verbose(f"exec: {code}", 2)
+        self.verbose(f"EXEC: {code}", 1)
         result = self._mpy.comm.exec(code)
         if result:
             print(result.decode('utf-8', 'backslashreplace'), end='')
@@ -691,7 +691,7 @@ class MpyTool():
                     self.cmd_delete(*commands)
                     break
                 elif command == 'reset':
-                    self.verbose("reset", 2)
+                    self.verbose("RESET", 1)
                     self._mpy.comm.soft_reset()
                     self._mpy.reset_state()
                 elif command == 'follow':
