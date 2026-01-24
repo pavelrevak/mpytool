@@ -840,6 +840,41 @@ Use -- to separate multiple commands:
 """
 
 
+def _run_commands(mpy_tool, command_groups, with_progress=True):
+    """Execute command groups with optional batch progress tracking"""
+    if not with_progress:
+        for commands in command_groups:
+            mpy_tool.process_commands(commands)
+        return
+    # Pre-scan to identify consecutive copy command batches (for progress)
+    i = 0
+    while i < len(command_groups):
+        is_copy, count, paths = mpy_tool.count_files_for_command(command_groups[i])
+        if not is_copy:
+            mpy_tool.process_commands(command_groups[i])
+            i += 1
+            continue
+        # Collect consecutive copy commands into a batch
+        batch_total = count
+        all_paths = paths
+        batch_start = i
+        j = i + 1
+        while j < len(command_groups):
+            is_copy_j, count_j, paths_j = mpy_tool.count_files_for_command(command_groups[j])
+            if not is_copy_j:
+                break
+            batch_total += count_j
+            all_paths.extend(paths_j)
+            j += 1
+        # Execute batch with combined count
+        max_src_len = max(len(p) for p in all_paths) if all_paths else 0
+        mpy_tool.set_batch_progress(batch_total, max_src_len)
+        for k in range(batch_start, j):
+            mpy_tool.process_commands(command_groups[k])
+        mpy_tool.reset_batch_progress()
+        i = j
+
+
 def main():
     """Main"""
     _description = _about["Summary"] if _about else None
@@ -900,39 +935,13 @@ def main():
     mpy_tool = MpyTool(
         conn, log=log, verbose=args.verbose, exclude_dirs=args.exclude_dir)
     command_groups = _utils.split_commands(args.commands)
-    # Pre-scan to identify consecutive copy command batches (for progress)
-    if args.verbose >= 1:
-        i = 0
-        while i < len(command_groups):
-            is_copy, count, paths = mpy_tool.count_files_for_command(command_groups[i])
-            if is_copy:
-                # Start a batch - collect consecutive copy commands
-                batch_total = count
-                all_paths = paths
-                batch_start = i
-                j = i + 1
-                while j < len(command_groups):
-                    is_copy_j, count_j, paths_j = mpy_tool.count_files_for_command(command_groups[j])
-                    if is_copy_j:
-                        batch_total += count_j
-                        all_paths.extend(paths_j)
-                        j += 1
-                    else:
-                        break
-                # Calculate max source path length for alignment
-                max_src_len = max(len(p) for p in all_paths) if all_paths else 0
-                # Execute batch with combined count
-                mpy_tool.set_batch_progress(batch_total, max_src_len)
-                for k in range(batch_start, j):
-                    mpy_tool.process_commands(command_groups[k])
-                mpy_tool.reset_batch_progress()
-                i = j
-            else:
-                mpy_tool.process_commands(command_groups[i])
-                i += 1
-    else:
-        for commands in command_groups:
-            mpy_tool.process_commands(commands)
+    try:
+        _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))
+    except KeyboardInterrupt:
+        # Clear partial progress line and show clean message
+        if _sys.stderr.isatty():
+            print('\r\033[K', end='', file=_sys.stderr)
+        print('Interrupted', file=_sys.stderr)
 
 
 if __name__ == '__main__':
