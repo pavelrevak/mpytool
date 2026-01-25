@@ -2,9 +2,9 @@
 
 MPY tool - manage files on devices running MicroPython
 
-It is an alternative to [ampy](https://github.com/scientifichackers/ampy)
+It is an alternative to the official [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html) and [ampy](https://github.com/scientifichackers/ampy).
 
-Target of this project is to make more clean code, faster, better verbose output...
+Target of this project is cleaner code, better performance, and improved verbose output.
 
 ## Installation
 
@@ -120,10 +120,11 @@ show version:
 $ mpytool -V
 ```
 
-command aliases:
+Command aliases:
 - `dir` = `ls`
 - `cat` = `get`
 - `del`, `rm` = `delete`
+- `follow` = `monitor`
 
 ## Examples using API from Python
 
@@ -171,11 +172,11 @@ $ mpytool -q cp main.py :/
 - `-dd` print info messages (purple)
 - `-ddd` print debug messages (blue)
 
-for reporting bugs, please provide in to issue also -ddd messages
+For reporting bugs, please include `-ddd` output in the issue.
 
 ## MPYTOOL vs other tools
 
-Benchmark on RP2040 (Raspberry Pi Pico) over native USB, January 2025:
+Benchmark on RP2040 (Raspberry Pi Pico) over native USB, January 2026:
 
 | Test | mpytool | mpremote |
 |------|---------|----------|
@@ -263,7 +264,7 @@ Working only with MicroPython boards, not with CircuitPython
 
 ## Credits
 
-(c) 2022 by Pavel Revak
+(c) 2022-2026 by Pavel Revak
 
 ### License
 
