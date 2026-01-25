@@ -66,10 +66,10 @@ $ mpytool rm mydir/               # delete contents only, keep directory
 $ mpytool rm /                    # delete everything on device
 ```
 
-reset only, reset and follow output, REPL mode:
+reset only, reset and monitor output, REPL mode:
 ```
 $ mpytool -p /dev/ttyACM0 reset
-$ mpytool -p /dev/ttyACM0 reset follow
+$ mpytool -p /dev/ttyACM0 reset monitor
 $ mpytool -p /dev/ttyACM0 repl
 ```
 
@@ -92,7 +92,7 @@ Flash:       120 KB / 1.38 MB (8.52%)
 
 multiple commands separated by `--`:
 ```
-$ mpytool -p /dev/ttyACM0 put main.py / -- reset -- follow
+$ mpytool -p /dev/ttyACM0 put main.py / -- reset -- monitor
 $ mpytool -p /dev/ttyACM0 delete old.py -- put new.py / -- reset
 ```
 

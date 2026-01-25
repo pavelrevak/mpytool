@@ -595,8 +595,8 @@ class MpyTool():
                 self.verbose(f"DELETE: {path}", 1)
                 self._mpy.delete(path)
 
-    def cmd_follow(self):
-        self.verbose("FOLLOW (Ctrl+C to stop)", 1)
+    def cmd_monitor(self):
+        self.verbose("MONITOR (Ctrl+C to stop)", 1)
         try:
             while True:
                 line = self._conn.read_line()
@@ -743,8 +743,8 @@ class MpyTool():
                     self.verbose("RESET", 1)
                     self._mpy.comm.soft_reset()
                     self._mpy.reset_state()
-                elif command == 'follow':
-                    self.cmd_follow()
+                elif command in ('monitor', 'follow'):
+                    self.cmd_monitor()
                     break
                 elif command == 'repl':
                     self.cmd_repl()
@@ -792,7 +792,7 @@ List of available commands:
   mkdir {path} [...]            create directory (also create all parents)
   delete {path} [...]           remove file/dir (path/ = contents only)
   reset                         soft reset
-  follow                        print log of running program
+  monitor                       print output of running program
   repl                          enter REPL mode [UNIX OS ONLY]
   exec {code}                   execute Python code on device
   info                          show device information
@@ -800,8 +800,9 @@ Aliases:
   dir                           alias to ls
   cat                           alias to get
   del, rm                       alias to delete
+  follow                        alias to monitor
 Use -- to separate multiple commands:
-  mpytool put main.py / -- reset -- follow
+  mpytool put main.py / -- reset -- monitor
 """
 
 
