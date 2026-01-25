@@ -78,6 +78,9 @@ class SimpleColorLogger():
         """Print verbose message if verbose_level >= level"""
         if self._verbose_level < level:
             return
+        # Skip progress updates (overwrite without newline) in non-TTY mode
+        if overwrite and not self._is_tty and end != '\n':
+            return
         color_code = self.COLORS.get(color, self._BOLD_GREEN) if self._is_tty else ''
         reset_code = self._RESET if self._is_tty else ''
         clear = f'\r{self._CLEAR_LINE}' if self._is_tty and overwrite else ''
