@@ -2,7 +2,7 @@
 
 MPY tool - manage files on devices running MicroPython
 
-It is an alternative to the official [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html) and [ampy](https://github.com/scientifichackers/ampy).
+It is an alternative to the official [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html).
 
 Target of this project is cleaner code, better performance, and improved verbose output.
 
@@ -195,49 +195,44 @@ mpytool advantages:
 
 ## Shell Completion
 
-mpytool includes tab completion for ZSH and Bash with support for commands, options, and remote file paths on the device.
+Tab completion for ZSH and Bash with support for commands, options, and remote file paths on the device.
 
-### ZSH
+### ZSH (one-liner install)
 
-Testing (current session):
 ```bash
-source /path/to/mpytool/completions/_mpytool
-compdef _mpytool mpytool
+mkdir -p ~/.zsh/completions && curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/_mpytool -o ~/.zsh/completions/_mpytool && echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc && exec zsh
 ```
 
-Permanent installation:
+Or step by step:
 ```bash
-# Create completions directory
+# Download completion file
 mkdir -p ~/.zsh/completions
+curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/_mpytool -o ~/.zsh/completions/_mpytool
 
-# Symlink completion file
-ln -s /path/to/mpytool/completions/_mpytool ~/.zsh/completions/_mpytool
-
-# Add to ~/.zshrc (BEFORE any compinit line):
-fpath=(~/.zsh/completions $fpath)
-autoload -Uz compinit && compinit
+# Add to ~/.zshrc (if not already there)
+echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc
 
 # Restart shell
 exec zsh
 ```
 
-### Bash
+### Bash (one-liner install)
 
-Testing (current session):
+Linux:
 ```bash
-source /path/to/mpytool/completions/mpytool.bash
+sudo curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o /etc/bash_completion.d/mpytool && exec bash
 ```
 
-Permanent installation:
+macOS (Homebrew):
 ```bash
-# Option 1: Add to ~/.bashrc
-echo 'source /path/to/mpytool/completions/mpytool.bash' >> ~/.bashrc
+curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o /usr/local/etc/bash_completion.d/mpytool && exec bash
+```
 
-# Option 2: Copy to system completions directory
-# Linux:
-sudo cp /path/to/mpytool/completions/mpytool.bash /etc/bash_completion.d/mpytool
-# macOS with Homebrew:
-cp /path/to/mpytool/completions/mpytool.bash /usr/local/etc/bash_completion.d/mpytool
+Or manually to home directory:
+```bash
+curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o ~/.mpytool-completion.bash
+echo 'source ~/.mpytool-completion.bash' >> ~/.bashrc
+exec bash
 ```
 
 ### Features
