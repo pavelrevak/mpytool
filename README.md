@@ -117,8 +117,15 @@ Platform:    rp2
 Version:     3.4.0; MicroPython v1.27.0 on 2025-12-09
 Impl:        micropython
 Machine:     Raspberry Pi Pico with RP2040
+Serial:      e660123456789abc
 Memory:      36.4 KB / 240 KB (15.15%)
 Flash:       120 KB / 1.38 MB (8.52%)
+```
+
+On devices with WiFi or Ethernet, MAC addresses are also shown:
+```
+MAC WiFi:    aa:bb:cc:dd:ee:01
+MAC WiFi AP: aa:bb:cc:dd:ee:02
 ```
 
 multiple commands separated by `--`:
