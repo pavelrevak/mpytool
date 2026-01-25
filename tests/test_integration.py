@@ -25,7 +25,7 @@ class TestDeviceConnection(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
 
     @classmethod
@@ -53,7 +53,7 @@ class TestFileOperations(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
 
     @classmethod
@@ -137,7 +137,7 @@ class TestExec(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
 
     @classmethod
@@ -180,7 +180,7 @@ class TestReplRecovery(unittest.TestCase):
         from mpytool import ConnSerial, Mpy
 
         # First connection - enter raw REPL and disconnect without exiting
-        conn1 = ConnSerial(port=DEVICE_PORT)
+        conn1 = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         mpy1 = Mpy(conn1)
         mpy1.comm.enter_raw_repl()
         self.assertTrue(mpy1.comm._repl_mode)
@@ -191,7 +191,7 @@ class TestReplRecovery(unittest.TestCase):
         del conn1
 
         # Second connection - device is still in raw REPL mode
-        conn2 = ConnSerial(port=DEVICE_PORT)
+        conn2 = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         mpy2 = Mpy(conn2)
 
         # This should recover and work
@@ -210,7 +210,7 @@ class TestDeviceInfo(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
 
     @classmethod
@@ -250,7 +250,7 @@ class TestCpCommand(unittest.TestCase):
         import shutil
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn)
         # Setup local test directory
@@ -363,7 +363,7 @@ class TestMvCommand(unittest.TestCase):
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn)
         try:
@@ -422,7 +422,7 @@ class TestDeleteCommand(unittest.TestCase):
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn)
 
@@ -490,7 +490,7 @@ class TestSkipUnchangedFiles(unittest.TestCase):
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
-        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn, force=False)
         cls.tool_force = MpyTool(cls.conn, force=True)
