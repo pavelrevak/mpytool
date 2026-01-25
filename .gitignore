@@ -4,3 +4,4 @@ dist
 *.egg-info
 *.md
 !README*.md
+scripts/

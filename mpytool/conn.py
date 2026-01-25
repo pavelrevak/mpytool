@@ -38,9 +38,13 @@ class Conn():
         """Write data to device, return bytes written (must be implemented by subclass)"""
         raise NotImplementedError
 
-    def _read_to_buffer(self):
-        """Read available data into buffer"""
-        if self._has_data():
+    def _read_to_buffer(self, wait_timeout=0):
+        """Read available data into buffer
+
+        Arguments:
+            wait_timeout: how long to wait for data (0 = non-blocking)
+        """
+        if self._has_data(wait_timeout):
             data = self._read_available()
             if data:
                 self._buffer += data
@@ -59,16 +63,13 @@ class Conn():
             return self._read_available()
         return None
 
-    def write(self, data, chunk_size=128, delay=0.01):
-        """Write data to device in chunks"""
+    def write(self, data):
+        """Write data to device"""
         if self._log:
             self._log.debug("wr: %s", bytes(data))
         while data:
-            chunk = data[:chunk_size]
-            count = self._write_raw(chunk)
+            count = self._write_raw(data)
             data = data[count:]
-            if data:
-                _time.sleep(delay)
 
     def read_until(self, end, timeout=1):
         """Read until end marker is found"""
@@ -76,7 +77,8 @@ class Conn():
             self._log.debug("wait for %s", end)
         start_time = _time.time()
         while True:
-            if self._read_to_buffer():
+            # Use select() with 1ms timeout instead of sleep - wakes immediately on data
+            if self._read_to_buffer(wait_timeout=0.001):
                 start_time = _time.time()  # reset timeout on data received
             if end in self._buffer:
                 break
@@ -85,7 +87,6 @@ class Conn():
                     raise Timeout(
                         f"During timeout received: {bytes(self._buffer)}")
                 raise Timeout("No data received")
-            _time.sleep(.01)
         index = self._buffer.index(end)
         data = self._buffer[:index]
         del self._buffer[:index + len(end)]
