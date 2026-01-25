@@ -478,5 +478,74 @@ class TestDeleteCommand(unittest.TestCase):
         self.assertEqual(self.mpy.ls(subdir), [])
 
 
+@requires_device
+class TestSkipUnchangedFiles(unittest.TestCase):
+    """Test skip unchanged files feature"""
+
+    TEST_DIR = "/_mpytool_skip_test"
+    TEST_FILE = "/_mpytool_skip_test/test.txt"
+    TEST_CONTENT = b"test content for hash check"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn, force=False)
+        cls.tool_force = MpyTool(cls.conn, force=True)
+        # Setup test directory
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_hashfile(self):
+        """Test hashfile method returns correct SHA256"""
+        import hashlib
+        self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
+        remote_hash = self.mpy.hashfile(self.TEST_FILE)
+        local_hash = hashlib.sha256(self.TEST_CONTENT).digest()
+        self.assertEqual(remote_hash, local_hash)
+
+    def test_02_file_needs_update_same(self):
+        """Test _file_needs_update returns False for identical file"""
+        self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
+        needs_update = self.tool._file_needs_update(self.TEST_CONTENT, self.TEST_FILE)
+        self.assertFalse(needs_update)
+
+    def test_03_file_needs_update_different_size(self):
+        """Test _file_needs_update returns True for different size"""
+        self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
+        different_content = b"different"
+        needs_update = self.tool._file_needs_update(different_content, self.TEST_FILE)
+        self.assertTrue(needs_update)
+
+    def test_04_file_needs_update_different_content(self):
+        """Test _file_needs_update returns True for same size but different content"""
+        self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
+        # Same length, different content
+        different_content = b"X" * len(self.TEST_CONTENT)
+        needs_update = self.tool._file_needs_update(different_content, self.TEST_FILE)
+        self.assertTrue(needs_update)
+
+    def test_05_file_needs_update_nonexistent(self):
+        """Test _file_needs_update returns True for nonexistent file"""
+        needs_update = self.tool._file_needs_update(b"test", self.TEST_DIR + "/nonexistent.txt")
+        self.assertTrue(needs_update)
+
+    def test_06_force_flag(self):
+        """Test force flag bypasses check"""
+        self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
+        # With force=True, should always return True
+        needs_update = self.tool_force._file_needs_update(self.TEST_CONTENT, self.TEST_FILE)
+        self.assertTrue(needs_update)
+
+
 if __name__ == "__main__":
     unittest.main()

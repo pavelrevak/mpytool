@@ -3,6 +3,7 @@
 import os as _os
 import sys as _sys
 import argparse as _argparse
+import hashlib as _hashlib
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.utils as _utils
@@ -25,7 +26,7 @@ class MpyTool():
     TEE = '├─ '
     LAST = '└─ '
 
-    def __init__(self, conn, log=None, verbose=None, exclude_dirs=None):
+    def __init__(self, conn, log=None, verbose=None, exclude_dirs=None, force=False):
         self._conn = conn
         self._log = log if log is not None else SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
@@ -33,6 +34,7 @@ class MpyTool():
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
         self._mpy = _mpytool.Mpy(conn, log=self._log)
+        self._force = force  # Skip unchanged file check
         # Progress tracking
         self._progress_total_files = 0
         self._progress_current_file = 0
@@ -41,6 +43,7 @@ class MpyTool():
         self._progress_max_src_len = 0
         self._is_debug = getattr(self._log, '_loglevel', 1) >= 4
         self._batch_mode = False
+        self._skipped_files = 0
 
     @property
     def _is_tty(self):
@@ -130,6 +133,27 @@ class MpyTool():
             dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
             count += len(files)
         return count
+
+    def _file_needs_update(self, local_data, remote_path):
+        """Check if local file differs from remote file
+
+        Returns True if file needs to be uploaded (different or doesn't exist)
+        """
+        if self._force:
+            return True
+        # Check remote file size first (fast)
+        remote_size = self._mpy.stat(remote_path)
+        if remote_size is None or remote_size < 0:
+            return True  # File doesn't exist or is a directory
+        local_size = len(local_data)
+        if local_size != remote_size:
+            return True  # Different size
+        # Sizes match - check hash
+        local_hash = _hashlib.sha256(local_data).digest()
+        remote_hash = self._mpy.hashfile(remote_path)
+        if remote_hash is None:
+            return True  # hashlib not available on device
+        return local_hash != remote_hash
 
     def _count_remote_files(self, path):
         """Count files on device"""
@@ -308,35 +332,55 @@ class MpyTool():
                 dpath = _os.path.join(rel_path, file_name)
                 with open(spath, 'rb') as src_file:
                     data = src_file.read()
+                # Check if file needs update
+                if not self._file_needs_update(data, dpath):
+                    self._skipped_files += 1
                     if show_progress and self._verbose >= 1:
                         self._progress_current_file += 1
                         self._set_progress_info(spath, dpath, False, True)
-                        self._mpy.put(data, dpath, self._progress_callback)
-                        self._progress_complete(len(data))
-                    else:
-                        self._mpy.put(data, dpath)
+                        self.verbose(f"  skip {self._progress_src} (unchanged)", color='yellow')
+                    continue
+                if show_progress and self._verbose >= 1:
+                    self._progress_current_file += 1
+                    self._set_progress_info(spath, dpath, False, True)
+                    self._mpy.put(data, dpath, self._progress_callback)
+                    self._progress_complete(len(data))
+                else:
+                    self._mpy.put(data, dpath)
 
     def _put_file(self, src_path, dst_path, show_progress=True):
         basename = _os.path.basename(src_path)
         if basename and not _os.path.basename(dst_path):
             dst_path = _os.path.join(dst_path, basename)
         self.verbose(f"PUT FILE: {src_path} -> {dst_path}", 2)
-        path = _os.path.dirname(dst_path)
-        result = self._mpy.stat(path)
-        if result is None:
-            self._mpy.mkdir(path)
-        elif result >= 0:
-            raise _mpytool.MpyError(
-                f'Error creating file under file: {path}')
+        # Read local file
         with open(src_path, 'rb') as src_file:
             data = src_file.read()
+        # Check if file needs update
+        if not self._file_needs_update(data, dst_path):
+            self._skipped_files += 1
             if show_progress and self._verbose >= 1:
                 self._progress_current_file += 1
                 self._set_progress_info(src_path, dst_path, False, True)
-                self._mpy.put(data, dst_path, self._progress_callback)
-                self._progress_complete(len(data))
-            else:
-                self._mpy.put(data, dst_path)
+                self.verbose(f"  skip {self._progress_src} (unchanged)", color='yellow')
+            return
+        # Create parent directory if needed
+        path = _os.path.dirname(dst_path)
+        if path:
+            result = self._mpy.stat(path)
+            if result is None:
+                self._mpy.mkdir(path)
+            elif result >= 0:
+                raise _mpytool.MpyError(
+                    f'Error creating file under file: {path}')
+        # Upload file
+        if show_progress and self._verbose >= 1:
+            self._progress_current_file += 1
+            self._set_progress_info(src_path, dst_path, False, True)
+            self._mpy.put(data, dst_path, self._progress_callback)
+            self._progress_complete(len(data))
+        else:
+            self._mpy.put(data, dst_path)
 
     def cmd_put(self, src_path, dst_path):
         if self._verbose >= 1 and not self._batch_mode:
@@ -816,6 +860,8 @@ def main():
     parser.add_argument(
         '-q', '--quiet', action='store_true', help='quiet mode (no progress)')
     parser.add_argument(
+        '-f', '--force', action='store_true', help='force copy even if unchanged')
+    parser.add_argument(
         "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
         'by default are excluded directories: __pycache__, .git, .svn')
     parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
@@ -854,7 +900,7 @@ def main():
     except _mpytool.ConnError as err:
         log.error(err)
         return
-    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir)
+    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir, force=args.force)
     command_groups = _utils.split_commands(args.commands)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))

@@ -39,7 +39,11 @@ $ mpytool cp myapp/ :/lib/          # upload directory into /lib/
 $ mpytool cp :/main.py ./           # download file to current directory
 $ mpytool cp :/ ./backup/           # download entire device to backup/
 $ mpytool cp :/old.py :/new.py      # copy file on device
+$ mpytool cp -f main.py :/          # force upload even if unchanged
 ```
+
+Unchanged files are automatically skipped (compares size and SHA256 hash).
+Use `-f` or `--force` to upload all files regardless.
 
 move/rename on device:
 ```

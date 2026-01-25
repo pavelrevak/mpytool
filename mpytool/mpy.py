@@ -96,6 +96,18 @@ def _mpytool_rmdir(path):
         elif attr == {_ATTR_DIR}:
             _mpytool_rmdir(path + '/' + name)
     os.rmdir(path)
+""",
+        'hashfile': """
+def _mpytool_hashfile(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(512)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.digest()
 """}
 
     def __init__(self, conn, log=None):
@@ -257,6 +269,21 @@ def _mpytool_rmdir(path):
         """
         self.import_module('os')
         self._mpy_comm.exec(f"os.rename('{_escape_path(src)}', '{_escape_path(dst)}')")
+
+    def hashfile(self, path):
+        """Compute SHA256 hash of file
+
+        Arguments:
+            path: file path
+
+        Returns:
+            bytes with SHA256 hash (32 bytes) or None if hashlib not available
+        """
+        self.load_helper('hashfile')
+        try:
+            return self._mpy_comm.exec_eval(f"_mpytool_hashfile('{_escape_path(path)}')")
+        except _mpy_comm.CmdError:
+            return None
 
     def get(self, path, progress_callback=None):
         """Read file
