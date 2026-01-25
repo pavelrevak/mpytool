@@ -639,6 +639,28 @@ class MpyTool():
                 return f"{size:.0f} {unit}"
         return f"{size:.0f} TB"
 
+    def cmd_paths(self, dir_name='.'):
+        """Print all paths (for shell completion) - undocumented"""
+        tree = self._mpy.tree(dir_name)
+        self._print_paths(tree, '')
+
+    def _print_paths(self, entry, prefix):
+        """Recursively print paths from tree structure"""
+        name, size, children = entry
+        if name in ('.', './'):
+            path = ''
+        else:
+            path = prefix + name
+        if children is None:
+            # File
+            print(path)
+        else:
+            # Directory
+            if path:
+                print(path + '/')
+            for child in children:
+                self._print_paths(child, path + '/' if path else '')
+
     def cmd_info(self):
         self.verbose("INFO", 2)
         self._mpy.comm.exec("import sys, gc, os")
@@ -767,6 +789,12 @@ class MpyTool():
                         self.cmd_mv(*commands)
                         break
                     raise ParamsError('mv requires source and destination')
+                elif command == '_paths':
+                    # Undocumented: for shell completion
+                    if commands:
+                        self.cmd_paths(commands.pop(0))
+                    else:
+                        self.cmd_paths()
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:

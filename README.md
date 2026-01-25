@@ -192,6 +192,62 @@ mpytool advantages:
 - Single tool for all operations (no need to chain commands)
 - Clean verbose output (`-v`) for debugging
 
+## Shell Completion
+
+mpytool includes tab completion for ZSH and Bash with support for commands, options, and remote file paths on the device.
+
+### ZSH
+
+Testing (current session):
+```bash
+source /path/to/mpytool/completions/_mpytool
+compdef _mpytool mpytool
+```
+
+Permanent installation:
+```bash
+# Create completions directory
+mkdir -p ~/.zsh/completions
+
+# Symlink completion file
+ln -s /path/to/mpytool/completions/_mpytool ~/.zsh/completions/_mpytool
+
+# Add to ~/.zshrc (BEFORE any compinit line):
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+
+# Restart shell
+exec zsh
+```
+
+### Bash
+
+Testing (current session):
+```bash
+source /path/to/mpytool/completions/mpytool.bash
+```
+
+Permanent installation:
+```bash
+# Option 1: Add to ~/.bashrc
+echo 'source /path/to/mpytool/completions/mpytool.bash' >> ~/.bashrc
+
+# Option 2: Copy to system completions directory
+# Linux:
+sudo cp /path/to/mpytool/completions/mpytool.bash /etc/bash_completion.d/mpytool
+# macOS with Homebrew:
+cp /path/to/mpytool/completions/mpytool.bash /usr/local/etc/bash_completion.d/mpytool
+```
+
+### Features
+
+- Tab completion for all commands and aliases
+- Remote file/directory completion (cached for 60 seconds)
+- Support for `--` command separator
+- Works with both relative and absolute paths
+
+Clear cache: `_mpytool_clear_cache`
+
 ## Requirements
 
 Working only with MicroPython boards, not with CircuitPython

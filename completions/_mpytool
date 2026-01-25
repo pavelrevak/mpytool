@@ -1,0 +1,280 @@
+#compdef mpytool
+
+# ZSH completion for mpytool
+# Install: copy to ~/.zsh/completions/_mpytool and add to fpath
+
+# Cache for remote files (per port)
+typeset -gA _mpytool_cache
+typeset -gA _mpytool_cache_time
+
+_mpytool_commands() {
+    local -a commands=(
+        'ls:list files on device'
+        'dir:alias for ls'
+        'tree:show directory tree'
+        'get:download files from device'
+        'cat:alias for get'
+        'put:upload files to device'
+        'cp:copy files (use : prefix for device paths)'
+        'mv:move/rename files on device'
+        'mkdir:create directory on device'
+        'delete:delete files on device'
+        'del:alias for delete'
+        'rm:alias for delete'
+        'monitor:monitor device output (Ctrl+C to exit)'
+        'follow:alias for monitor'
+        'repl:interactive REPL session'
+        'exec:execute Python code on device'
+        'reset:soft reset device'
+        'info:show device information'
+    )
+    _describe -t commands 'mpytool command' commands
+}
+
+_mpytool_get_port() {
+    # Try to get port from command line arguments
+    local port=""
+    local i
+    for ((i=1; i < ${#words[@]}; i++)); do
+        if [[ "${words[i]}" == "-p" || "${words[i]}" == "--port" ]]; then
+            port="${words[i+1]}"
+            break
+        fi
+    done
+
+    # If no port specified, try auto-detect
+    if [[ -z "$port" ]]; then
+        # Simple auto-detect: first /dev/tty.usb* or /dev/ttyACM* or /dev/ttyUSB*
+        for p in /dev/tty.usbmodem* /dev/tty.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
+            if [[ -e "$p" ]]; then
+                port="$p"
+                break
+            fi
+        done
+    fi
+    echo "$port"
+}
+
+_mpytool_fetch_paths() {
+    # Fetch and cache paths, returns via $_mpytool_cached_files array
+    local port=$(_mpytool_get_port)
+    [[ -z "$port" || ! -e "$port" ]] && return 1
+
+    local cache_key="${port//\//_}"
+    local now=$(date +%s)
+    local cache_age=$((now - ${_mpytool_cache_time[$cache_key]:-0}))
+
+    # Use cache if less than 60 seconds old
+    if [[ $cache_age -lt 60 && -n "${_mpytool_cache[$cache_key]}" ]]; then
+        _mpytool_cached_files=(${(f)_mpytool_cache[$cache_key]})
+        return 0
+    fi
+
+    # Fetch file list from device using _paths command
+    local output
+    output=$(mpytool -p "$port" _paths 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    # Split output into array (one path per line)
+    _mpytool_cached_files=("${(@f)output}")
+
+    # Cache results
+    _mpytool_cache[$cache_key]="${(F)_mpytool_cached_files}"
+    _mpytool_cache_time[$cache_key]=$now
+    return 0
+}
+
+_mpytool_complete_remote() {
+    # $1 = colon prefix (":" or "")
+    local colon_prefix="$1"
+    local -a _mpytool_cached_files=()
+    _mpytool_fetch_paths || return 1
+
+    local cur="${words[CURRENT]}"
+    # Remove leading : for processing
+    cur="${cur#:}"
+
+    local prefix=""
+    local filter=""
+
+    # Handle absolute vs relative paths
+    if [[ "$cur" == "/"* ]]; then
+        prefix="/"
+        filter="${cur#/}"
+    else
+        filter="$cur"
+    fi
+
+    # Extract directory part (everything up to and including last /)
+    local dir_part=""
+    if [[ "$filter" == */* ]]; then
+        dir_part="${filter%/*}/"
+    fi
+
+    # Filter and show only direct children of current directory
+    local -a matches=()
+    local f child
+    for f in "${_mpytool_cached_files[@]}"; do
+        # Check if file is in the target directory
+        if [[ -n "$dir_part" ]]; then
+            [[ "$f" != "$dir_part"* ]] && continue
+            child="${f#$dir_part}"
+        else
+            child="$f"
+        fi
+
+        # If child contains /, show parent dir instead
+        if [[ "$child" == */* ]]; then
+            child="${child%%/*}/"
+        fi
+
+        local full="${prefix}${dir_part}${child}"
+
+        # Avoid duplicates
+        if [[ ! " ${matches[*]} " =~ " ${full} " ]]; then
+            matches+=("$full")
+        fi
+    done
+
+    # Add with appropriate suffix (none for dirs, space for files)
+    local -a dirs=() files=()
+    for f in "${matches[@]}"; do
+        if [[ "$f" == */ ]]; then
+            dirs+=("$f")
+        else
+            files+=("$f")
+        fi
+    done
+
+    if [[ -n "$colon_prefix" ]]; then
+        [[ ${#dirs[@]} -gt 0 ]] && compadd -p ':' -S '' -a dirs
+        [[ ${#files[@]} -gt 0 ]] && compadd -p ':' -a files
+    else
+        [[ ${#dirs[@]} -gt 0 ]] && compadd -S '' -a dirs
+        [[ ${#files[@]} -gt 0 ]] && compadd -a files
+    fi
+}
+
+_mpytool_remote_files() {
+    _mpytool_complete_remote ':'
+}
+
+_mpytool_remote_files_no_prefix() {
+    _mpytool_complete_remote ''
+}
+
+_mpytool_clear_cache() {
+    # Call this to clear the remote file cache
+    _mpytool_cache=()
+    _mpytool_cache_time=()
+}
+
+_mpytool() {
+    local curcontext="$curcontext" state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '-V[show version]' \
+        '--version[show version]' \
+        '-p[serial port]:port:_files -g "/dev/tty*"' \
+        '--port[serial port]:port:_files -g "/dev/tty*"' \
+        '-a[network address]:address:' \
+        '--address[network address]:address:' \
+        '-b[baud rate]:baud:(9600 19200 38400 57600 115200 230400 460800 921600)' \
+        '--baud[baud rate]:baud:(9600 19200 38400 57600 115200 230400 460800 921600)' \
+        '-d[debug level]' \
+        '--debug[debug level]' \
+        '-v[verbose output]' \
+        '--verbose[verbose output]' \
+        '-q[quiet mode]' \
+        '--quiet[quiet mode]' \
+        '-f[force copy]' \
+        '--force[force copy]' \
+        '-e[exclude directory]:dir:_files -/' \
+        '--exclude-dir[exclude directory]:dir:_files -/' \
+        '*::command:->commands'
+
+    case "$state" in
+        commands)
+            # Find the last -- separator and work relative to it
+            local cmd_start=1
+            local i
+            for ((i=1; i < CURRENT; i++)); do
+                if [[ "${words[i]}" == "--" ]]; then
+                    cmd_start=$((i + 1))
+                fi
+            done
+
+            local cmd="${words[cmd_start]}"
+            local pos=$((CURRENT - cmd_start + 1))
+
+            # If at command position (right after -- or at start), complete commands
+            if [[ $CURRENT -eq $cmd_start ]]; then
+                _mpytool_commands
+                return
+            fi
+
+            # If current word is --, offer commands for next position
+            if [[ "${words[CURRENT]}" == "--" ]]; then
+                return
+            fi
+
+            # Command-specific completions (pos is position within current command group)
+            case "$cmd" in
+                ls|dir|tree|mkdir|delete|del|rm|get|cat)
+                    # These work directly on device (no : prefix)
+                    _mpytool_remote_files_no_prefix
+                    ;;
+                put)
+                    # put: first arg is local, second is remote (no : prefix)
+                    if [[ $pos -eq 2 ]]; then
+                        _files
+                    else
+                        _mpytool_remote_files_no_prefix
+                    fi
+                    ;;
+                cp)
+                    # cp: either arg can be local or remote (: prefix for device)
+                    if [[ "$words[CURRENT]" == :* ]]; then
+                        _mpytool_remote_files
+                    else
+                        _files
+                        compadd -S '' ':'
+                    fi
+                    ;;
+                mv)
+                    # mv: both args are remote (: prefix required)
+                    if [[ "$words[CURRENT]" == :* ]]; then
+                        _mpytool_remote_files
+                    else
+                        compadd -S '' ':'
+                    fi
+                    ;;
+                exec)
+                    # exec takes Python code, no completion
+                    ;;
+                repl|monitor|follow|reset|info)
+                    # No arguments
+                    ;;
+                --)
+                    # After --, complete commands
+                    _mpytool_commands
+                    ;;
+                *)
+                    # Unknown command or first position
+                    _mpytool_commands
+                    ;;
+            esac
+
+            # Always offer -- to chain commands
+            compadd -- '--'
+            ;;
+    esac
+}
+
+# Only run if called as completion (not when sourced)
+if [[ -n "$compstate" ]]; then
+    _mpytool "$@"
+fi
