@@ -255,9 +255,9 @@ class MpyTool():
         result = self._mpy.ls(dir_name)
         for name, size in result:
             if size is not None:
-                print(f'{size:8d} {name}')
+                print(f'{self.format_size(size):>9} {name}')
             else:
-                print(f'{"":8} {name}/')
+                print(f'{"":9} {name}/')
 
     @classmethod
     def print_tree(cls, tree, prefix='', print_size=True, first=True, last=True):
@@ -275,7 +275,7 @@ class MpyTool():
             sufix = '/'
         line = ''
         if print_size:
-            line += f'{size:8d} '
+            line += f'{cls.format_size(size):>9} '
         line += prefix + this_prefix + name + sufix
         print(line)
         if not sub_tree:
@@ -626,16 +626,16 @@ class MpyTool():
 
     @staticmethod
     def format_size(size):
-        """Format size in bytes to human readable format with 3+ digits"""
-        if size < 1000:
-            return f"{size} B"
+        """Format size in bytes to human readable format with 3-4 digits"""
+        if size < 1024:
+            return f"{size}  B"
         for unit in ('KB', 'MB', 'GB', 'TB'):
             size /= 1024
             if size < 10:
                 return f"{size:.2f} {unit}"
             if size < 100:
                 return f"{size:.1f} {unit}"
-            if size < 1000 or unit == 'TB':
+            if size < 1024 or unit == 'TB':
                 return f"{size:.0f} {unit}"
         return f"{size:.0f} TB"
 

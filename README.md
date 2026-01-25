@@ -130,16 +130,55 @@ MAC WiFi AP: aa:bb:cc:dd:ee:02
 
 multiple commands separated by `--`:
 ```
-$ mpytool -p /dev/ttyACM0 put main.py / -- reset -- monitor
-$ mpytool -p /dev/ttyACM0 delete old.py -- put new.py / -- reset
+$ mpytool cp main.py boot.py :/ -- reset -- monitor
+$ mpytool delete old.py -- cp new.py :/ -- reset
 ```
 
 auto-detect serial port (if only one device is connected):
 ```
-$ mpytool ls
-Using /dev/ttyACM0
-       215 boot.py
-      2938 net.py
+$ mpytool ls lib/
+Using /dev/tty.usbmodem1101
+          uhttp/
+  23.2 KB wlan.py
+  4.95 KB wlan_http.py
+```
+
+tree view:
+```
+$ mpytool tree
+Using /dev/tty.usbmodem1101
+   142 KB ./
+  41.3 KB ├─ html/
+    587 B │  ├─ index.html
+  40.8 KB │  └─ wlan.html
+  97.7 KB ├─ lib/
+  69.6 KB │  ├─ uhttp/
+     93 B │  │  ├─ __init__.py
+  26.3 KB │  │  ├─ client.py
+  43.2 KB │  │  └─ server.py
+  23.2 KB │  ├─ wlan.py
+  4.95 KB │  └─ wlan_http.py
+     23 B ├─ boot.py
+  3.03 KB └─ main.py
+```
+
+tree view:
+```
+$ mpytool tree
+Using /dev/tty.usbmodem11101
+  150852 ./
+   42342 ├─ html/
+     587 │  ├─ index.html
+   41755 │  └─ wlan.html
+  100059 ├─ lib/
+   71267 │  ├─ uhttp/
+      93 │  │  ├─ __init__.py
+   26963 │  │  ├─ client.py
+   44211 │  │  └─ server.py
+   23726 │  ├─ wlan.py
+    5066 │  └─ wlan_http.py
+      29 ├─ boot.py
+    3102 └─ main.py
 ```
 
 connect over network (TCP, default port 23):
