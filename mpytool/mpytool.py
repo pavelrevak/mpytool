@@ -529,7 +529,7 @@ class MpyTool():
             else:
                 final_dest = dest_path
             self.verbose(f"MV: {src_path} -> {final_dest}", 1)
-            self._mpy.comm.exec(f"os.rename('{src_path}', '{final_dest}')")
+            self._mpy.rename(src_path, final_dest)
 
     def cmd_mkdir(self, *dir_names):
         for dir_name in dir_names:

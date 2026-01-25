@@ -171,14 +171,19 @@ for reporting bugs, please provide in to issue also -ddd messages
 
 ## MPYTOOL vs other tools
 
-for test used: ESP32S2 over USB 2MB RAM and 4MB FLASH:
+Benchmark on RP2040 (Raspberry Pi Pico) over USB, January 2025:
 
-recursive put of 30 files in 4 folders, 70KB total:
+| Test | mpytool | mpremote | rshell |
+|------|---------|----------|--------|
+| 30 files in 4 dirs (70KB) | 10.2s | 7.8s | 80s |
+| 50 small files (50KB) | 9.6s | 9.2s | 81s |
+| 5 large files (250KB) | 32.8s | 17.7s | 340s |
 
-- mpytool: 12.3s
-- mpremote: 16.5s
-- ampy: 79.3s
-- rshell: 81.1s
+mpremote (official MicroPython tool) is faster for raw transfers. mpytool advantages:
+- Simple `:` prefix syntax for device paths (`cp file.py :/`)
+- Progress indicator with file counts (`[3/10] 50% file.py -> :/lib/`)
+- Single tool for all operations (no need to chain commands)
+- Clean verbose output (`-v`) for debugging
 
 ## Requirements
 

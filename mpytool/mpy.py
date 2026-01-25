@@ -248,6 +248,16 @@ def _mpytool_rmdir(path):
         else:
             self._mpy_comm.exec(f"os.remove('{_escape_path(path)}')")
 
+    def rename(self, src, dst):
+        """Rename/move file or directory
+
+        Arguments:
+            src: source path
+            dst: destination path
+        """
+        self.import_module('os')
+        self._mpy_comm.exec(f"os.rename('{_escape_path(src)}', '{_escape_path(dst)}')")
+
     def get(self, path, progress_callback=None):
         """Read file
 
