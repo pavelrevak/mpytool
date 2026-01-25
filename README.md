@@ -175,17 +175,19 @@ for reporting bugs, please provide in to issue also -ddd messages
 
 ## MPYTOOL vs other tools
 
-Benchmark on RP2040 (Raspberry Pi Pico) over USB, January 2025:
+Benchmark on RP2040 (Raspberry Pi Pico) over native USB, January 2025:
 
-| Test | mpytool | mpremote | rshell |
-|------|---------|----------|--------|
-| 30 files in 4 dirs (70KB) | **3.2s** | 7.8s | 80s |
-| 50 small files (50KB) | **3.9s** | 9.2s | 81s |
-| 5 large files (250KB) | **8.0s** | 17.7s | 340s |
+| Test | mpytool | mpremote |
+|------|---------|----------|
+| 50 small files, 5 dirs (200KB) | **4.2s** | 9.4s |
+| 5 large files (260KB) | **8.0s** | 17.3s |
+| re-upload unchanged files | **1.3s** | 5.0s |
+
+mpytool is **2x faster** for uploads and **4x faster** for re-uploads (skips unchanged files).
 
 mpytool advantages:
-- Fastest file transfers (2-4x faster than mpremote)
-- Simple `:` prefix syntax for device paths (`cp file.py :/`)
+- Fastest file transfers (2x faster than mpremote)
+- Skip unchanged files (compares size + SHA256 hash)
 - Progress indicator with file counts (`[3/10] 50% file.py -> :/lib/`)
 - Single tool for all operations (no need to chain commands)
 - Clean verbose output (`-v`) for debugging
@@ -201,7 +203,7 @@ Working only with MicroPython boards, not with CircuitPython
 
 - Linux
 - MacOS
-- Windows (REPL mode is disabled)
+- Windows (limited support - REPL mode is disabled)
 
 ## Credits
 

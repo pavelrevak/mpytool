@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mpytool"
-version = "1.2.0"
+version = "2.0.0"
 description = "MPY tool - manage files on devices running MicroPython"
 readme = "README.md"
 license = "MIT"
