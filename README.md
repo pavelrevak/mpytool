@@ -251,21 +251,35 @@ $ mpytool -q cp main.py :/
 
 For reporting bugs, please include `-ddd` output in the issue.
 
-## MPYTOOL vs other tools
+## Performance
 
-Benchmark on RP2040 (Raspberry Pi Pico) over native USB, January 2026:
+Benchmark comparison with mpremote (native USB, January 2026):
 
-| Test | mpytool | mpremote |
-|------|---------|----------|
-| 50 small files, 5 dirs (200KB) | **4.2s** | 9.4s |
-| 5 large files (260KB) | **8.0s** | 17.3s |
-| re-upload unchanged files | **1.3s** | 5.0s |
+### ESP32-C6 (native USB)
 
-mpytool is **2x faster** for uploads and **4x faster** for re-uploads (skips unchanged files).
+| Test | mpytool | mpremote | Speedup |
+|------|---------|----------|---------|
+| Small files upload (50 x 4KB) | 6.5s (30.8 KB/s) | 16.4s (12.2 KB/s) | **2.5x** |
+| Small files download | 4.9s (41.0 KB/s) | 18.9s (10.6 KB/s) | **3.9x** |
+| Large files upload (5 x 40KB) | 5.7s (35.1 KB/s) | 12.5s (16.1 KB/s) | **2.2x** |
+| Large files download | 4.0s (50.4 KB/s) | 13.3s (15.0 KB/s) | **3.4x** |
+| Re-upload unchanged | 0.7s | 1.8s | **2.6x** |
 
-mpytool advantages:
-- Fastest file transfers (2x faster than mpremote)
-- Skip unchanged files (compares size + SHA256 hash)
+### RP2040 (native USB)
+
+| Test | mpytool | mpremote | Speedup |
+|------|---------|----------|---------|
+| Small files upload (50 x 4KB) | 8.2s (24.6 KB/s) | 19.1s (10.5 KB/s) | **2.3x** |
+| Small files download | 5.9s (33.9 KB/s) | 17.6s (11.4 KB/s) | **3.0x** |
+| Large files upload (5 x 40KB) | 7.0s (28.7 KB/s) | 15.2s (13.2 KB/s) | **2.2x** |
+| Large files download | 5.2s (38.8 KB/s) | 13.1s (15.3 KB/s) | **2.5x** |
+| Re-upload unchanged | 0.6s | 1.6s | **2.5x** |
+
+### mpytool advantages
+
+- **2-4x faster** file transfers than mpremote
+- **Skip unchanged files** - compares size + SHA256 hash (re-upload in <1s)
+- **Robust REPL recovery** - works reliably with ESP32 via USB-UART bridges (CP2102, CH340) where mpremote often fails with "could not enter raw repl"
 - Progress indicator with file counts (`[3/10] 50% file.py -> :/lib/`)
 - Single tool for all operations (no need to chain commands)
 - Clean verbose output (`-v`) for debugging
