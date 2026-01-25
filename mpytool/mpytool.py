@@ -711,11 +711,46 @@ class MpyTool():
                     pass
         except _mpytool.MpyError:
             pass
+        # Get unique ID (serial number)
+        unique_id = None
+        try:
+            unique_id = self._mpy.comm.exec_eval("repr(__import__('machine').unique_id().hex())")
+        except _mpytool.MpyError:
+            pass
+        # Get MAC addresses (WiFi and/or LAN)
+        mac_addresses = []
+        try:
+            self._mpy.comm.exec("import network")
+            # Try WiFi STA
+            try:
+                mac = self._mpy.comm.exec_eval("repr(network.WLAN(network.STA_IF).config('mac').hex(':'))")
+                mac_addresses.append(('WiFi', mac))
+            except _mpytool.MpyError:
+                pass
+            # Try WiFi AP (if different)
+            try:
+                mac = self._mpy.comm.exec_eval("repr(network.WLAN(network.AP_IF).config('mac').hex(':'))")
+                if not mac_addresses or mac != mac_addresses[0][1]:
+                    mac_addresses.append(('WiFi AP', mac))
+            except _mpytool.MpyError:
+                pass
+            # Try LAN/Ethernet
+            try:
+                mac = self._mpy.comm.exec_eval("repr(network.LAN().config('mac').hex(':'))")
+                mac_addresses.append(('LAN', mac))
+            except _mpytool.MpyError:
+                pass
+        except _mpytool.MpyError:
+            pass
         print(f"Platform:    {platform}")
         print(f"Version:     {version}")
         print(f"Impl:        {impl}")
         if machine:
             print(f"Machine:     {machine}")
+        if unique_id:
+            print(f"Serial:      {unique_id}")
+        for iface, mac in mac_addresses:
+            print(f"MAC {iface:7} {mac}")
         print(f"Memory:      {self.format_size(gc_alloc)} / {self.format_size(gc_total)} ({gc_pct:.2f}%)")
         for fs in fs_info:
             label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
