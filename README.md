@@ -12,6 +12,37 @@ Target of this project is cleaner code, better performance, and improved verbose
 pip3 install mpytool
 ```
 
+### Installation in virtualenv
+
+Create a dedicated virtualenv for CLI tools (keeps your system Python clean):
+
+```bash
+# Create virtualenv (once)
+python3 -m venv ~/.venv/tools
+
+# Install mpytool
+~/.venv/tools/bin/pip install mpytool
+
+# Run directly
+~/.venv/tools/bin/mpytool --help
+```
+
+To use `mpytool` command without full path, add the venv bin to end of your PATH:
+
+**ZSH** (`~/.zshrc`):
+```bash
+export PATH="$PATH:$HOME/.venv/tools/bin"
+```
+
+**Bash** (`~/.bashrc`):
+```bash
+export PATH="$PATH:$HOME/.venv/tools/bin"
+```
+
+Then restart your shell (`exec zsh` or `exec bash`) and use `mpytool` directly.
+
+Adding venv bin at the end of PATH keeps your system `python` and `pip` as default, while making `mpytool` available when not found elsewhere.
+
 ## Examples:
 
 help:
