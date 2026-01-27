@@ -243,6 +243,31 @@ use `-q` or `--quiet` to disable all output:
 $ mpytool -q cp main.py :/
 ```
 
+## Output Example
+
+Complete workflow - upload changed files, reset device, and monitor output:
+```
+$ mpytool cp ~/Work/mpy/wlan/main.py ~/Work/mpy/wlan/html :/ -- cp ~/Work/mpy/wlan/wlan_http.py ~/Work/mpy/wlan/wlan.py ~/Work/mpy/uhttp/uhttp :/lib/ -- reset -- monitor
+Using /dev/tty.usbmodem1101
+COPY
+  [1/8] 100% 3.03K Work/mpy/wlan/main.py            -> :/main.py
+  [2/8] skip  587B Work/mpy/wlan/html/index.html       (unchanged)
+  [3/8] skip 40.8K Work/mpy/wlan/html/wlan.html        (unchanged)
+  [4/8] skip 4.95K Work/mpy/wlan/wlan_http.py          (unchanged)
+  [5/8] 100% 23.2K Work/mpy/wlan/wlan.py            -> :/lib/wlan.py
+  [6/8] skip 43.2K Work/mpy/uhttp/uhttp/server.py      (unchanged)
+  [7/8] skip 26.3K Work/mpy/uhttp/uhttp/client.py      (unchanged)
+  [8/8] skip   93B Work/mpy/uhttp/uhttp/__init__.py    (unchanged)
+  26.2K  17.3K/s  1.5s  speedup 5.4  (2 transferred, 6 skipped)
+RESET
+MONITOR (Ctrl+C to stop)
+
+starting web...
+Config file not created
+AP started: ESP32 (WPA2_PSK, IP: 192.168.4.1)
+Scanning...
+```
+
 ## Debug output
 
 - `-d` print warnings (yellow)
@@ -274,6 +299,16 @@ Benchmark comparison with mpremote (native USB, January 2026):
 | Large files upload (5 x 40KB) | 7.0s (28.7 KB/s) | 15.2s (13.2 KB/s) | **2.2x** |
 | Large files download | 5.2s (38.8 KB/s) | 13.1s (15.3 KB/s) | **2.5x** |
 | Re-upload unchanged | 0.6s | 1.6s | **2.5x** |
+
+### ESP32 (over UART) - mpremote fails on Mac OS with devices over UART
+
+| Test | mpytool | mpremote | Speedup |
+|------|---------|----------|---------|
+| Small files upload (50 x 4KB) | 8.2s (24.6 KB/s) | | |
+| Small files download | 5.9s (33.9 KB/s) | | |
+| Large files upload (5 x 40KB) | 7.0s (28.7 KB/s) | | |
+| Large files download | 5.2s (38.8 KB/s) | | |
+| Re-upload unchanged | 0.6s | | |
 
 ### mpytool advantages
 

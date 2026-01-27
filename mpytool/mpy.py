@@ -108,6 +108,33 @@ def _mpytool_hashfile(path):
                 break
             h.update(chunk)
     return h.digest()
+""",
+        'fileinfo': f"""
+def _mpytool_fileinfo(files):
+    import hashlib
+    result = {{}}
+    for path, expected_size in files.items():
+        try:
+            s = os.stat(path)
+            if s[0] != {_ATTR_FILE}:
+                result[path] = None
+                continue
+            size = s[6]
+            if size != expected_size:
+                result[path] = (size, None)
+                continue
+            h = hashlib.sha256()
+            with open(path, 'rb') as f:
+                while True:
+                    chunk = f.read(512)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            result[path] = (size, h.digest())
+        except:
+            result[path] = None
+    gc.collect()
+    return result
 """}
 
     def __init__(self, conn, log=None):
@@ -285,6 +312,28 @@ def _mpytool_hashfile(path):
         except _mpy_comm.CmdError:
             return None
 
+    def fileinfo(self, files):
+        """Get file info (size and hash) for multiple files in one call
+
+        Arguments:
+            files: dict {path: expected_size} - hash is only computed if sizes match
+
+        Returns:
+            dict {path: (size, hash)} - hash is None if sizes don't match
+            dict {path: None} - if file doesn't exist
+            Returns None if hashlib not available on device
+        """
+        self.import_module('os')
+        self.import_module('gc')
+        self.load_helper('fileinfo')
+        escaped_files = {_escape_path(p): s for p, s in files.items()}
+        # Timeout scales with number of files (base 5s + 0.5s per file)
+        timeout = 5 + len(files) * 0.5
+        try:
+            return self._mpy_comm.exec_eval(f"_mpytool_fileinfo({escaped_files})", timeout=timeout)
+        except _mpy_comm.CmdError:
+            return None
+
     def get(self, path, progress_callback=None):
         """Read file
 
@@ -335,3 +384,6 @@ def _mpytool_hashfile(path):
             if progress_callback:
                 progress_callback(transferred, total_size)
         self._mpy_comm.exec("f.close()")
+        # Run garbage collection to free memory and allow flash to settle
+        self.import_module('gc')
+        self._mpy_comm.exec("gc.collect()")

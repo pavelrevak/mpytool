@@ -2,6 +2,7 @@
 
 import os as _os
 import sys as _sys
+import time as _time
 import argparse as _argparse
 import hashlib as _hashlib
 import mpytool as _mpytool
@@ -44,6 +45,13 @@ class MpyTool():
         self._is_debug = getattr(self._log, '_loglevel', 1) >= 4
         self._batch_mode = False
         self._skipped_files = 0
+        # Transfer statistics
+        self._stats_total_bytes = 0
+        self._stats_transferred_bytes = 0
+        self._stats_transferred_files = 0
+        self._stats_start_time = None
+        # Remote file info cache for batch operations
+        self._remote_file_cache = {}  # {path: (size, hash) or None}
 
     @property
     def _is_tty(self):
@@ -82,15 +90,25 @@ class MpyTool():
             return _os.path.abspath(path)
 
     def _format_progress_line(self, percent, total):
-        """Format progress line: [2/5]  23% 24.1KB source -> dest"""
-        size_str = self.format_size(total).replace(' ', '')
+        """Format progress line: [2/5] 100% 24.1K source -> dest"""
+        size_str = self.format_size(total)
         if self._progress_total_files > 1:
             prefix = f"[{self._progress_current_file}/{self._progress_total_files}]"
         else:
             prefix = ""
         # Pad source to align ->
         src_width = max(len(self._progress_src), self._progress_max_src_len)
-        return f"{prefix:>7} {percent:3d}% {size_str:>7} {self._progress_src:<{src_width}} -> {self._progress_dst}"
+        return f"{prefix:>7} {percent:3d}% {size_str:>5} {self._progress_src:<{src_width}} -> {self._progress_dst}"
+
+    def _format_skip_line(self, total):
+        """Format skip line: [2/5] skip  587B source (unchanged)"""
+        size_str = self.format_size(total)
+        if self._progress_total_files > 1:
+            prefix = f"[{self._progress_current_file}/{self._progress_total_files}]"
+        else:
+            prefix = ""
+        src_width = max(len(self._progress_src), self._progress_max_src_len)
+        return f"{prefix:>7} skip {size_str:>5} {self._progress_src:<{src_width}}    (unchanged)"
 
     def _progress_callback(self, transferred, total):
         """Callback for file transfer progress"""
@@ -134,6 +152,64 @@ class MpyTool():
             count += len(files)
         return count
 
+    def _prefetch_remote_info(self, dst_files):
+        """Prefetch remote file info (size and hash) for multiple files
+
+        Arguments:
+            dst_files: dict {remote_path: local_size} - sizes used to skip hash if mismatch
+
+        Uses batch call to reduce round-trips. Results are cached in _remote_file_cache.
+        """
+        if self._force or not dst_files:
+            return
+        # Filter out already cached paths
+        files_to_fetch = {p: s for p, s in dst_files.items() if p not in self._remote_file_cache}
+        if not files_to_fetch:
+            return
+        self.verbose(f"Checking {len(files_to_fetch)} files...", 2)
+        result = self._mpy.fileinfo(files_to_fetch)
+        if result is None:
+            # hashlib not available - mark all as needing update
+            for path in files_to_fetch:
+                self._remote_file_cache[path] = None
+        else:
+            self._remote_file_cache.update(result)
+
+    def _collect_dst_files(self, src_path, dst_path, add_src_basename=True):
+        """Collect destination paths and local sizes for a local->remote copy operation
+
+        Arguments:
+            src_path: local source path (file or directory)
+            dst_path: remote destination base path
+            add_src_basename: if True, add source basename to dst_path (matching _put_dir behavior)
+
+        Returns:
+            dict {remote_path: local_file_size}
+        """
+        files = {}
+        if _os.path.isfile(src_path):
+            # For files, add basename if dst_path ends with /
+            basename = _os.path.basename(src_path)
+            if basename and not _os.path.basename(dst_path):
+                dst_path = _os.path.join(dst_path, basename)
+            files[dst_path] = _os.path.getsize(src_path)
+        elif _os.path.isdir(src_path):
+            # For directories, mimic _put_dir behavior
+            if add_src_basename:
+                basename = _os.path.basename(src_path)
+                if basename:
+                    dst_path = _os.path.join(dst_path, basename)
+            for root, dirs, filenames in _os.walk(src_path, topdown=True):
+                dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
+                rel_path = _os.path.relpath(root, src_path)
+                if rel_path == '.':
+                    rel_path = ''
+                for file_name in filenames:
+                    spath = _os.path.join(root, file_name)
+                    dpath = _os.path.join(dst_path, rel_path, file_name) if rel_path else _os.path.join(dst_path, file_name)
+                    files[dpath] = _os.path.getsize(spath)
+        return files
+
     def _file_needs_update(self, local_data, remote_path):
         """Check if local file differs from remote file
 
@@ -141,7 +217,20 @@ class MpyTool():
         """
         if self._force:
             return True
-        # Check remote file size first (fast)
+        # Check cache first (populated by _prefetch_remote_info)
+        if remote_path in self._remote_file_cache:
+            cached = self._remote_file_cache[remote_path]
+            if cached is None:
+                return True  # File doesn't exist or hashlib not available
+            remote_size, remote_hash = cached
+            local_size = len(local_data)
+            if local_size != remote_size:
+                return True  # Different size
+            if remote_hash is None:
+                return True  # Size matched but hash wasn't computed (shouldn't happen with prefetch)
+            local_hash = _hashlib.sha256(local_data).digest()
+            return local_hash != remote_hash
+        # Fallback to individual calls (for single file operations)
         remote_size = self._mpy.stat(remote_path)
         if remote_size is None or remote_size < 0:
             return True  # File doesn't exist or is a directory
@@ -243,6 +332,12 @@ class MpyTool():
         self._progress_current_file = 0
         self._progress_max_src_len = max_src_len
         self._batch_mode = True
+        # Reset statistics for this batch
+        self._stats_total_bytes = 0
+        self._stats_transferred_bytes = 0
+        self._stats_transferred_files = 0
+        self._skipped_files = 0
+        self._stats_start_time = _time.time()
 
     def reset_batch_progress(self):
         """Reset batch progress mode"""
@@ -250,6 +345,33 @@ class MpyTool():
         self._progress_total_files = 0
         self._progress_current_file = 0
         self._progress_max_src_len = 0
+        self._remote_file_cache.clear()
+
+    def print_copy_summary(self):
+        """Print summary after copy operation"""
+        if self._stats_start_time is None:
+            return
+        elapsed = _time.time() - self._stats_start_time
+        total = self._stats_total_bytes
+        transferred = self._stats_transferred_bytes
+        total_files = self._stats_transferred_files + self._skipped_files
+        # Format summary line
+        parts = []
+        parts.append(f"{self.format_size(transferred).strip()}")
+        if elapsed > 0:
+            speed = transferred / elapsed
+            parts.append(f"{self.format_size(speed).strip()}/s")
+        parts.append(f"{elapsed:.1f}s")
+        if total > 0 and transferred < total:
+            speedup = total / transferred if transferred > 0 else float('inf')
+            parts.append(f"speedup {speedup:.1f}")
+        summary = "  ".join(parts)
+        # File counts
+        if self._skipped_files > 0:
+            file_info = f"{self._stats_transferred_files} transferred, {self._skipped_files} skipped"
+        else:
+            file_info = f"{total_files} files"
+        self.verbose(f"  {summary}  ({file_info})", color='green')
 
     def cmd_ls(self, dir_name):
         result = self._mpy.ls(dir_name)
@@ -332,19 +454,23 @@ class MpyTool():
                 dpath = _os.path.join(rel_path, file_name)
                 with open(spath, 'rb') as src_file:
                     data = src_file.read()
+                file_size = len(data)
+                self._stats_total_bytes += file_size
                 # Check if file needs update
                 if not self._file_needs_update(data, dpath):
                     self._skipped_files += 1
                     if show_progress and self._verbose >= 1:
                         self._progress_current_file += 1
                         self._set_progress_info(spath, dpath, False, True)
-                        self.verbose(f"  skip {self._progress_src} (unchanged)", color='yellow')
+                        self.verbose(self._format_skip_line(file_size), color='yellow')
                     continue
+                self._stats_transferred_bytes += file_size
+                self._stats_transferred_files += 1
                 if show_progress and self._verbose >= 1:
                     self._progress_current_file += 1
                     self._set_progress_info(spath, dpath, False, True)
                     self._mpy.put(data, dpath, self._progress_callback)
-                    self._progress_complete(len(data))
+                    self._progress_complete(file_size)
                 else:
                     self._mpy.put(data, dpath)
 
@@ -356,13 +482,15 @@ class MpyTool():
         # Read local file
         with open(src_path, 'rb') as src_file:
             data = src_file.read()
+        file_size = len(data)
+        self._stats_total_bytes += file_size
         # Check if file needs update
         if not self._file_needs_update(data, dst_path):
             self._skipped_files += 1
             if show_progress and self._verbose >= 1:
                 self._progress_current_file += 1
                 self._set_progress_info(src_path, dst_path, False, True)
-                self.verbose(f"  skip {self._progress_src} (unchanged)", color='yellow')
+                self.verbose(self._format_skip_line(file_size), color='yellow')
             return
         # Create parent directory if needed
         path = _os.path.dirname(dst_path)
@@ -374,11 +502,13 @@ class MpyTool():
                 raise _mpytool.MpyError(
                     f'Error creating file under file: {path}')
         # Upload file
+        self._stats_transferred_bytes += file_size
+        self._stats_transferred_files += 1
         if show_progress and self._verbose >= 1:
             self._progress_current_file += 1
             self._set_progress_info(src_path, dst_path, False, True)
             self._mpy.put(data, dst_path, self._progress_callback)
-            self._progress_complete(len(data))
+            self._progress_complete(file_size)
         else:
             self._mpy.put(data, dst_path)
 
@@ -407,6 +537,10 @@ class MpyTool():
             self._progress_complete(len(data))
         else:
             data = self._mpy.get(src_path)
+        file_size = len(data)
+        self._stats_total_bytes += file_size
+        self._stats_transferred_bytes += file_size
+        self._stats_transferred_files += 1
         with open(dst_path, 'wb') as dst_file:
             dst_file.write(data)
 
@@ -498,11 +632,30 @@ class MpyTool():
         else:
             data = self._mpy.get(src_path)
             self._mpy.put(data, dst_path)
+        file_size = len(data)
+        self._stats_total_bytes += file_size
+        self._stats_transferred_bytes += file_size
+        self._stats_transferred_files += 1
 
     def cmd_cp(self, *args):
         """Copy files between local and device"""
+        # Parse -f flag from arguments
+        args = list(args)
+        force = '-f' in args or '--force' in args
+        args = [a for a in args if a not in ('-f', '--force')]
         if len(args) < 2:
             raise ParamsError('cp requires source and destination')
+        # Save and set force flag for this command
+        saved_force = self._force
+        if force:
+            self._force = True
+        try:
+            self._cmd_cp_impl(args)
+        finally:
+            self._force = saved_force
+
+    def _cmd_cp_impl(self, args):
+        """Internal implementation of cp command"""
         sources = list(args[:-1])
         dest = args[-1]
         dest_is_remote = dest.startswith(':')
@@ -527,6 +680,19 @@ class MpyTool():
                     total_files += self._count_local_files(src_path_clean)
             self._progress_total_files = total_files
             self._progress_current_file = 0
+        # Prefetch remote file info for all local->remote copies (batch optimization)
+        if dest_is_remote and not self._force:
+            all_dst_files = {}
+            for src in sources:
+                if not src.startswith(':'):  # local source
+                    copy_contents = src.endswith('/')
+                    src_path = src.rstrip('/')
+                    if _os.path.exists(src_path):
+                        # Pass dest_path and let _collect_dst_files handle basename logic
+                        add_basename = not copy_contents  # copy_contents=True means don't add src basename
+                        all_dst_files.update(self._collect_dst_files(src_path, dest_path.rstrip('/') or '/', add_basename))
+            if all_dst_files:
+                self._prefetch_remote_info(all_dst_files)
         for src in sources:
             src_is_remote = src.startswith(':')
             src_path = src[1:] if src_is_remote else src
@@ -626,18 +792,18 @@ class MpyTool():
 
     @staticmethod
     def format_size(size):
-        """Format size in bytes to human readable format with 3-4 digits"""
+        """Format size in bytes to human readable format (like ls -h)"""
         if size < 1024:
-            return f"{size}  B"
-        for unit in ('KB', 'MB', 'GB', 'TB'):
+            return f"{size}B"
+        for unit in ('K', 'M', 'G', 'T'):
             size /= 1024
             if size < 10:
-                return f"{size:.2f} {unit}"
+                return f"{size:.2f}{unit}"
             if size < 100:
-                return f"{size:.1f} {unit}"
-            if size < 1024 or unit == 'TB':
-                return f"{size:.0f} {unit}"
-        return f"{size:.0f} TB"
+                return f"{size:.1f}{unit}"
+            if size < 1024 or unit == 'T':
+                return f"{size:.0f}{unit}"
+        return f"{size:.0f}T"
 
     def cmd_paths(self, dir_name='.'):
         """Print all paths (for shell completion) - undocumented"""
@@ -724,20 +890,20 @@ class MpyTool():
             # Try WiFi STA
             try:
                 mac = self._mpy.comm.exec_eval("repr(network.WLAN(network.STA_IF).config('mac').hex(':'))")
-                mac_addresses.append(('WiFi', mac))
+                mac_addresses.append(('WiFi:', mac))
             except _mpytool.MpyError:
                 pass
             # Try WiFi AP (if different)
             try:
                 mac = self._mpy.comm.exec_eval("repr(network.WLAN(network.AP_IF).config('mac').hex(':'))")
                 if not mac_addresses or mac != mac_addresses[0][1]:
-                    mac_addresses.append(('WiFi AP', mac))
+                    mac_addresses.append(('WiFi AP:', mac))
             except _mpytool.MpyError:
                 pass
             # Try LAN/Ethernet
             try:
                 mac = self._mpy.comm.exec_eval("repr(network.LAN().config('mac').hex(':'))")
-                mac_addresses.append(('LAN', mac))
+                mac_addresses.append(('LAN:', mac))
             except _mpytool.MpyError:
                 pass
         except _mpytool.MpyError:
@@ -750,7 +916,7 @@ class MpyTool():
         if unique_id:
             print(f"Serial:      {unique_id}")
         for iface, mac in mac_addresses:
-            print(f"MAC {iface:7} {mac}")
+            print(f"MAC {iface:8} {mac}")
         print(f"Memory:      {self.format_size(gc_alloc)} / {self.format_size(gc_total)} ({gc_pct:.2f}%)")
         for fs in fs_info:
             label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
@@ -848,7 +1014,7 @@ _COMMANDS_HELP_STR = """
 List of available commands:
   ls [{path}]                   list files and its sizes
   tree [{path}]                 list tree of structure and sizes
-  cp {src} [...] {dst}          copy files (: prefix = device path)
+  cp [-f] {src} [...] {dst}     copy files (: prefix = device path, -f = force)
   mv {src} [...] {dst}          move/rename on device (: prefix required)
   get {path} [...]              get file and print it
   put {src_path} [{dst_path}]   put file or directory to destination
@@ -901,6 +1067,7 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
         mpy_tool.set_batch_progress(batch_total, max_src_len)
         for k in range(batch_start, j):
             mpy_tool.process_commands(command_groups[k])
+        mpy_tool.print_copy_summary()
         mpy_tool.reset_batch_progress()
         i = j
 
@@ -923,8 +1090,6 @@ def main():
         '-v', '--verbose', action='store_true', help='verbose output (show commands)')
     parser.add_argument(
         '-q', '--quiet', action='store_true', help='quiet mode (no progress)')
-    parser.add_argument(
-        '-f', '--force', action='store_true', help='force copy even if unchanged')
     parser.add_argument(
         "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
         'by default are excluded directories: __pycache__, .git, .svn')
@@ -964,7 +1129,7 @@ def main():
     except _mpytool.ConnError as err:
         log.error(err)
         return
-    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir, force=args.force)
+    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir)
     command_groups = _utils.split_commands(args.commands)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))

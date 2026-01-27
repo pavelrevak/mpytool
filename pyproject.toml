@@ -22,3 +22,6 @@ Homepage = "https://github.com/pavelrevak/mpytool"
 
 [project.scripts]
 mpytool = "mpytool.mpytool:main"
+
+[tool.setuptools.packages.find]
+include = ["mpytool*"]
