@@ -108,7 +108,7 @@ class MpyTool():
         else:
             prefix = ""
         src_width = max(len(self._progress_src), self._progress_max_src_len)
-        return f"{prefix:>7} skip {size_str:>5} {self._progress_src:<{src_width}}    (unchanged)"
+        return f"{prefix:>7} skip {size_str:>5} {self._progress_src:<{src_width}} -> {self._progress_dst}"
 
     def _progress_callback(self, transferred, total):
         """Callback for file transfer progress"""

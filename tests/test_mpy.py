@@ -1,5 +1,6 @@
 """Tests for mpy module"""
 
+import base64
 import unittest
 from unittest.mock import Mock, patch
 from mpytool.mpy import _escape_path, Mpy
@@ -35,11 +36,16 @@ class TestFileInfo(unittest.TestCase):
 
     def test_fileinfo_returns_dict(self):
         """Test that fileinfo returns dictionary from device"""
+        # Device returns base64 encoded hashes
+        device_response = {
+            "/a.txt": (100, base64.b64encode(b"hash_a")),
+            "/b.txt": (200, base64.b64encode(b"hash_b")),
+        }
         expected = {
             "/a.txt": (100, b"hash_a"),
             "/b.txt": (200, b"hash_b"),
         }
-        self.mpy._mpy_comm.exec_eval.return_value = expected
+        self.mpy._mpy_comm.exec_eval.return_value = device_response
         result = self.mpy.fileinfo({"/a.txt": 100, "/b.txt": 200})
         self.assertEqual(result, expected)
 

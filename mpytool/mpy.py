@@ -1,5 +1,7 @@
 """MicroPython tool: main MPY class"""
 
+import base64
+
 import mpytool.mpy_comm as _mpy_comm
 
 
@@ -99,7 +101,6 @@ def _mpytool_rmdir(path):
 """,
         'hashfile': """
 def _mpytool_hashfile(path):
-    import hashlib
     h = hashlib.sha256()
     with open(path, 'rb') as f:
         while True:
@@ -107,11 +108,10 @@ def _mpytool_hashfile(path):
             if not chunk:
                 break
             h.update(chunk)
-    return h.digest()
+    return ubinascii.b2a_base64(h.digest()).strip()
 """,
         'fileinfo': f"""
 def _mpytool_fileinfo(files):
-    import hashlib
     result = {{}}
     for path, expected_size in files.items():
         try:
@@ -130,7 +130,7 @@ def _mpytool_fileinfo(files):
                     if not chunk:
                         break
                     h.update(chunk)
-            result[path] = (size, h.digest())
+            result[path] = (size, ubinascii.b2a_base64(h.digest()).strip())
         except:
             result[path] = None
     gc.collect()
@@ -306,9 +306,12 @@ def _mpytool_fileinfo(files):
         Returns:
             bytes with SHA256 hash (32 bytes) or None if hashlib not available
         """
+        self.import_module('hashlib')
+        self.import_module('ubinascii')
         self.load_helper('hashfile')
         try:
-            return self._mpy_comm.exec_eval(f"_mpytool_hashfile('{_escape_path(path)}')")
+            result = self._mpy_comm.exec_eval(f"_mpytool_hashfile('{_escape_path(path)}')")
+            return base64.b64decode(result) if result else None
         except _mpy_comm.CmdError:
             return None
 
@@ -325,12 +328,19 @@ def _mpytool_fileinfo(files):
         """
         self.import_module('os')
         self.import_module('gc')
+        self.import_module('hashlib')
+        self.import_module('ubinascii')
         self.load_helper('fileinfo')
         escaped_files = {_escape_path(p): s for p, s in files.items()}
         # Timeout scales with number of files (base 5s + 0.5s per file)
         timeout = 5 + len(files) * 0.5
         try:
-            return self._mpy_comm.exec_eval(f"_mpytool_fileinfo({escaped_files})", timeout=timeout)
+            result = self._mpy_comm.exec_eval(f"_mpytool_fileinfo({escaped_files})", timeout=timeout)
+            # Decode base64 hashes
+            for path, info in result.items():
+                if info and info[1]:
+                    result[path] = (info[0], base64.b64decode(info[1]))
+            return result
         except _mpy_comm.CmdError:
             return None
 
