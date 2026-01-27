@@ -76,6 +76,17 @@ $ mpytool cp -f main.py :/          # force upload even if unchanged
 Unchanged files are automatically skipped (compares size and SHA256 hash).
 Use `-f` or `--force` to upload all files regardless.
 
+transfer options:
+```
+$ mpytool cp -f main.py :/           # force upload even if unchanged
+$ mpytool cp -z main.py :/           # force compression (auto-detected by default)
+$ mpytool cp --no-compress data.bin :/  # disable compression
+$ mpytool -c 8K cp main.py :/        # set chunk size (512, 1K, 2K, 4K, 8K, 16K, 32K)
+```
+
+Compression is auto-detected based on device RAM and deflate module availability.
+Chunk size is auto-detected based on free RAM (larger chunks = faster transfer).
+
 move/rename on device:
 ```
 $ mpytool mv :/old.py :/new.py      # rename file
@@ -97,11 +108,14 @@ $ mpytool rm mydir/               # delete contents only, keep directory
 $ mpytool rm /                    # delete everything on device
 ```
 
-reset only, reset and monitor output, REPL mode:
+reset and REPL:
 ```
-$ mpytool -p /dev/ttyACM0 reset
-$ mpytool -p /dev/ttyACM0 reset monitor
-$ mpytool -p /dev/ttyACM0 repl
+$ mpytool reset              # soft reset (Ctrl-D)
+$ mpytool mreset             # MCU reset (machine.reset, auto-reconnect)
+$ mpytool rtsreset           # hardware reset via RTS signal (serial only)
+$ mpytool bootloader         # enter bootloader (machine.bootloader)
+$ mpytool dtrboot            # enter bootloader via DTR/RTS (ESP32 only)
+$ mpytool repl               # enter REPL mode
 ```
 
 execute Python code on device:
@@ -247,22 +261,23 @@ $ mpytool -q cp main.py :/
 
 Complete workflow - upload changed files, reset device, and monitor output:
 ```
-$ mpytool cp ~/Work/mpy/wlan/main.py ~/Work/mpy/wlan/html :/ -- cp ~/Work/mpy/wlan/wlan_http.py ~/Work/mpy/wlan/wlan.py ~/Work/mpy/uhttp/uhttp :/lib/ -- reset -- monitor
+$ mpytool cp ~/Work/mpy/wlan/main.py ~/Work/mpy/wlan/html :/ -- cp ~/Work/mpy/wlan/wlan_http.py ~/Work/mpy/wlan/wlan.py ~/Work/mpy/uhttp/uhttp :/lib/ -- cp ~/Tmp/test0.bin :/lib/ -- reset -- monitor
 Using /dev/tty.usbmodem1101
-COPY
-  [1/8] 100% 3.03K Work/mpy/wlan/main.py            -> :/main.py
-  [2/8] skip  587B Work/mpy/wlan/html/index.html       (unchanged)
-  [3/8] skip 40.8K Work/mpy/wlan/html/wlan.html        (unchanged)
-  [4/8] skip 4.95K Work/mpy/wlan/wlan_http.py          (unchanged)
-  [5/8] 100% 23.2K Work/mpy/wlan/wlan.py            -> :/lib/wlan.py
-  [6/8] skip 43.2K Work/mpy/uhttp/uhttp/server.py      (unchanged)
-  [7/8] skip 26.3K Work/mpy/uhttp/uhttp/client.py      (unchanged)
-  [8/8] skip   93B Work/mpy/uhttp/uhttp/__init__.py    (unchanged)
-  26.2K  17.3K/s  1.5s  speedup 5.4  (2 transferred, 6 skipped)
+COPY (chunk: 16K, compress: on)
+  [1/9] 100% 3.03K ../mpy/wlan/main.py            -> :/main.py                (compressed)
+  [2/9] skip  587B ../mpy/wlan/html/index.html    -> :/html/index.html        (unchanged)
+  [3/9] 100% 40.8K ../mpy/wlan/html/wlan.html     -> :/html/wlan.html         (compressed)
+  [4/9] skip 4.95K ../mpy/wlan/wlan_http.py       -> :/lib/wlan_http.py       (unchanged)
+  [5/9] 100% 23.1K ../mpy/wlan/wlan.py            -> :/lib/wlan.py            (compressed)
+  [6/9] skip 43.2K ../mpy/uhttp/uhttp/server.py   -> :/lib/uhttp/server.py    (unchanged)
+  [7/9] skip 26.3K ../mpy/uhttp/uhttp/client.py   -> :/lib/uhttp/client.py    (unchanged)
+  [8/9] skip   93B ../mpy/uhttp/uhttp/__init__.py -> :/lib/uhttp/__init__.py  (unchanged)
+  [9/9] skip 10.0K ../../Tmp/test0.bin            -> :/lib/test0.bin          (unchanged)
+  66.9K  29.7K/s  2.3s  speedup 6.5x  (3 transferred, 6 skipped)
 RESET
 MONITOR (Ctrl+C to stop)
 
-starting web...
+starting web server...
 Config file not created
 AP started: ESP32 (WPA2_PSK, IP: 192.168.4.1)
 Scanning...
@@ -278,43 +293,71 @@ For reporting bugs, please include `-ddd` output in the issue.
 
 ## Performance
 
-Benchmark comparison with mpremote (native USB, January 2026):
+Benchmark comparison with mpremote v1.27.0 (January 2026).
 
-### ESP32-C6 (native USB)
+Test files: 50 small (4 KB) + 4 large (50 KB) Python source files (total 400 KB).
+Higher speed achieved by automatic compression of text-based files during transfer.
 
-| Test | mpytool | mpremote | Speedup |
-|------|---------|----------|---------|
-| Small files upload (50 x 4KB) | 6.5s (30.8 KB/s) | 16.4s (12.2 KB/s) | **2.5x** |
-| Small files download | 4.9s (41.0 KB/s) | 18.9s (10.6 KB/s) | **3.9x** |
-| Large files upload (5 x 40KB) | 5.7s (35.1 KB/s) | 12.5s (16.1 KB/s) | **2.2x** |
-| Large files download | 4.0s (50.4 KB/s) | 13.3s (15.0 KB/s) | **3.4x** |
-| Re-upload unchanged | 0.7s | 1.8s | **2.6x** |
+### RP2040 - USB-CDC - MacOS
 
-### RP2040 (native USB)
+| files | mpytool | mpremote | speedup |
+|-------|---------|----------|---------|
+| small 50 x 4K | 9.6s (20.8 KB/s) | 23.3s (8.6 KB/s) | **2.4x** |
+| small 50 x 4K - skip | 2.0s | 5.4s | **2.7x** |
+| large 4 x 50K | 3.4s (58.8 KB/s) | 15s (13.3 KB/s) | **4.4x** |
+| large 4 x 50K - skip | 0.6s | 0.9s | **1.5x** |
 
-| Test | mpytool | mpremote | Speedup |
-|------|---------|----------|---------|
-| Small files upload (50 x 4KB) | 8.2s (24.6 KB/s) | 19.1s (10.5 KB/s) | **2.3x** |
-| Small files download | 5.9s (33.9 KB/s) | 17.6s (11.4 KB/s) | **3.0x** |
-| Large files upload (5 x 40KB) | 7.0s (28.7 KB/s) | 15.2s (13.2 KB/s) | **2.2x** |
-| Large files download | 5.2s (38.8 KB/s) | 13.1s (15.3 KB/s) | **2.5x** |
-| Re-upload unchanged | 0.6s | 1.6s | **2.5x** |
+### ESP32-C6 - USB-CDC - MacOS
 
-### ESP32 (over UART) - mpremote fails on Mac OS with devices over UART
+| files | mpytool | mpremote | speedup |
+|-------|---------|----------|---------|
+| small 50 x 4K | 10.4s (19.2 KB/s) | 30.7s (6.5 KB/s) | **3.0x** |
+| small 50 x 4K - skip | 5.5s | 12.7s | **2.3x** |
+| large 4 x 50K | 4.0s (50.0 KB/s) | 13.2s (15.2 KB/s) | **3.3x** |
+| large 4 x 50K - skip | 0.7s | 1.4s | **2.0x** |
 
-| Test | mpytool | mpremote | Speedup |
-|------|---------|----------|---------|
-| Small files upload (50 x 4KB) | 8.2s (24.6 KB/s) | | |
-| Small files download | 5.9s (33.9 KB/s) | | |
-| Large files upload (5 x 40KB) | 7.0s (28.7 KB/s) | | |
-| Large files download | 5.2s (38.8 KB/s) | | |
-| Re-upload unchanged | 0.6s | | |
+### ESP32-WROOM - USB-UART - MacOS
 
-### mpytool advantages
+| files | mpytool | mpremote | speedup |
+|-------|---------|----------|---------|
+| small 50 x 4K | 32.4s (6.2 KB/s) | crash | - |
+| small 50 x 4K - skip | 11.8s | crash | - |
+| large 4 x 50K | 12.1s (16.5 KB/s) | crash | - |
+| large 4 x 50K - skip | 3.5s | crash | - |
 
-- **2-4x faster** file transfers than mpremote
-- **Skip unchanged files** - compares size + SHA256 hash (re-upload in <1s)
-- **Robust REPL recovery** - works reliably with ESP32 via USB-UART bridges (CP2102, CH340) where mpremote often fails with "could not enter raw repl"
+### ESP32-WROVER - USB-UART - MacOS
+
+| files | mpytool | mpremote | speedup |
+|-------|---------|----------|---------|
+| small 50 x 4K | 24.5s (8.2 KB/s) | crash | - |
+| small 50 x 4K - skip | 7.7s | crash | - |
+| large 4 x 50K | 12.0s (16.7 KB/s) | crash | - |
+| large 4 x 50K - skip | 2.2s | crash | - |
+
+### ESP32-WROOM - USB-UART - Linux
+
+| files | mpytool | mpremote | speedup |
+|-------|---------|----------|---------|
+| small 50 x 4K | 25.6s (7.8 KB/s) | 66.9s (3.0 KB/s) | **2.6x** |
+| small 50 x 4K - skip | 5.9s | 17.3s | **2.9x** |
+| large 4 x 50K | 7.9s (25.3 KB/s) | 44.4s (4.5 KB/s) | **5.6x** |
+| large 4 x 50K - skip | 1.2s | 2.0s | **1.7x** |
+
+### ESP32-WROVER - USB-UART - Linux
+
+| files | mpytool | mpremote | speedup |
+|-------|---------|----------|---------|
+| small 50 x 4K | 33.9s (5.9 KB/s) | 75.0s (2.7 KB/s) | **2.2x** |
+| small 50 x 4K - skip | 9.8s | 19.4s | **2.0x** |
+| large 4 x 50K | 10.0s (20.0 KB/s) | 46.4s (4.3 KB/s) | **4.6x** |
+| large 4 x 50K - skip | 1.6s | 2.5s | **1.6x** |
+
+### Summary
+
+- **Large files upload: 3.3x - 5.6x faster** than mpremote
+- **Small files upload: 2.2x - 3.0x faster** than mpremote
+- **Skip unchanged: 1.5x - 2.9x faster** than mpremote
+- **Robust REPL handling** - works reliably with ESP32 via USB-UART bridges (CP2102, CH340) where mpremote crashes on MacOS
 - Progress indicator with file counts (`[3/10] 50% file.py -> :/lib/`)
 - Single tool for all operations (no need to chain commands)
 - Clean verbose output (`-v`) for debugging

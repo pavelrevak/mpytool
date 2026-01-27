@@ -1318,6 +1318,8 @@ def main():
     except KeyboardInterrupt:
         # Clear partial progress line and show clean message
         log.verbose('Interrupted', level=0, overwrite=True)
+    except (_mpytool.MpyError, _mpytool.ConnError, _mpytool.Timeout) as err:
+        log.error(err)
 
 
 if __name__ == '__main__':
