@@ -98,3 +98,15 @@ class Conn():
         """Read single line"""
         line = self.read_until(b'\n', timeout)
         return line.strip(b'\r')
+
+    def hard_reset(self):
+        """Hardware reset (only available on serial connections)"""
+        raise NotImplementedError("Hardware reset not available on this connection")
+
+    def reset_to_bootloader(self):
+        """Reset into bootloader mode (only available on serial connections)"""
+        raise NotImplementedError("Reset to bootloader not available on this connection")
+
+    def reconnect(self, timeout=None):
+        """Reconnect after device reset (only available on serial connections)"""
+        raise NotImplementedError("Reconnect not available on this connection")

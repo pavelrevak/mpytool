@@ -1004,7 +1004,51 @@ class MpyTool():
             label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
             print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs['pct']:.2f}%)")
 
-    def process_commands(self, commands):
+    def cmd_mreset(self, reconnect=True):
+        """MCU reset using machine.reset() with optional auto-reconnect"""
+        self.verbose("MRESET", 1)
+        self._mpy.comm.enter_raw_repl()
+        self._conn.write(b"import machine; machine.reset()\x04")
+        self._mpy.reset_state()
+        if reconnect:
+            try:
+                self.verbose("  reconnecting...", 1, color='yellow')
+                self._conn.reconnect()
+                self.verbose("  connected", 1, color='green')
+            except (_mpytool.ConnError, OSError) as err:
+                self.verbose(f"  reconnect failed: {err}", 1, color='red')
+                raise _mpytool.ConnError(f"Reconnect failed: {err}")
+
+    def cmd_rtsreset(self):
+        """Hardware reset device using RTS signal"""
+        self.verbose("RTSRESET", 1)
+        try:
+            self._mpy.conn.hard_reset()
+            self._mpy.reset_state()
+        except NotImplementedError:
+            raise _mpytool.MpyError("Hardware reset not available (serial only)")
+
+    def cmd_bootloader(self):
+        """Enter bootloader using machine.bootloader()"""
+        self.verbose("BOOTLOADER", 1)
+        self._mpy.comm.enter_raw_repl()
+        self._conn.write(b"import machine; machine.bootloader()\x04")
+        self._mpy.reset_state()
+
+    def cmd_dtrboot(self):
+        """Enter bootloader using DTR/RTS signals (ESP32 only)
+
+        Auto-detects port type:
+        - USB-UART: classic DTR/RTS sequence (GPIO0 directly connected)
+        - USB-CDC: USB-JTAG-Serial sequence (ESP32-S/C native USB)
+        """
+        self.verbose("DTRBOOT", 1)
+        try:
+            self._mpy.conn.reset_to_bootloader()
+        except NotImplementedError:
+            raise _mpytool.MpyError("DTR boot not available (serial only)")
+
+    def process_commands(self, commands, is_last_group=False):
         try:
             while commands:
                 command = commands.pop(0)
@@ -1048,6 +1092,10 @@ class MpyTool():
                     self.verbose("RESET", 1)
                     self._mpy.comm.soft_reset()
                     self._mpy.reset_state()
+                elif command == 'mreset':
+                    # Reconnect only if there are more commands (in this or next group)
+                    has_more = bool(commands) or not is_last_group
+                    self.cmd_mreset(reconnect=has_more)
                 elif command in ('monitor', 'follow'):
                     self.cmd_monitor()
                     break
@@ -1062,6 +1110,12 @@ class MpyTool():
                         raise ParamsError('missing code for exec command')
                 elif command == 'info':
                     self.cmd_info()
+                elif command == 'rtsreset':
+                    self.cmd_rtsreset()
+                elif command == 'bootloader':
+                    self.cmd_bootloader()
+                elif command == 'dtrboot':
+                    self.cmd_dtrboot()
                 elif command == 'cp':
                     if len(commands) >= 2:
                         self.cmd_cp(*commands)
@@ -1102,7 +1156,11 @@ List of available commands:
   put {src_path} [{dst_path}]   put file or directory to destination
   mkdir {path} [...]            create directory (also create all parents)
   delete {path} [...]           remove file/dir (path/ = contents only)
-  reset                         soft reset
+  reset                         soft reset (Ctrl-D)
+  mreset                        MCU reset (machine.reset, auto-reconnect)
+  rtsreset                      RTS reset (hardware reset via RTS signal)
+  bootloader                    enter bootloader (machine.bootloader)
+  dtrboot                       enter bootloader via DTR/RTS (ESP32 only)
   monitor                       print output of running program
   repl                          enter REPL mode [UNIX OS ONLY]
   exec {code}                   execute Python code on device
@@ -1120,15 +1178,17 @@ Use -- to separate multiple commands:
 def _run_commands(mpy_tool, command_groups, with_progress=True):
     """Execute command groups with optional batch progress tracking"""
     if not with_progress:
-        for commands in command_groups:
-            mpy_tool.process_commands(commands)
+        for i, commands in enumerate(command_groups):
+            is_last = (i == len(command_groups) - 1)
+            mpy_tool.process_commands(commands, is_last_group=is_last)
         return
     # Pre-scan to identify consecutive copy command batches (for progress)
     i = 0
     while i < len(command_groups):
         is_copy, count, src_paths, dst_paths = mpy_tool.count_files_for_command(command_groups[i])
         if not is_copy:
-            mpy_tool.process_commands(command_groups[i])
+            is_last = (i == len(command_groups) - 1)
+            mpy_tool.process_commands(command_groups[i], is_last_group=is_last)
             i += 1
             continue
         # Collect consecutive copy commands into a batch
@@ -1151,7 +1211,8 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
         mpy_tool.print_transfer_info()
         mpy_tool.set_batch_progress(batch_total, max_src_len, max_dst_len)
         for k in range(batch_start, j):
-            mpy_tool.process_commands(command_groups[k])
+            is_last = (k == j - 1) and (j == len(command_groups))
+            mpy_tool.process_commands(command_groups[k], is_last_group=is_last)
         mpy_tool.print_copy_summary()
         mpy_tool.reset_batch_progress()
         i = j

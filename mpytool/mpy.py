@@ -129,10 +129,11 @@ def _mt_finfo(files):
     def reset_state(self):
         """Reset internal state after device reset
 
-        Call this after soft_reset() to clear cached helper/import state.
+        Call this after soft_reset() or hard_reset() to clear cached state.
         """
         self._imported = []
         self._load_helpers = []
+        self._mpy_comm._repl_mode = None
         Mpy._CHUNK_AUTO_DETECTED = None
         Mpy._DEFLATE_AVAILABLE = None
 
