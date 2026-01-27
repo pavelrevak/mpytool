@@ -78,7 +78,6 @@ Use `-f` or `--force` to upload all files regardless.
 
 transfer options:
 ```
-$ mpytool cp -f main.py :/           # force upload even if unchanged
 $ mpytool cp -z main.py :/           # force compression (auto-detected by default)
 $ mpytool cp --no-compress data.bin :/  # disable compression
 $ mpytool -c 8K cp main.py :/        # set chunk size (512, 1K, 2K, 4K, 8K, 16K, 32K)
@@ -115,6 +114,7 @@ $ mpytool mreset             # MCU reset (machine.reset, auto-reconnect)
 $ mpytool rtsreset           # hardware reset via RTS signal (serial only)
 $ mpytool bootloader         # enter bootloader (machine.bootloader)
 $ mpytool dtrboot            # enter bootloader via DTR/RTS (ESP32 only)
+$ mpytool reset monitor      # reset and monitor output
 $ mpytool repl               # enter REPL mode
 ```
 
@@ -174,25 +174,6 @@ Using /dev/tty.usbmodem1101
   4.95 KB │  └─ wlan_http.py
      23 B ├─ boot.py
   3.03 KB └─ main.py
-```
-
-tree view:
-```
-$ mpytool tree
-Using /dev/tty.usbmodem11101
-  150852 ./
-   42342 ├─ html/
-     587 │  ├─ index.html
-   41755 │  └─ wlan.html
-  100059 ├─ lib/
-   71267 │  ├─ uhttp/
-      93 │  │  ├─ __init__.py
-   26963 │  │  ├─ client.py
-   44211 │  │  └─ server.py
-   23726 │  ├─ wlan.py
-    5066 │  └─ wlan_http.py
-      29 ├─ boot.py
-    3102 └─ main.py
 ```
 
 connect over network (TCP, default port 23):
@@ -358,9 +339,10 @@ Higher speed achieved by automatic compression of text-based files during transf
 - **Small files upload: 2.2x - 3.0x faster** than mpremote
 - **Skip unchanged: 1.5x - 2.9x faster** than mpremote
 - **Robust REPL handling** - works reliably with ESP32 via USB-UART bridges (CP2102, CH340) where mpremote crashes on MacOS
-- Progress indicator with file counts (`[3/10] 50% file.py -> :/lib/`)
-- Single tool for all operations (no need to chain commands)
-- Clean verbose output (`-v`) for debugging
+
+Many more test scenarios could be designed (different file types, sizes, mixed workloads), but in most cases mpytool would be **at least 2x faster** than mpremote.
+
+mpytool also provides a **Python API** suitable for integration into IDEs and custom automation tools.
 
 ## Shell Completion
 

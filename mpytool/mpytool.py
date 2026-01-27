@@ -1292,7 +1292,9 @@ def main():
             port = ports[0]
             log.verbose(f"Using {port}", level=1)
         else:
-            log.error("Multiple serial ports found: %s. Use -p to specify one.", ", ".join(ports))
+            log.error("Multiple serial ports found. Use -p to specify one:")
+            for p in ports:
+                print(f"  {p}")
             return
     try:
         if port:

@@ -64,10 +64,11 @@ def detect_serial_ports() -> list[str]:
 
     patterns = []
     if sys.platform == "darwin":
+        # Use cu.* (call-up) instead of tty.* - doesn't wait for DCD signal
         patterns = [
-            "/dev/tty.usbmodem*",
-            "/dev/tty.usbserial*",
-            "/dev/tty.usb*",
+            "/dev/cu.usbmodem*",
+            "/dev/cu.usbserial*",
+            "/dev/cu.usb*",
         ]
     elif sys.platform == "linux":
         patterns = [
