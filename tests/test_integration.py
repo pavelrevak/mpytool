@@ -547,5 +547,141 @@ class TestSkipUnchangedFiles(unittest.TestCase):
         self.assertTrue(needs_update)
 
 
+@requires_device
+class TestEncodingAndCompression(unittest.TestCase):
+    """Test encoding selection and compression"""
+
+    TEST_DIR = "/_mpytool_enc_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_text_upload_uses_raw(self):
+        """Test that text files use raw encoding"""
+        data = b"Hello World, this is plain text!"
+        path = self.TEST_DIR + "/text.txt"
+        encodings, wire_bytes = self.mpy.put(data, path)
+        self.assertIn('raw', encodings)
+        # Verify file content
+        self.assertEqual(self.mpy.get(path), data)
+
+    def test_02_binary_upload_uses_base64(self):
+        """Test that binary files use base64 encoding"""
+        data = bytes(range(256)) * 4  # 1KB of all byte values
+        path = self.TEST_DIR + "/binary.bin"
+        encodings, wire_bytes = self.mpy.put(data, path)
+        self.assertIn('base64', encodings)
+        # Verify file content
+        self.assertEqual(self.mpy.get(path), data)
+
+    def test_03_compression_reduces_wire_bytes(self):
+        """Test that compression reduces wire bytes for compressible data"""
+        data = b"A" * 2000  # Highly compressible
+        path = self.TEST_DIR + "/compress.txt"
+        encodings, wire_bytes = self.mpy.put(data, path, compress=True)
+        self.assertIn('compressed', encodings)
+        # Wire bytes should be much less than data size
+        self.assertLess(wire_bytes, len(data))
+        # Verify file content
+        self.assertEqual(self.mpy.get(path), data)
+
+    def test_04_compression_not_used_for_incompressible(self):
+        """Test that compression is not used when data doesn't compress well"""
+        import os
+        data = os.urandom(500)  # Random data doesn't compress
+        path = self.TEST_DIR + "/random.bin"
+        encodings, wire_bytes = self.mpy.put(data, path, compress=True)
+        # Should use base64 instead of compressed
+        self.assertNotIn('compressed', encodings)
+        # Verify file content
+        self.assertEqual(self.mpy.get(path), data)
+
+    def test_05_auto_chunk_size_detection(self):
+        """Test that chunk size is auto-detected based on RAM"""
+        # Reset cache to force re-detection
+        from mpytool.mpy import Mpy as MpyClass
+        MpyClass._CHUNK_AUTO_DETECTED = None
+        # Upload triggers detection
+        data = b"test"
+        path = self.TEST_DIR + "/chunk_test.txt"
+        self.mpy.put(data, path)
+        # Chunk size should be detected and cached
+        self.assertIsNotNone(MpyClass._CHUNK_AUTO_DETECTED)
+        self.assertIn(MpyClass._CHUNK_AUTO_DETECTED, [512, 1024, 2048, 4096, 8192])
+
+
+@requires_device
+class TestCpWithFlags(unittest.TestCase):
+    """Test cp command with -f and -z flags"""
+
+    TEST_DIR = "/_mpytool_cpflags_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        cls.tool_compress = MpyTool(cls.conn, compress=True)
+        cls.tool_force = MpyTool(cls.conn, force=True)
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_cp_with_combined_flags(self):
+        """Test cp -fz with combined flags"""
+        import tempfile
+        import os
+        # Create temp file
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.txt', delete=False) as f:
+            f.write(b"A" * 1000)
+            temp_path = f.name
+        try:
+            # First upload
+            self.tool.cmd_cp(temp_path, ':' + self.TEST_DIR + '/')
+            # Second upload with -fz should force and compress
+            self.tool.cmd_cp('-fz', temp_path, ':' + self.TEST_DIR + '/')
+            # Verify file exists
+            basename = os.path.basename(temp_path)
+            content = self.mpy.get(self.TEST_DIR + '/' + basename)
+            self.assertEqual(content, b"A" * 1000)
+        finally:
+            os.unlink(temp_path)
+
+    def test_02_global_compress_flag(self):
+        """Test global compress flag from MpyTool constructor"""
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.txt', delete=False) as f:
+            f.write(b"B" * 1000)
+            temp_path = f.name
+        try:
+            self.tool_compress.cmd_cp('-f', temp_path, ':' + self.TEST_DIR + '/')
+            basename = os.path.basename(temp_path)
+            content = self.mpy.get(self.TEST_DIR + '/' + basename)
+            self.assertEqual(content, b"B" * 1000)
+        finally:
+            os.unlink(temp_path)
+
+
 if __name__ == "__main__":
     unittest.main()

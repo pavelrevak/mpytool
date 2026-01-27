@@ -27,27 +27,30 @@ class MpyTool():
     TEE = '├─ '
     LAST = '└─ '
 
-    def __init__(self, conn, log=None, verbose=None, exclude_dirs=None, force=False):
+    def __init__(self, conn, log=None, verbose=None, exclude_dirs=None, force=False, compress=None, chunk_size=None):
         self._conn = conn
         self._log = log if log is not None else SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
         self._exclude_dirs = {'__pycache__', '.git', '.svn'}
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
-        self._mpy = _mpytool.Mpy(conn, log=self._log)
+        self._mpy = _mpytool.Mpy(conn, log=self._log, chunk_size=chunk_size)
         self._force = force  # Skip unchanged file check
+        self._compress = compress  # Use compression for uploads
         # Progress tracking
         self._progress_total_files = 0
         self._progress_current_file = 0
         self._progress_src = ''
         self._progress_dst = ''
         self._progress_max_src_len = 0
+        self._progress_max_dst_len = 0
         self._is_debug = getattr(self._log, '_loglevel', 1) >= 4
         self._batch_mode = False
         self._skipped_files = 0
         # Transfer statistics
         self._stats_total_bytes = 0
         self._stats_transferred_bytes = 0
+        self._stats_wire_bytes = 0  # Actual bytes sent over wire (with encoding)
         self._stats_transferred_files = 0
         self._stats_start_time = None
         # Remote file info cache for batch operations
@@ -69,6 +72,14 @@ class MpyTool():
         if self._verbose_out is not None:
             self._verbose_out.verbose(msg, level, color, end, overwrite)
 
+    def print_transfer_info(self):
+        """Print transfer settings (chunk size and compression)"""
+        chunk = self._mpy._detect_chunk_size()
+        chunk_str = f"{chunk // 1024}K" if chunk >= 1024 else str(chunk)
+        compress = self._mpy._detect_deflate() if self._compress is None else self._compress
+        compress_str = "on" if compress else "off"
+        self.verbose(f"COPY (chunk: {chunk_str}, compress: {compress_str})", 1)
+
     @staticmethod
     def _format_local_path(path):
         """Format local path: relative from CWD, absolute if > 2 levels up"""
@@ -89,26 +100,37 @@ class MpyTool():
             # On Windows, relpath fails for different drives
             return _os.path.abspath(path)
 
-    def _format_progress_line(self, percent, total):
-        """Format progress line: [2/5] 100% 24.1K source -> dest"""
+    # Encoding info strings for alignment: (base64), (compressed), (base64, compressed), (unchanged)
+    _ENC_WIDTH = 22  # Length of longest: "  (base64, compressed)"
+
+    def _format_encoding_info(self, encodings, pad=False):
+        """Format encoding info: (base64), (compressed), (base64, compressed)"""
+        if not encodings or encodings == {'raw'}:
+            return " " * self._ENC_WIDTH if pad else ""
+        # Filter out 'raw' and sort for consistent output
+        types = sorted(e for e in encodings if e != 'raw')
+        if not types:
+            return " " * self._ENC_WIDTH if pad else ""
+        info = f"  ({', '.join(types)})"
+        if pad:
+            return f"{info:<{self._ENC_WIDTH}}"
+        return info
+
+    def _format_line(self, status, total, encodings=None):
+        """Format progress/skip line: [2/5] 100% 24.1K source -> dest (base64)"""
         size_str = self.format_size(total)
-        if self._progress_total_files > 1:
-            prefix = f"[{self._progress_current_file}/{self._progress_total_files}]"
-        else:
-            prefix = ""
-        # Pad source to align ->
-        src_width = max(len(self._progress_src), self._progress_max_src_len)
-        return f"{prefix:>7} {percent:3d}% {size_str:>5} {self._progress_src:<{src_width}} -> {self._progress_dst}"
+        multi = self._progress_total_files > 1
+        prefix = f"[{self._progress_current_file}/{self._progress_total_files}]" if multi else ""
+        src_w = max(len(self._progress_src), self._progress_max_src_len)
+        dst_w = max(len(self._progress_dst), self._progress_max_dst_len)
+        enc = self._format_encoding_info(encodings, pad=multi) if encodings else (" " * self._ENC_WIDTH if multi else "")
+        return f"{prefix:>7} {status} {size_str:>5} {self._progress_src:<{src_w}} -> {self._progress_dst:<{dst_w}}{enc}"
+
+    def _format_progress_line(self, percent, total, encodings=None):
+        return self._format_line(f"{percent:3d}%", total, encodings)
 
     def _format_skip_line(self, total):
-        """Format skip line: [2/5] skip  587B source (unchanged)"""
-        size_str = self.format_size(total)
-        if self._progress_total_files > 1:
-            prefix = f"[{self._progress_current_file}/{self._progress_total_files}]"
-        else:
-            prefix = ""
-        src_width = max(len(self._progress_src), self._progress_max_src_len)
-        return f"{prefix:>7} skip {size_str:>5} {self._progress_src:<{src_width}} -> {self._progress_dst}"
+        return self._format_line("skip", total, {'unchanged'})
 
     def _progress_callback(self, transferred, total):
         """Callback for file transfer progress"""
@@ -121,9 +143,9 @@ class MpyTool():
             # Normal mode: overwrite line
             self.verbose(line, color='cyan', end='', overwrite=True)
 
-    def _progress_complete(self, total):
+    def _progress_complete(self, total, encodings=None):
         """Mark current file as complete"""
-        line = self._format_progress_line(100, total)
+        line = self._format_progress_line(100, total, encodings)
         if self._is_debug:
             # Already printed with newline in callback
             pass
@@ -141,16 +163,19 @@ class MpyTool():
             self._progress_dst = ':' + dst
         else:
             self._progress_dst = self._format_local_path(dst)
+        # Track max dst length for alignment
+        if len(self._progress_dst) > self._progress_max_dst_len:
+            self._progress_max_dst_len = len(self._progress_dst)
 
-    def _count_local_files(self, path):
-        """Count files in local directory (excluding excluded dirs)"""
+    def _collect_local_paths(self, path):
+        """Collect all local file paths (formatted for display)"""
         if _os.path.isfile(path):
-            return 1
-        count = 0
-        for _, dirs, files in _os.walk(path, topdown=True):
+            return [self._format_local_path(path)]
+        paths = []
+        for root, dirs, files in _os.walk(path, topdown=True):
             dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
-            count += len(files)
-        return count
+            paths.extend(self._format_local_path(_os.path.join(root, f)) for f in files)
+        return paths
 
     def _prefetch_remote_info(self, dst_files):
         """Prefetch remote file info (size and hash) for multiple files
@@ -244,24 +269,6 @@ class MpyTool():
             return True  # hashlib not available on device
         return local_hash != remote_hash
 
-    def _count_remote_files(self, path):
-        """Count files on device"""
-        stat = self._mpy.stat(path)
-        if stat is None:
-            return 0
-        if stat >= 0:  # file
-            return 1
-        # directory - count recursively
-        count = 0
-        entries = self._mpy.ls(path)
-        for name, size in entries:
-            if size is None:  # directory
-                entry_path = path.rstrip('/') + '/' + name
-                count += self._count_remote_files(entry_path)
-            else:  # file
-                count += 1
-        return count
-
     def _collect_source_paths(self, commands):
         """Collect source paths for a cp/put command (for alignment calculation)"""
         paths = []
@@ -287,19 +294,6 @@ class MpyTool():
             paths.extend(self._collect_local_paths(src_path))
         return paths
 
-    def _collect_local_paths(self, path):
-        """Collect all local file paths (formatted for display)"""
-        paths = []
-        if _os.path.isfile(path):
-            paths.append(self._format_local_path(path))
-        elif _os.path.isdir(path):
-            for root, dirs, files in _os.walk(path, topdown=True):
-                dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
-                for f in files:
-                    full_path = _os.path.join(root, f)
-                    paths.append(self._format_local_path(full_path))
-        return paths
-
     def _collect_remote_paths(self, path):
         """Collect all remote file paths (formatted for display)"""
         paths = []
@@ -318,23 +312,95 @@ class MpyTool():
                     paths.append(':' + entry_path)
         return paths
 
+    def _collect_destination_paths(self, commands):
+        """Collect formatted destination paths for a cp/put command"""
+        if not commands:
+            return []
+        cmd = commands[0]
+        if cmd == 'cp' and len(commands) >= 3:
+            # Filter out flags
+            args = [a for a in commands[1:] if not a.startswith('-')]
+            if len(args) < 2:
+                return []
+            sources, dest = args[:-1], args[-1]
+            dest_is_remote = dest.startswith(':')
+            dest_path = (dest[1:] or '/') if dest_is_remote else dest
+            dest_is_dir = dest_path.endswith('/')
+            dst_paths = []
+            for src in sources:
+                src_is_remote = src.startswith(':')
+                src_path = ((src[1:] or '/') if src_is_remote else src).rstrip('/') or '/'
+                copy_contents = src.endswith('/')
+                if dest_is_remote and not src_is_remote:
+                    # local -> remote: reuse _collect_dst_files
+                    if _os.path.exists(src_path):
+                        files = self._collect_dst_files(src_path, dest_path.rstrip('/') or '/', not copy_contents)
+                        dst_paths.extend(':' + p for p in files)
+                elif not dest_is_remote and src_is_remote:
+                    # remote -> local
+                    dst_paths.extend(self._collect_remote_to_local_dst(src_path, dest_path, dest_is_dir, copy_contents))
+                elif dest_is_remote and src_is_remote:
+                    # remote -> remote (file only)
+                    stat = self._mpy.stat(src_path)
+                    if stat is not None and stat >= 0:
+                        basename = src_path.split('/')[-1]
+                        dst_paths.append(':' + (dest_path + basename if dest_is_dir else dest_path))
+            return dst_paths
+        elif cmd == 'put' and len(commands) >= 2:
+            src_path = commands[1]
+            dst_path = commands[2] if len(commands) > 2 else '/'
+            if _os.path.exists(src_path):
+                files = self._collect_dst_files(src_path, dst_path.rstrip('/') or '/', add_src_basename=True)
+                return [':' + p for p in files]
+        return []
+
+    def _collect_remote_to_local_dst(self, src_path, dest_path, dest_is_dir, copy_contents):
+        """Collect destination paths for remote->local copy"""
+        stat = self._mpy.stat(src_path)
+        if stat is None:
+            return []
+        base_dst = dest_path.rstrip('/') or '.'
+        if dest_is_dir and not copy_contents and src_path != '/':
+            base_dst = _os.path.join(base_dst, src_path.split('/')[-1])
+        if stat >= 0:  # file
+            if _os.path.isdir(base_dst) or dest_is_dir:
+                return [self._format_local_path(_os.path.join(base_dst, src_path.split('/')[-1]))]
+            return [self._format_local_path(base_dst)]
+        # directory - collect recursively
+        return self._collect_remote_dir_dst(src_path, base_dst)
+
+    def _collect_remote_dir_dst(self, src_path, base_dst):
+        """Collect local destination paths for remote directory download"""
+        paths = []
+        for name, size in self._mpy.ls(src_path):
+            entry_src = src_path.rstrip('/') + '/' + name
+            entry_dst = _os.path.join(base_dst, name)
+            if size is None:  # directory
+                paths.extend(self._collect_remote_dir_dst(entry_src, entry_dst))
+            else:  # file
+                paths.append(self._format_local_path(entry_dst))
+        return paths
+
     def count_files_for_command(self, commands):
         """Count files that would be transferred by cp/put command.
-        Returns (is_copy_command, file_count, source_paths)"""
-        paths = self._collect_source_paths(commands)
-        if paths:
-            return True, len(paths), paths
-        return False, 0, []
+        Returns (is_copy_command, file_count, source_paths, dest_paths)"""
+        src_paths = self._collect_source_paths(commands)
+        if src_paths:
+            dst_paths = self._collect_destination_paths(commands)
+            return True, len(src_paths), src_paths, dst_paths
+        return False, 0, [], []
 
-    def set_batch_progress(self, total_files, max_src_len=0):
+    def set_batch_progress(self, total_files, max_src_len=0, max_dst_len=0):
         """Set batch progress for consecutive copy commands"""
         self._progress_total_files = total_files
         self._progress_current_file = 0
         self._progress_max_src_len = max_src_len
+        self._progress_max_dst_len = max_dst_len
         self._batch_mode = True
         # Reset statistics for this batch
         self._stats_total_bytes = 0
         self._stats_transferred_bytes = 0
+        self._stats_wire_bytes = 0
         self._stats_transferred_files = 0
         self._skipped_files = 0
         self._stats_start_time = _time.time()
@@ -345,6 +411,7 @@ class MpyTool():
         self._progress_total_files = 0
         self._progress_current_file = 0
         self._progress_max_src_len = 0
+        self._progress_max_dst_len = 0
         self._remote_file_cache.clear()
 
     def print_copy_summary(self):
@@ -354,6 +421,7 @@ class MpyTool():
         elapsed = _time.time() - self._stats_start_time
         total = self._stats_total_bytes
         transferred = self._stats_transferred_bytes
+        wire = self._stats_wire_bytes
         total_files = self._stats_transferred_files + self._skipped_files
         # Format summary line
         parts = []
@@ -362,9 +430,11 @@ class MpyTool():
             speed = transferred / elapsed
             parts.append(f"{self.format_size(speed).strip()}/s")
         parts.append(f"{elapsed:.1f}s")
-        if total > 0 and transferred < total:
-            speedup = total / transferred if transferred > 0 else float('inf')
-            parts.append(f"speedup {speedup:.1f}")
+        # Combined speedup: total file size vs actual wire bytes
+        # Includes savings from: skipped files, base64 encoding, compression
+        if wire > 0 and total > wire:
+            speedup = total / wire
+            parts.append(f"speedup {speedup:.1f}x")
         summary = "  ".join(parts)
         # File counts
         if self._skipped_files > 0:
@@ -432,6 +502,30 @@ class MpyTool():
             data = self._mpy.get(file_name)
             print(data.decode('utf-8'))
 
+    def _upload_file(self, data, src_path, dst_path, show_progress):
+        """Upload file data to device with stats tracking and progress display"""
+        file_size = len(data)
+        self._stats_total_bytes += file_size
+        if not self._file_needs_update(data, dst_path):
+            self._skipped_files += 1
+            if show_progress and self._verbose >= 1:
+                self._progress_current_file += 1
+                self._set_progress_info(src_path, dst_path, False, True)
+                self.verbose(self._format_skip_line(file_size), color='yellow')
+            return False  # skipped
+        self._stats_transferred_bytes += file_size
+        self._stats_transferred_files += 1
+        if show_progress and self._verbose >= 1:
+            self._progress_current_file += 1
+            self._set_progress_info(src_path, dst_path, False, True)
+            encodings, wire = self._mpy.put(data, dst_path, self._progress_callback, self._compress)
+            self._stats_wire_bytes += wire
+            self._progress_complete(file_size, encodings)
+        else:
+            _, wire = self._mpy.put(data, dst_path, compress=self._compress)
+            self._stats_wire_bytes += wire
+        return True  # uploaded
+
     def _put_dir(self, src_path, dst_path, show_progress=True):
         basename = _os.path.basename(src_path)
         if basename:
@@ -439,82 +533,38 @@ class MpyTool():
         self.verbose(f"PUT DIR: {src_path} -> {dst_path}", 2)
         for path, dirs, files in _os.walk(src_path, topdown=True):
             dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
-            basename = _os.path.basename(path)
-            if basename in self._exclude_dirs:
+            if _os.path.basename(path) in self._exclude_dirs:
                 continue
             rel_path = _os.path.relpath(path, src_path)
-            if rel_path == '.':
-                rel_path = ''
-            rel_path = _os.path.join(dst_path, rel_path)
+            rel_path = _os.path.join(dst_path, '' if rel_path == '.' else rel_path)
             if rel_path:
                 self.verbose(f'MKDIR: {rel_path}', 2)
                 self._mpy.mkdir(rel_path)
             for file_name in files:
                 spath = _os.path.join(path, file_name)
-                dpath = _os.path.join(rel_path, file_name)
-                with open(spath, 'rb') as src_file:
-                    data = src_file.read()
-                file_size = len(data)
-                self._stats_total_bytes += file_size
-                # Check if file needs update
-                if not self._file_needs_update(data, dpath):
-                    self._skipped_files += 1
-                    if show_progress and self._verbose >= 1:
-                        self._progress_current_file += 1
-                        self._set_progress_info(spath, dpath, False, True)
-                        self.verbose(self._format_skip_line(file_size), color='yellow')
-                    continue
-                self._stats_transferred_bytes += file_size
-                self._stats_transferred_files += 1
-                if show_progress and self._verbose >= 1:
-                    self._progress_current_file += 1
-                    self._set_progress_info(spath, dpath, False, True)
-                    self._mpy.put(data, dpath, self._progress_callback)
-                    self._progress_complete(file_size)
-                else:
-                    self._mpy.put(data, dpath)
+                with open(spath, 'rb') as f:
+                    self._upload_file(f.read(), spath, _os.path.join(rel_path, file_name), show_progress)
 
     def _put_file(self, src_path, dst_path, show_progress=True):
         basename = _os.path.basename(src_path)
         if basename and not _os.path.basename(dst_path):
             dst_path = _os.path.join(dst_path, basename)
         self.verbose(f"PUT FILE: {src_path} -> {dst_path}", 2)
-        # Read local file
-        with open(src_path, 'rb') as src_file:
-            data = src_file.read()
-        file_size = len(data)
-        self._stats_total_bytes += file_size
-        # Check if file needs update
-        if not self._file_needs_update(data, dst_path):
-            self._skipped_files += 1
-            if show_progress and self._verbose >= 1:
-                self._progress_current_file += 1
-                self._set_progress_info(src_path, dst_path, False, True)
-                self.verbose(self._format_skip_line(file_size), color='yellow')
-            return
+        with open(src_path, 'rb') as f:
+            data = f.read()
         # Create parent directory if needed
-        path = _os.path.dirname(dst_path)
-        if path:
-            result = self._mpy.stat(path)
-            if result is None:
-                self._mpy.mkdir(path)
-            elif result >= 0:
-                raise _mpytool.MpyError(
-                    f'Error creating file under file: {path}')
-        # Upload file
-        self._stats_transferred_bytes += file_size
-        self._stats_transferred_files += 1
-        if show_progress and self._verbose >= 1:
-            self._progress_current_file += 1
-            self._set_progress_info(src_path, dst_path, False, True)
-            self._mpy.put(data, dst_path, self._progress_callback)
-            self._progress_complete(file_size)
-        else:
-            self._mpy.put(data, dst_path)
+        parent = _os.path.dirname(dst_path)
+        if parent:
+            stat = self._mpy.stat(parent)
+            if stat is None:
+                self._mpy.mkdir(parent)
+            elif stat >= 0:
+                raise _mpytool.MpyError(f'Error creating file under file: {parent}')
+        self._upload_file(data, src_path, dst_path, show_progress)
 
     def cmd_put(self, src_path, dst_path):
         if self._verbose >= 1 and not self._batch_mode:
-            self._progress_total_files = self._count_local_files(src_path)
+            self._progress_total_files = len(self._collect_local_paths(src_path))
             self._progress_current_file = 0
         if _os.path.isdir(src_path):
             self._put_dir(src_path, dst_path)
@@ -627,11 +677,13 @@ class MpyTool():
             self._progress_current_file += 1
             self._set_progress_info(src_path, dst_path, True, True)
             data = self._mpy.get(src_path, self._progress_callback)
-            self._mpy.put(data, dst_path)
-            self._progress_complete(len(data))
+            encodings, wire = self._mpy.put(data, dst_path, compress=self._compress)
+            self._stats_wire_bytes += wire
+            self._progress_complete(len(data), encodings)
         else:
             data = self._mpy.get(src_path)
-            self._mpy.put(data, dst_path)
+            _, wire = self._mpy.put(data, dst_path, compress=self._compress)
+            self._stats_wire_bytes += wire
         file_size = len(data)
         self._stats_total_bytes += file_size
         self._stats_transferred_bytes += file_size
@@ -639,20 +691,47 @@ class MpyTool():
 
     def cmd_cp(self, *args):
         """Copy files between local and device"""
-        # Parse -f flag from arguments
+        # Parse flags: -f/--force, -z/--compress, -Z/--no-compress
         args = list(args)
-        force = '-f' in args or '--force' in args
-        args = [a for a in args if a not in ('-f', '--force')]
+        force = None
+        compress = None  # None = use global setting
+        filtered_args = []
+        for a in args:
+            if a == '--force':
+                force = True
+            elif a == '--compress':
+                compress = True
+            elif a == '--no-compress':
+                compress = False
+            elif a.startswith('-') and not a.startswith('--') and len(a) > 1:
+                # Handle combined short flags like -fz, -fZ
+                flags = a[1:]
+                if 'f' in flags:
+                    force = True
+                if 'z' in flags:
+                    compress = True
+                if 'Z' in flags:
+                    compress = False
+                remaining = flags.replace('f', '').replace('z', '').replace('Z', '')
+                if remaining:
+                    filtered_args.append('-' + remaining)
+            else:
+                filtered_args.append(a)
+        args = filtered_args
         if len(args) < 2:
             raise ParamsError('cp requires source and destination')
-        # Save and set force flag for this command
+        # Save and set flags for this command
         saved_force = self._force
-        if force:
-            self._force = True
+        saved_compress = self._compress
+        if force is not None:
+            self._force = force
+        if compress is not None:
+            self._compress = compress
         try:
             self._cmd_cp_impl(args)
         finally:
             self._force = saved_force
+            self._compress = saved_compress
 
     def _cmd_cp_impl(self, args):
         """Internal implementation of cp command"""
@@ -675,24 +754,27 @@ class MpyTool():
                     src_path = '/'
                 src_path_clean = src_path.rstrip('/') or '/'
                 if src_is_remote:
-                    total_files += self._count_remote_files(src_path_clean)
+                    total_files += len(self._collect_remote_paths(src_path_clean))
                 else:
-                    total_files += self._count_local_files(src_path_clean)
+                    total_files += len(self._collect_local_paths(src_path_clean))
             self._progress_total_files = total_files
             self._progress_current_file = 0
-        # Prefetch remote file info for all local->remote copies (batch optimization)
-        if dest_is_remote and not self._force:
-            all_dst_files = {}
+        # Collect destination paths for alignment and prefetch
+        all_dst_files = {}
+        if dest_is_remote:
             for src in sources:
                 if not src.startswith(':'):  # local source
                     copy_contents = src.endswith('/')
                     src_path = src.rstrip('/')
                     if _os.path.exists(src_path):
-                        # Pass dest_path and let _collect_dst_files handle basename logic
-                        add_basename = not copy_contents  # copy_contents=True means don't add src basename
+                        add_basename = not copy_contents
                         all_dst_files.update(self._collect_dst_files(src_path, dest_path.rstrip('/') or '/', add_basename))
-            if all_dst_files:
-                self._prefetch_remote_info(all_dst_files)
+            # Set max_dst_len for alignment (add : prefix) - skip in batch mode (already set)
+            if all_dst_files and not self._batch_mode:
+                self._progress_max_dst_len = max(len(':' + p) for p in all_dst_files)
+            # Prefetch remote file info (skip if force)
+                if not self._force:
+                    self._prefetch_remote_info(all_dst_files)
         for src in sources:
             src_is_remote = src.startswith(':')
             src_path = src[1:] if src_is_remote else src
@@ -794,7 +876,7 @@ class MpyTool():
     def format_size(size):
         """Format size in bytes to human readable format (like ls -h)"""
         if size < 1024:
-            return f"{size}B"
+            return f"{int(size)}B"
         for unit in ('K', 'M', 'G', 'T'):
             size /= 1024
             if size < 10:
@@ -1044,32 +1126,55 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
     # Pre-scan to identify consecutive copy command batches (for progress)
     i = 0
     while i < len(command_groups):
-        is_copy, count, paths = mpy_tool.count_files_for_command(command_groups[i])
+        is_copy, count, src_paths, dst_paths = mpy_tool.count_files_for_command(command_groups[i])
         if not is_copy:
             mpy_tool.process_commands(command_groups[i])
             i += 1
             continue
         # Collect consecutive copy commands into a batch
         batch_total = count
-        all_paths = paths
+        all_src_paths = src_paths
+        all_dst_paths = dst_paths
         batch_start = i
         j = i + 1
         while j < len(command_groups):
-            is_copy_j, count_j, paths_j = mpy_tool.count_files_for_command(command_groups[j])
+            is_copy_j, count_j, src_paths_j, dst_paths_j = mpy_tool.count_files_for_command(command_groups[j])
             if not is_copy_j:
                 break
             batch_total += count_j
-            all_paths.extend(paths_j)
+            all_src_paths.extend(src_paths_j)
+            all_dst_paths.extend(dst_paths_j)
             j += 1
-        # Execute batch with combined count
-        max_src_len = max(len(p) for p in all_paths) if all_paths else 0
-        mpy_tool.verbose("COPY", 1)
-        mpy_tool.set_batch_progress(batch_total, max_src_len)
+        # Execute batch with combined count and alignment
+        max_src_len = max(len(p) for p in all_src_paths) if all_src_paths else 0
+        max_dst_len = max(len(p) for p in all_dst_paths) if all_dst_paths else 0
+        mpy_tool.print_transfer_info()
+        mpy_tool.set_batch_progress(batch_total, max_src_len, max_dst_len)
         for k in range(batch_start, j):
             mpy_tool.process_commands(command_groups[k])
         mpy_tool.print_copy_summary()
         mpy_tool.reset_batch_progress()
         i = j
+
+
+def _parse_chunk_size(value):
+    """Parse chunk size value (e.g., '1K', '2K', '4096')"""
+    valid = {512, 1024, 2048, 4096, 8192, 16384, 32768}
+    val = value.upper()
+    if val.endswith('K'):
+        try:
+            num = int(val[:-1]) * 1024
+        except ValueError:
+            raise _argparse.ArgumentTypeError(f"invalid chunk size: {value}")
+    else:
+        try:
+            num = int(value)
+        except ValueError:
+            raise _argparse.ArgumentTypeError(f"invalid chunk size: {value}")
+    if num not in valid:
+        valid_str = ', '.join(f'{v//1024}K' if v >= 1024 else str(v) for v in sorted(valid))
+        raise _argparse.ArgumentTypeError(f"chunk size must be one of: {valid_str}")
+    return num
 
 
 def main():
@@ -1093,6 +1198,15 @@ def main():
     parser.add_argument(
         "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
         'by default are excluded directories: __pycache__, .git, .svn')
+    parser.add_argument(
+        '-f', '--force', action='store_true', help='force overwrite (skip unchanged check)')
+    parser.add_argument(
+        '-z', '--compress', action='store_true', default=None, help='force compression')
+    parser.add_argument(
+        '-Z', '--no-compress', action='store_true', help='disable compression')
+    parser.add_argument(
+        '-c', '--chunk-size', type=_parse_chunk_size, metavar='SIZE',
+        help='transfer chunk size: 512, 1K, 2K, 4K, 8K, 16K, 32K (default: auto)')
     parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
     args = parser.parse_args()
     # Convert to numeric level: 0=quiet, 1=progress, 2=verbose
@@ -1129,7 +1243,14 @@ def main():
     except _mpytool.ConnError as err:
         log.error(err)
         return
-    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir)
+    # Determine compression setting: None=auto, True=force, False=disable
+    compress = None
+    if args.no_compress:
+        compress = False
+    elif args.compress:
+        compress = True
+    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir,
+                       force=args.force, compress=compress, chunk_size=args.chunk_size)
     command_groups = _utils.split_commands(args.commands)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))

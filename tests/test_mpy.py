@@ -78,7 +78,7 @@ class TestFileInfo(unittest.TestCase):
         self.mpy.fileinfo({"/a.txt": 100})
         # Check that helper was loaded (exec called with helper code)
         exec_calls = [str(c) for c in self.mpy._mpy_comm.exec.call_args_list]
-        helper_loaded = any("_mpytool_fileinfo" in c for c in exec_calls)
+        helper_loaded = any("_mt_finfo" in c for c in exec_calls)
         self.assertTrue(helper_loaded)
 
     def test_fileinfo_passes_sizes(self):
@@ -89,6 +89,212 @@ class TestFileInfo(unittest.TestCase):
         # Check that sizes are in the command
         self.assertIn("100", call_args[0][0])
         self.assertIn("200", call_args[0][0])
+
+
+class TestDetectChunkSize(unittest.TestCase):
+    """Tests for Mpy._detect_chunk_size method"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mpy = Mpy(self.mock_conn)
+        self.mpy._mpy_comm = Mock()
+        # Reset class-level cache before each test
+        Mpy._CHUNK_AUTO_DETECTED = None
+
+    def tearDown(self):
+        # Reset class-level cache after each test
+        Mpy._CHUNK_AUTO_DETECTED = None
+
+    def test_large_ram_uses_32k_chunks(self):
+        """Test that devices with >256KB RAM use 32KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 300 * 1024  # 300KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 32768)
+
+    def test_medium_large_ram_uses_16k_chunks(self):
+        """Test that devices with >128KB RAM use 16KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 150 * 1024  # 150KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 16384)
+
+    def test_medium_ram_uses_8k_chunks(self):
+        """Test that devices with >64KB RAM use 8KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 80 * 1024  # 80KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 8192)
+
+    def test_small_ram_uses_4k_chunks(self):
+        """Test that devices with >48KB RAM use 4KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 55 * 1024  # 55KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 4096)
+
+    def test_smaller_ram_uses_2k_chunks(self):
+        """Test that devices with >32KB RAM use 2KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 40 * 1024  # 40KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 2048)
+
+    def test_small_ram_uses_1k_chunks(self):
+        """Test that devices with >24KB RAM use 1KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 28 * 1024  # 28KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 1024)
+
+    def test_tiny_ram_uses_512_chunks(self):
+        """Test that devices with <=24KB RAM use 512B chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 512)
+
+    def test_error_defaults_to_512(self):
+        """Test that errors default to 512B chunks"""
+        from mpytool.mpy_comm import CmdError
+        self.mpy._mpy_comm.exec_eval.side_effect = CmdError("cmd", b"", b"error")
+        chunk = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk, 512)
+
+    def test_caches_result(self):
+        """Test that chunk size is cached after first detection"""
+        self.mpy._mpy_comm.exec_eval.return_value = 300 * 1024  # 300KB
+        chunk1 = self.mpy._detect_chunk_size()
+        # Change return value - should still use cached
+        self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
+        chunk2 = self.mpy._detect_chunk_size()
+        self.assertEqual(chunk1, chunk2)
+        self.assertEqual(chunk2, 32768)
+
+    def test_user_specified_skips_detection(self):
+        """Test that user-specified chunk size skips auto-detection"""
+        mpy = Mpy(self.mock_conn, chunk_size=4096)
+        mpy._mpy_comm = Mock()
+        chunk = mpy._detect_chunk_size()
+        self.assertEqual(chunk, 4096)
+        # exec_eval should not be called (no RAM detection)
+        mpy._mpy_comm.exec_eval.assert_not_called()
+
+
+class TestEncodeChunk(unittest.TestCase):
+    """Tests for Mpy._encode_chunk method"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mpy = Mpy(self.mock_conn)
+
+    def test_printable_ascii_uses_raw(self):
+        """Test that printable ASCII uses raw repr (shorter)"""
+        chunk = b"Hello World"
+        cmd, size, enc_type = self.mpy._encode_chunk(chunk)
+        self.assertEqual(size, 11)
+        self.assertEqual(enc_type, 'raw')
+        # Raw repr is shorter for printable ASCII
+        self.assertEqual(cmd, repr(chunk))
+
+    def test_binary_data_uses_base64(self):
+        """Test that binary data with many escapes uses base64"""
+        # All zeros - each byte would be \x00 (4 chars) in raw
+        chunk = b"\x00" * 100
+        cmd, size, enc_type = self.mpy._encode_chunk(chunk)
+        self.assertEqual(size, 100)
+        self.assertEqual(enc_type, 'base64')
+        # Base64 should be chosen (shorter than 400 chars of \x00\x00...)
+        self.assertIn("ub.a2b_base64", cmd)
+
+    def test_returns_correct_original_size(self):
+        """Test that original chunk size is returned"""
+        chunk = b"test data"
+        cmd, size, enc_type = self.mpy._encode_chunk(chunk)
+        self.assertEqual(size, len(chunk))
+
+    def test_compression_option(self):
+        """Test that compression is tried when enabled"""
+        # Highly compressible data
+        chunk = b"A" * 500
+        cmd, size, enc_type = self.mpy._encode_chunk(chunk, compress=True)
+        self.assertEqual(size, 500)
+        self.assertEqual(enc_type, 'compressed')
+        # Should use deflate (much smaller than raw or base64)
+        self.assertIn("df.DeflateIO", cmd)
+
+    def test_compression_not_used_for_incompressible(self):
+        """Test that compression is not used when data doesn't compress well"""
+        # Random-ish binary data that doesn't compress
+        import os
+        chunk = os.urandom(100)
+        cmd, size, enc_type = self.mpy._encode_chunk(chunk, compress=True)
+        # Should not use deflate (compression overhead makes it larger)
+        self.assertNotIn("df.DeflateIO", cmd)
+        self.assertIn(enc_type, ('raw', 'base64'))
+
+
+class TestPut(unittest.TestCase):
+    """Tests for Mpy.put method"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mpy = Mpy(self.mock_conn)
+        self.mpy._mpy_comm = Mock()
+        self.mpy._mpy_comm.exec_eval.return_value = 512  # Bytes written
+        # Set chunk size to avoid detection call
+        Mpy._CHUNK_AUTO_DETECTED = 512
+
+    def tearDown(self):
+        Mpy._CHUNK_AUTO_DETECTED = None
+
+    def test_returns_encodings_and_wire_bytes(self):
+        """Test that put returns encodings set and wire bytes"""
+        data = b"Hello World"
+        self.mpy._mpy_comm.exec_eval.return_value = len(data)
+        encodings, wire_bytes = self.mpy.put(data, "/test.txt")
+        self.assertIsInstance(encodings, set)
+        self.assertIsInstance(wire_bytes, int)
+        self.assertGreater(wire_bytes, 0)
+
+    def test_raw_encoding_for_text(self):
+        """Test that text data uses raw encoding"""
+        data = b"Hello World"
+        self.mpy._mpy_comm.exec_eval.return_value = len(data)
+        encodings, _ = self.mpy.put(data, "/test.txt")
+        self.assertIn('raw', encodings)
+
+    def test_base64_encoding_for_binary(self):
+        """Test that binary data uses base64 encoding"""
+        data = b"\x00" * 100
+        self.mpy._mpy_comm.exec_eval.return_value = len(data)
+        encodings, _ = self.mpy.put(data, "/test.bin")
+        self.assertIn('base64', encodings)
+
+    def test_compressed_encoding_when_enabled(self):
+        """Test that compressible data uses compressed encoding"""
+        data = b"A" * 1000  # Highly compressible
+        self.mpy._mpy_comm.exec_eval.return_value = len(data)
+        encodings, _ = self.mpy.put(data, "/test.txt", compress=True)
+        self.assertIn('compressed', encodings)
+
+    def test_wire_bytes_less_than_data_with_compression(self):
+        """Test that wire bytes are less than data size with compression"""
+        data = b"A" * 1000  # Highly compressible
+        self.mpy._mpy_comm.exec_eval.return_value = len(data)
+        _, wire_bytes = self.mpy.put(data, "/test.txt", compress=True)
+        # Wire bytes should be significantly less due to compression
+        # (accounting for command overhead)
+        self.assertLess(wire_bytes, len(data))
+
+    def test_wire_bytes_includes_command_overhead(self):
+        """Test that wire bytes include f.write() command overhead"""
+        data = b"x"  # Single byte
+        self.mpy._mpy_comm.exec_eval.return_value = 1
+        _, wire_bytes = self.mpy.put(data, "/test.txt")
+        # Should include 9 bytes overhead for "f.write(" + ")"
+        self.assertGreater(wire_bytes, len(repr(data)))
+
+    def test_progress_callback_called(self):
+        """Test that progress callback is called during transfer"""
+        data = b"Hello World"
+        self.mpy._mpy_comm.exec_eval.return_value = len(data)
+        callback = Mock()
+        self.mpy.put(data, "/test.txt", progress_callback=callback)
+        callback.assert_called()
 
 
 if __name__ == "__main__":
