@@ -1,15 +1,16 @@
 """MicroPython tool"""
 
+import argparse as _argparse
+import hashlib as _hashlib
+import importlib.metadata as _metadata
 import os as _os
 import sys as _sys
 import time as _time
-import argparse as _argparse
-import hashlib as _hashlib
+
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.utils as _utils
 from mpytool.logger import SimpleColorLogger
-import importlib.metadata as _metadata
 
 try:
     _about = _metadata.metadata("mpytool")
@@ -27,7 +28,9 @@ class MpyTool():
     TEE = '├─ '
     LAST = '└─ '
 
-    def __init__(self, conn, log=None, verbose=None, exclude_dirs=None, force=False, compress=None, chunk_size=None):
+    def __init__(
+            self, conn, log=None, verbose=None, exclude_dirs=None,
+            force=False, compress=None, chunk_size=None):
         self._conn = conn
         self._log = log if log is not None else SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
@@ -35,9 +38,8 @@ class MpyTool():
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
         self._mpy = _mpytool.Mpy(conn, log=self._log, chunk_size=chunk_size)
-        self._force = force  # Skip unchanged file check
-        self._compress = compress  # Use compression for uploads
-        # Progress tracking
+        self._force = force
+        self._compress = compress
         self._progress_total_files = 0
         self._progress_current_file = 0
         self._progress_src = ''
@@ -47,7 +49,6 @@ class MpyTool():
         self._is_debug = getattr(self._log, '_loglevel', 1) >= 4
         self._batch_mode = False
         self._skipped_files = 0
-        # Transfer statistics
         self._stats_total_bytes = 0
         self._stats_transferred_bytes = 0
         self._stats_wire_bytes = 0  # Actual bytes sent over wire (with encoding)
@@ -107,7 +108,6 @@ class MpyTool():
         """Format encoding info: (base64), (compressed), (base64, compressed)"""
         if not encodings or encodings == {'raw'}:
             return " " * self._ENC_WIDTH if pad else ""
-        # Filter out 'raw' and sort for consistent output
         types = sorted(e for e in encodings if e != 'raw')
         if not types:
             return " " * self._ENC_WIDTH if pad else ""
@@ -150,7 +150,6 @@ class MpyTool():
             # Already printed with newline in callback
             pass
         else:
-            # Print final line with newline
             self.verbose(line, color='cyan', overwrite=True)
 
     def _set_progress_info(self, src, dst, is_src_remote, is_dst_remote):
@@ -163,7 +162,6 @@ class MpyTool():
             self._progress_dst = ':' + dst
         else:
             self._progress_dst = self._format_local_path(dst)
-        # Track max dst length for alignment
         if len(self._progress_dst) > self._progress_max_dst_len:
             self._progress_max_dst_len = len(self._progress_dst)
 
@@ -187,7 +185,6 @@ class MpyTool():
         """
         if self._force or not dst_files:
             return
-        # Filter out already cached paths
         files_to_fetch = {p: s for p, s in dst_files.items() if p not in self._remote_file_cache}
         if not files_to_fetch:
             return
@@ -284,10 +281,8 @@ class MpyTool():
                     src_path = '/'
                 src_path = src_path.rstrip('/') or '/'
                 if src_is_remote:
-                    # Collect all file paths from remote
                     paths.extend(self._collect_remote_paths(src_path))
                 else:
-                    # Collect all file paths from local
                     paths.extend(self._collect_local_paths(src_path))
         elif cmd == 'put' and len(commands) >= 2:
             src_path = commands[1]
@@ -366,7 +361,6 @@ class MpyTool():
             if _os.path.isdir(base_dst) or dest_is_dir:
                 return [self._format_local_path(_os.path.join(base_dst, src_path.split('/')[-1]))]
             return [self._format_local_path(base_dst)]
-        # directory - collect recursively
         return self._collect_remote_dir_dst(src_path, base_dst)
 
     def _collect_remote_dir_dst(self, src_path, base_dst):
@@ -397,7 +391,6 @@ class MpyTool():
         self._progress_max_src_len = max_src_len
         self._progress_max_dst_len = max_dst_len
         self._batch_mode = True
-        # Reset statistics for this batch
         self._stats_total_bytes = 0
         self._stats_transferred_bytes = 0
         self._stats_wire_bytes = 0
@@ -423,7 +416,6 @@ class MpyTool():
         transferred = self._stats_transferred_bytes
         wire = self._stats_wire_bytes
         total_files = self._stats_transferred_files + self._skipped_files
-        # Format summary line
         parts = []
         parts.append(f"{self.format_size(transferred).strip()}")
         if elapsed > 0:
@@ -436,7 +428,6 @@ class MpyTool():
             speedup = total / wire
             parts.append(f"speedup {speedup:.1f}x")
         summary = "  ".join(parts)
-        # File counts
         if self._skipped_files > 0:
             file_info = f"{self._stats_transferred_files} transferred, {self._skipped_files} skipped"
         else:
@@ -552,7 +543,6 @@ class MpyTool():
         self.verbose(f"PUT FILE: {src_path} -> {dst_path}", 2)
         with open(src_path, 'rb') as f:
             data = f.read()
-        # Create parent directory if needed
         parent = _os.path.dirname(dst_path)
         if parent:
             stat = self._mpy.stat(parent)
@@ -576,7 +566,6 @@ class MpyTool():
     def _get_file(self, src_path, dst_path, show_progress=True):
         """Download single file from device"""
         self.verbose(f"GET FILE: {src_path} -> {dst_path}", 2)
-        # Create destination directory if needed
         dst_dir = _os.path.dirname(dst_path)
         if dst_dir and not _os.path.exists(dst_dir):
             _os.makedirs(dst_dir)
@@ -626,7 +615,6 @@ class MpyTool():
             dst_path = dst_path.rstrip('/')
         if src_is_dir:
             if copy_contents:
-                # Copy contents of directory
                 for item in _os.listdir(src_path):
                     item_src = _os.path.join(src_path, item)
                     if _os.path.isdir(item_src):
@@ -668,7 +656,6 @@ class MpyTool():
             raise ParamsError(f'Source not found on device: {src_path}')
         if stat == -1:
             raise ParamsError('Remote-to-remote directory copy not supported yet')
-        # File copy on device
         if dst_is_dir:
             basename = src_path.split('/')[-1]
             dst_path = dst_path + basename
@@ -734,7 +721,6 @@ class MpyTool():
             self._compress = saved_compress
 
     def _cmd_cp_impl(self, args):
-        """Internal implementation of cp command"""
         sources = list(args[:-1])
         dest = args[-1]
         dest_is_remote = dest.startswith(':')
@@ -744,7 +730,6 @@ class MpyTool():
         dest_is_dir = dest_path.endswith('/')
         if len(sources) > 1 and not dest_is_dir:
             raise ParamsError('multiple sources require destination directory (ending with /)')
-        # Count total files for progress (only if not in batch mode)
         if self._verbose >= 1 and not self._batch_mode:
             total_files = 0
             for src in sources:
@@ -759,7 +744,6 @@ class MpyTool():
                     total_files += len(self._collect_local_paths(src_path_clean))
             self._progress_total_files = total_files
             self._progress_current_file = 0
-        # Collect destination paths for alignment and prefetch
         all_dst_files = {}
         if dest_is_remote:
             for src in sources:
@@ -769,10 +753,8 @@ class MpyTool():
                     if _os.path.exists(src_path):
                         add_basename = not copy_contents
                         all_dst_files.update(self._collect_dst_files(src_path, dest_path.rstrip('/') or '/', add_basename))
-            # Set max_dst_len for alignment (add : prefix) - skip in batch mode (already set)
             if all_dst_files and not self._batch_mode:
                 self._progress_max_dst_len = max(len(':' + p) for p in all_dst_files)
-            # Prefetch remote file info (skip if force)
                 if not self._force:
                     self._prefetch_remote_info(all_dst_files)
         for src in sources:
@@ -795,7 +777,6 @@ class MpyTool():
             raise ParamsError('mv requires source and destination')
         sources = list(args[:-1])
         dest = args[-1]
-        # Validate all paths are remote
         if not dest.startswith(':'):
             raise ParamsError('mv destination must be device path (: prefix)')
         for src in sources:
@@ -812,7 +793,6 @@ class MpyTool():
             if stat is None:
                 raise ParamsError(f'Source not found on device: {src_path}')
             if dest_is_dir:
-                # Ensure destination directory exists
                 dst_dir = dest_path.rstrip('/')
                 if dst_dir and self._mpy.stat(dst_dir) is None:
                     self._mpy.mkdir(dst_dir)
@@ -912,8 +892,6 @@ class MpyTool():
     def cmd_ota(self, firmware_path):
         """OTA firmware update from local .app-bin file"""
         self.verbose("OTA UPDATE", 1)
-
-        # Read firmware file
         if not _os.path.isfile(firmware_path):
             raise ParamsError(f"Firmware file not found: {firmware_path}")
 
@@ -922,21 +900,15 @@ class MpyTool():
 
         fw_size = len(firmware)
         self.verbose(f"  Firmware: {self.format_size(fw_size)}", 1)
-
-        # Get partition info to show target
         info = self._mpy.partitions()
         if not info['next_ota']:
             raise _mpytool.MpyError("OTA not available (no OTA partitions)")
 
         self.verbose(f"  Target: {info['next_ota']} ({self.format_size(info['next_ota_size'])})", 1)
-
-        # Show transfer settings
         use_compress = self._mpy._detect_deflate()
         chunk_size = self._mpy._detect_chunk_size()
         chunk_str = f"{chunk_size // 1024}K" if chunk_size >= 1024 else str(chunk_size)
         self.verbose(f"  Writing (chunk: {chunk_str}, compress: {'on' if use_compress else 'off'})...", 1)
-
-        # Progress tracking
         start_time = _time.time()
 
         def progress_callback(transferred, total, wire_bytes):
@@ -947,10 +919,7 @@ class MpyTool():
                 line = f"  Writing: {pct:3d}% {self.format_size(transferred):>6} / {self.format_size(total)}  {speed:.1f} KB/s"
                 self.verbose(line, color='cyan', end='', overwrite=True)
 
-        # Write firmware
         result = self._mpy.ota_write(firmware, progress_callback, self._compress)
-
-        # Final stats
         elapsed = _time.time() - start_time
         speed = fw_size / elapsed / 1024 if elapsed > 0 else 0
         ratio = fw_size / result['wire_bytes'] if result['wire_bytes'] > 0 else 1
@@ -965,8 +934,6 @@ class MpyTool():
         """List ESP32 partitions"""
         self.verbose("PARTITIONS", 2)
         info = self._mpy.partitions()
-
-        # Print header
         print(f"{'Label':<12} {'Type':<8} {'Subtype':<10} {'Address':>10} {'Size':>10} {'Flags'}")
         print("-" * 65)
 
@@ -1035,30 +1002,20 @@ class MpyTool():
 
     def cmd_info(self):
         self.verbose("INFO", 2)
-
-        # Platform info
         plat = self._mpy.platform()
         print(f"Platform:    {plat['platform']}")
         print(f"Version:     {plat['version']}")
         print(f"Impl:        {plat['impl']}")
         if plat['machine']:
             print(f"Machine:     {plat['machine']}")
-
-        # Unique ID
         uid = self._mpy.unique_id()
         if uid:
             print(f"Serial:      {uid}")
-
-        # MAC addresses
         for iface, mac in self._mpy.mac_addresses():
             print(f"MAC {iface + ':':<8} {mac}")
-
-        # Memory
         mem = self._mpy.memory()
         mem_pct = (mem['alloc'] / mem['total'] * 100) if mem['total'] > 0 else 0
         print(f"Memory:      {self.format_size(mem['alloc'])} / {self.format_size(mem['total'])} ({mem_pct:.2f}%)")
-
-        # Filesystems
         for fs in self._mpy.filesystems():
             label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
             fs_pct = (fs['used'] / fs['total'] * 100) if fs['total'] > 0 else 0
@@ -1299,7 +1256,6 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
             is_last = (i == len(command_groups) - 1)
             mpy_tool.process_commands(commands, is_last_group=is_last)
         return
-    # Pre-scan to identify consecutive copy command batches (for progress)
     i = 0
     while i < len(command_groups):
         is_copy, count, src_paths, dst_paths = mpy_tool.count_files_for_command(command_groups[i])
@@ -1308,7 +1264,6 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
             mpy_tool.process_commands(command_groups[i], is_last_group=is_last)
             i += 1
             continue
-        # Collect consecutive copy commands into a batch
         batch_total = count
         all_src_paths = src_paths
         all_dst_paths = dst_paths
@@ -1322,7 +1277,6 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
             all_src_paths.extend(src_paths_j)
             all_dst_paths.extend(dst_paths_j)
             j += 1
-        # Execute batch with combined count and alignment
         max_src_len = max(len(p) for p in all_src_paths) if all_src_paths else 0
         max_dst_len = max(len(p) for p in all_dst_paths) if all_dst_paths else 0
         mpy_tool.print_transfer_info()
@@ -1429,8 +1383,9 @@ def main():
         compress = False
     elif args.compress:
         compress = True
-    mpy_tool = MpyTool(conn, log=log, verbose=log, exclude_dirs=args.exclude_dir,
-                       force=args.force, compress=compress, chunk_size=args.chunk_size)
+    mpy_tool = MpyTool(
+        conn, log=log, verbose=log, exclude_dirs=args.exclude_dir,
+        force=args.force, compress=compress, chunk_size=args.chunk_size)
     command_groups = _utils.split_commands(args.commands)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))

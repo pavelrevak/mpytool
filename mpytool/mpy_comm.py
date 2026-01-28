@@ -60,8 +60,6 @@ class MpyComm():
             return True
         if self._log:
             self._log.info('STOP CURRENT OPERATION')
-
-        # Flush any pending data first
         self._conn.flush()
 
         # Try multiple attempts with short timeouts
@@ -141,7 +139,6 @@ class MpyComm():
         Raises:
             CmdError when command return error
         """
-        # wait for prompt
         self.enter_raw_repl()
         if self._log:
             self._log.info("CMD: %s", command)

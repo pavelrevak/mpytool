@@ -225,7 +225,6 @@ def _mt_finfo(files):
             path = ''
         if path in ('', '.', '/'):
             return self._mpy_comm.exec_eval(f"_mt_tree('{_escape_path(path)}')")
-        # check if path exists
         result = self.stat(path)
         if result is None:
             raise DirNotFound(path)
@@ -310,7 +309,6 @@ def _mt_finfo(files):
         timeout = 5 + len(files) * 0.5
         try:
             result = self._mpy_comm.exec_eval(f"_mt_finfo({escaped_files})", timeout=timeout)
-            # Decode base64 hashes
             for path, info in result.items():
                 if info and info[1]:
                     result[path] = (info[0], base64.b64decode(info[1]))
@@ -328,7 +326,6 @@ def _mt_finfo(files):
         Returns:
             bytes with file content
         """
-        # Get file size first if callback provided
         total_size = 0
         if progress_callback:
             total_size = self.stat(path)
@@ -395,12 +392,10 @@ def _mt_finfo(files):
         Returns:
             chunk size in bytes (512, 1024, 2048, 4096, 8192, 16384, or 32768)
         """
-        # Return user-specified chunk size if provided
         if self._chunk_size is not None:
             return self._chunk_size
         if Mpy._CHUNK_AUTO_DETECTED is not None:
             return Mpy._CHUNK_AUTO_DETECTED
-        # Get free RAM after garbage collection
         self.import_module('gc')
         self._mpy_comm.exec("gc.collect()")
         try:
@@ -464,11 +459,9 @@ def _mt_finfo(files):
         wire_bytes = 0
         encodings_used = set()
 
-        # Resolve compression setting
         if compress is None:
             compress = self._detect_deflate()
 
-        # Import modules for encoding
         self.import_module('ubinascii as ub')
         if compress:
             self.import_module('deflate as df')
@@ -565,7 +558,6 @@ def _mt_finfo(files):
         addresses = []
         try:
             self.import_module('network')
-            # WiFi STA
             try:
                 mac = self._mpy_comm.exec_eval(
                     "repr(network.WLAN(network.STA_IF).config('mac').hex(':'))"
@@ -573,7 +565,6 @@ def _mt_finfo(files):
                 addresses.append(('WiFi', mac))
             except _mpy_comm.CmdError:
                 pass
-            # WiFi AP
             try:
                 mac = self._mpy_comm.exec_eval(
                     "repr(network.WLAN(network.AP_IF).config('mac').hex(':'))"
@@ -582,7 +573,6 @@ def _mt_finfo(files):
                     addresses.append(('WiFi AP', mac))
             except _mpy_comm.CmdError:
                 pass
-            # LAN/Ethernet
             try:
                 mac = self._mpy_comm.exec_eval(
                     "repr(network.LAN().config('mac').hex(':'))"
@@ -658,7 +648,6 @@ def _mt_finfo(files):
         result['filesystems'] = self.filesystems()
         return result
 
-    # Partition type/subtype name mappings
     _PART_TYPES = {0: 'app', 1: 'data'}
     _PART_SUBTYPES = {
         # App subtypes (type 0)
@@ -689,12 +678,10 @@ def _mt_finfo(files):
         except _mpy_comm.CmdError:
             raise _mpy_comm.MpyError("Partition info not available (ESP32 only)")
 
-        # Get running partition label
         running = self._mpy_comm.exec_eval(
             "repr(esp32.Partition(esp32.Partition.RUNNING).info()[4])"
         )
 
-        # Get all partitions (app + data)
         raw_parts = self._mpy_comm.exec_eval(
             "[p.info() for p in "
             "esp32.Partition.find(esp32.Partition.TYPE_APP) + "
@@ -718,7 +705,6 @@ def _mt_finfo(files):
                 'running': label == running,
             })
 
-        # Get boot partition
         try:
             boot = self._mpy_comm.exec_eval(
                 "repr(esp32.Partition(esp32.Partition.BOOT).info()[4])"
@@ -808,6 +794,80 @@ def _mt_finfo(files):
         self._conn.reset_to_bootloader()
         self.reset_state()
 
+    def _write_partition_data(
+            self, part_var, data, data_size, part_size,
+            progress_callback=None, compress=None):
+        """Write data to partition (shared implementation)
+
+        Arguments:
+            part_var: variable name holding partition on device (e.g. '_part')
+            data: bytes to write
+            data_size: size of data
+            part_size: partition size (for validation)
+            progress_callback: optional callback(transferred, total, wire_bytes)
+            compress: None=auto-detect, True=force, False=disable
+
+        Returns:
+            tuple: (wire_bytes, used_compress)
+        """
+        if data_size > part_size:
+            raise _mpy_comm.MpyError(
+                f"Data too large: {data_size} > {part_size} bytes"
+            )
+
+        if compress is None:
+            compress = self._detect_deflate()
+
+        flash_block = 4096
+        chunk_size = self._detect_chunk_size()
+        chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
+
+        self.import_module('ubinascii as ub')
+        if compress:
+            self.import_module('deflate as df')
+            self.import_module('io as _io')
+
+        block_num = 0
+        offset = 0
+        wire_bytes = 0
+        used_compress = False
+
+        while offset < data_size:
+            chunk = data[offset:offset + chunk_size]
+            chunk_len = len(chunk)
+
+            # Pad last chunk to flash block size
+            if chunk_len % flash_block:
+                padding = flash_block - (chunk_len % flash_block)
+                chunk = chunk + b'\xff' * padding
+
+            if compress:
+                compressed = zlib.compress(chunk)
+                comp_b64 = base64.b64encode(compressed).decode('ascii')
+                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                if len(comp_b64) < len(raw_b64) - 20:
+                    cmd = f"{part_var}.writeblocks({block_num}, df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read())"
+                    wire_bytes += len(comp_b64)
+                    used_compress = True
+                else:
+                    cmd = f"{part_var}.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
+                    wire_bytes += len(raw_b64)
+            else:
+                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                cmd = f"{part_var}.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
+                wire_bytes += len(raw_b64)
+
+            self._mpy_comm.exec(cmd, timeout=30)
+
+            blocks_written = len(chunk) // flash_block
+            block_num += blocks_written
+            offset += chunk_size
+
+            if progress_callback:
+                progress_callback(min(offset, data_size), data_size, wire_bytes)
+
+        return wire_bytes, used_compress
+
     def ota_write(self, data, progress_callback=None, compress=None):
         """Write firmware data to next OTA partition
 
@@ -831,7 +891,6 @@ def _mt_finfo(files):
         except _mpy_comm.CmdError:
             raise _mpy_comm.MpyError("OTA not available (ESP32 only)")
 
-        # Get next OTA partition info
         try:
             part_info = self._mpy_comm.exec_eval(
                 "esp32.Partition(esp32.Partition.RUNNING).get_next_update().info()"
@@ -842,76 +901,15 @@ def _mt_finfo(files):
         part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
         fw_size = len(data)
 
-        if fw_size > part_size:
-            raise _mpy_comm.MpyError(
-                f"Firmware too large: {fw_size} > {part_size} bytes"
-            )
+        self._mpy_comm.exec("_part = esp32.Partition(esp32.Partition.RUNNING).get_next_update()")
 
-        # Resolve compression setting
-        if compress is None:
-            compress = self._detect_deflate()
+        wire_bytes, used_compress = self._write_partition_data(
+            '_part', data, fw_size, part_size, progress_callback, compress
+        )
 
-        # Flash block size
-        flash_block = 4096
-        # Transfer chunk size (multiple of flash block for efficiency)
-        chunk_size = self._detect_chunk_size()
-        # Round down to flash block multiple
-        chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
+        self._mpy_comm.exec("_part.set_boot()")
 
-        # Prepare partition for writing
-        self._mpy_comm.exec("_ota_p = esp32.Partition(esp32.Partition.RUNNING).get_next_update()")
-        self.import_module('ubinascii as ub')
-        if compress:
-            self.import_module('deflate as df')
-            self.import_module('io as _io')
-
-        # Write firmware
-        block_num = 0
-        offset = 0
-        wire_bytes = 0
-        used_compress = False
-
-        while offset < fw_size:
-            chunk = data[offset:offset + chunk_size]
-            chunk_len = len(chunk)
-
-            # Pad last chunk to flash block size
-            if chunk_len % flash_block:
-                padding = flash_block - (chunk_len % flash_block)
-                chunk = chunk + b'\xff' * padding
-
-            # Encode chunk (reuse _encode_chunk logic)
-            if compress:
-                compressed = zlib.compress(chunk)
-                comp_b64 = base64.b64encode(compressed).decode('ascii')
-                raw_b64 = base64.b64encode(chunk).decode('ascii')
-                # Use compression if significantly smaller
-                if len(comp_b64) < len(raw_b64) - 20:
-                    cmd = f"_ota_p.writeblocks({block_num}, df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read())"
-                    wire_bytes += len(comp_b64)
-                    used_compress = True
-                else:
-                    cmd = f"_ota_p.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
-                    wire_bytes += len(raw_b64)
-            else:
-                raw_b64 = base64.b64encode(chunk).decode('ascii')
-                cmd = f"_ota_p.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
-                wire_bytes += len(raw_b64)
-
-            self._mpy_comm.exec(cmd, timeout=30)
-
-            blocks_written = len(chunk) // flash_block
-            block_num += blocks_written
-            offset += chunk_size
-
-            if progress_callback:
-                progress_callback(min(offset, fw_size), fw_size, wire_bytes)
-
-        # Set as boot partition
-        self._mpy_comm.exec("_ota_p.set_boot()")
-
-        # Cleanup
-        self._mpy_comm.exec("del _ota_p")
+        self._mpy_comm.exec("del _part")
         self.import_module('gc')
         self._mpy_comm.exec("gc.collect()")
 
@@ -952,9 +950,8 @@ def _mt_finfo(files):
 
         part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
 
-        # Block size for reading
         block_size = 4096
-        chunk_blocks = 8  # Read 8 blocks at a time (32KB)
+        chunk_blocks = 8  # 32KB per iteration
 
         self._mpy_comm.exec(
             f"_part = (esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
@@ -970,7 +967,6 @@ def _mt_finfo(files):
             blocks_to_read = min(chunk_blocks, total_blocks - block_num)
             bytes_to_read = blocks_to_read * block_size
 
-            # Read blocks and encode as base64
             self._mpy_comm.exec(f"_buf=bytearray({bytes_to_read}); _part.readblocks({block_num}, _buf)")
             b64_data = self._mpy_comm.exec_eval("repr(ub.b2a_base64(_buf).decode())")
             chunk = base64.b64decode(b64_data)
@@ -981,9 +977,7 @@ def _mt_finfo(files):
             if progress_callback:
                 progress_callback(min(block_num * block_size, part_size), part_size)
 
-        # Cleanup
         self._mpy_comm.exec("del _part")
-
         return bytes(data[:part_size])
 
     def partition_write(self, label, data, progress_callback=None, compress=None):
@@ -1018,72 +1012,15 @@ def _mt_finfo(files):
         part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
         data_size = len(data)
 
-        if data_size > part_size:
-            raise _mpy_comm.MpyError(
-                f"Data too large: {data_size} > {part_size} bytes"
-            )
-
-        # Resolve compression setting
-        if compress is None:
-            compress = self._detect_deflate()
-
-        # Flash block size
-        flash_block = 4096
-        chunk_size = self._detect_chunk_size()
-        chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
-
-        # Prepare partition for writing
         self._mpy_comm.exec(
             f"_part = (esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
             f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0]"
         )
-        self.import_module('ubinascii as ub')
-        if compress:
-            self.import_module('deflate as df')
-            self.import_module('io as _io')
 
-        # Write data
-        block_num = 0
-        offset = 0
-        wire_bytes = 0
-        used_compress = False
+        wire_bytes, used_compress = self._write_partition_data(
+            '_part', data, data_size, part_size, progress_callback, compress
+        )
 
-        while offset < data_size:
-            chunk = data[offset:offset + chunk_size]
-            chunk_len = len(chunk)
-
-            # Pad last chunk to flash block size
-            if chunk_len % flash_block:
-                padding = flash_block - (chunk_len % flash_block)
-                chunk = chunk + b'\xff' * padding
-
-            # Encode chunk
-            if compress:
-                compressed = zlib.compress(chunk)
-                comp_b64 = base64.b64encode(compressed).decode('ascii')
-                raw_b64 = base64.b64encode(chunk).decode('ascii')
-                if len(comp_b64) < len(raw_b64) - 20:
-                    cmd = f"_part.writeblocks({block_num}, df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read())"
-                    wire_bytes += len(comp_b64)
-                    used_compress = True
-                else:
-                    cmd = f"_part.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
-                    wire_bytes += len(raw_b64)
-            else:
-                raw_b64 = base64.b64encode(chunk).decode('ascii')
-                cmd = f"_part.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
-                wire_bytes += len(raw_b64)
-
-            self._mpy_comm.exec(cmd, timeout=30)
-
-            blocks_written = len(chunk) // flash_block
-            block_num += blocks_written
-            offset += chunk_size
-
-            if progress_callback:
-                progress_callback(min(offset, data_size), data_size, wire_bytes)
-
-        # Cleanup
         self._mpy_comm.exec("del _part")
         self.import_module('gc')
         self._mpy_comm.exec("gc.collect()")
