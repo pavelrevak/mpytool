@@ -365,41 +365,60 @@ mpytool also provides a **Python API** suitable for integration into IDEs and cu
 
 Tab completion for ZSH and Bash with support for commands, options, and remote file paths on the device.
 
-### ZSH (one-liner install)
+Completion files are in `completions/` directory:
+- `_mpytool` - ZSH completion
+- `mpytool.bash` - Bash completion
 
+### ZSH
+
+**Completion file:** `completions/_mpytool`
+
+**Where to put it:**
+- `~/.zsh/completions/_mpytool` (user directory, recommended)
+- `/usr/local/share/zsh/site-functions/_mpytool` (system-wide)
+
+**Configuration in `~/.zshrc`:**
 ```bash
-mkdir -p ~/.zsh/completions && curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/_mpytool -o ~/.zsh/completions/_mpytool && echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc && exec zsh
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
 ```
 
-Or step by step:
+**Quick install (or update):**
 ```bash
-# Download completion file
 mkdir -p ~/.zsh/completions
 curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/_mpytool -o ~/.zsh/completions/_mpytool
-
-# Add to ~/.zshrc (if not already there)
-echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc
-
-# Restart shell
+grep -q '\.zsh/completions' ~/.zshrc || echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc
 exec zsh
 ```
 
-### Bash (one-liner install)
+### Bash
 
-Linux:
+**Completion file:** `completions/mpytool.bash`
+
+**Where to put it:**
+- `/etc/bash_completion.d/mpytool` (Linux system-wide, requires sudo)
+- `/usr/local/etc/bash_completion.d/mpytool` (macOS Homebrew)
+- `~/.mpytool-completion.bash` (user directory)
+
+**Configuration in `~/.bashrc`** (only for user directory):
+```bash
+source ~/.mpytool-completion.bash
+```
+
+**Quick install (Linux system-wide):**
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o /etc/bash_completion.d/mpytool && exec bash
 ```
 
-macOS (Homebrew):
+**Quick install (macOS Homebrew):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o /usr/local/etc/bash_completion.d/mpytool && exec bash
 ```
 
-Or manually to home directory:
+**Quick install (user directory):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o ~/.mpytool-completion.bash
-echo 'source ~/.mpytool-completion.bash' >> ~/.bashrc
+grep -q 'mpytool-completion' ~/.bashrc || echo 'source ~/.mpytool-completion.bash' >> ~/.bashrc
 exec bash
 ```
 
