@@ -12,6 +12,12 @@ Target of this project is cleaner code, better performance, and improved verbose
 pip3 install mpytool
 ```
 
+### Installation from git (latest development version)
+
+```bash
+pip3 install git+https://github.com/pavelrevak/mpytool.git
+```
+
 ### Installation in virtualenv
 
 Create a dedicated virtualenv for CLI tools (keeps your system Python clean):
@@ -109,7 +115,8 @@ $ mpytool rm /                    # delete everything on device
 
 reset and REPL:
 ```
-$ mpytool reset              # soft reset (Ctrl-D)
+$ mpytool reset              # soft reset (Ctrl-D, runs boot.py/main.py)
+$ mpytool sreset             # soft reset in raw REPL (clears RAM only)
 $ mpytool mreset             # MCU reset (machine.reset, auto-reconnect)
 $ mpytool rtsreset           # hardware reset via RTS signal (serial only)
 $ mpytool bootloader         # enter bootloader (machine.bootloader)
@@ -117,6 +124,16 @@ $ mpytool dtrboot            # enter bootloader via DTR/RTS (ESP32 only)
 $ mpytool reset monitor      # reset and monitor output
 $ mpytool repl               # enter REPL mode
 ```
+
+serial terminal and monitor (general purpose):
+```
+$ mpytool repl                       # auto-detect port, 115200 baud
+$ mpytool -p /dev/ttyUSB0 repl       # specify port
+$ mpytool -b 9600 repl               # specify baudrate
+$ mpytool -p /dev/ttyUSB0 -b 9600 monitor   # monitor at 9600 baud
+```
+
+Both `repl` and `monitor` can be used as general-purpose serial tools - not just for MicroPython devices. Use them to interact with any serial device (Arduino, ESP with custom firmware, GPS modules, etc.). When only one serial port is detected, it is used automatically. Default baudrate is 115200.
 
 execute Python code on device:
 ```

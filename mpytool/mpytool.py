@@ -1019,6 +1019,12 @@ class MpyTool():
                 self.verbose(f"  reconnect failed: {err}", 1, color='red')
                 raise _mpytool.ConnError(f"Reconnect failed: {err}")
 
+    def cmd_sreset(self):
+        """Soft reset in raw REPL - clears RAM but doesn't run boot.py/main.py"""
+        self.verbose("SRESET", 1)
+        self._mpy.comm.soft_reset_raw()
+        self._mpy.reset_state()
+
     def cmd_rtsreset(self):
         """Hardware reset device using RTS signal"""
         self.verbose("RTSRESET", 1)
@@ -1096,6 +1102,8 @@ class MpyTool():
                     # Reconnect only if there are more commands (in this or next group)
                     has_more = bool(commands) or not is_last_group
                     self.cmd_mreset(reconnect=has_more)
+                elif command == 'sreset':
+                    self.cmd_sreset()
                 elif command in ('monitor', 'follow'):
                     self.cmd_monitor()
                     break
@@ -1156,7 +1164,8 @@ List of available commands:
   put {src_path} [{dst_path}]   put file or directory to destination
   mkdir {path} [...]            create directory (also create all parents)
   delete {path} [...]           remove file/dir (path/ = contents only)
-  reset                         soft reset (Ctrl-D)
+  reset                         soft reset (Ctrl-D, runs boot.py/main.py)
+  sreset                        soft reset in raw REPL (clears RAM only)
   mreset                        MCU reset (machine.reset, auto-reconnect)
   rtsreset                      RTS reset (hardware reset via RTS signal)
   bootloader                    enter bootloader (machine.bootloader)

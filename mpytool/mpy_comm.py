@@ -118,6 +118,16 @@ class MpyComm():
         self._conn.read_until(b'soft reboot', timeout=1)
         self._repl_mode = None
 
+    def soft_reset_raw(self):
+        """Soft reset in raw REPL mode - clears RAM but doesn't run boot.py/main.py"""
+        self.enter_raw_repl()
+        if self._log:
+            self._log.info('SOFT RESET (raw)')
+        self._conn.write(b'\x04')
+        self._conn.read_until(b'soft reboot', timeout=1)
+        self._conn.read_until(b'>', timeout=1)
+        self._repl_mode = True
+
     def exec(self, command, timeout=5):
         """Execute command
 
