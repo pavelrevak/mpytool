@@ -577,12 +577,13 @@ class TestEncodingAndCompression(unittest.TestCase):
         # Verify file content
         self.assertEqual(self.mpy.get(path), data)
 
-    def test_02_binary_upload_uses_base64(self):
-        """Test that binary files use base64 encoding"""
+    def test_02_binary_upload_uses_base64_or_compressed(self):
+        """Test that binary files use base64 or compressed encoding"""
         data = bytes(range(256)) * 4  # 1KB of all byte values
         path = self.TEST_DIR + "/binary.bin"
         encodings, wire_bytes = self.mpy.put(data, path)
-        self.assertIn('base64', encodings)
+        # Binary data uses base64 or compressed (if deflate available)
+        self.assertTrue('base64' in encodings or 'compressed' in encodings)
         # Verify file content
         self.assertEqual(self.mpy.get(path), data)
 
@@ -619,7 +620,7 @@ class TestEncodingAndCompression(unittest.TestCase):
         self.mpy.put(data, path)
         # Chunk size should be detected and cached
         self.assertIsNotNone(MpyClass._CHUNK_AUTO_DETECTED)
-        self.assertIn(MpyClass._CHUNK_AUTO_DETECTED, [512, 1024, 2048, 4096, 8192])
+        self.assertIn(MpyClass._CHUNK_AUTO_DETECTED, [512, 1024, 2048, 4096, 8192, 16384, 32768])
 
 
 @requires_device
@@ -681,6 +682,85 @@ class TestCpWithFlags(unittest.TestCase):
             self.assertEqual(content, b"B" * 1000)
         finally:
             os.unlink(temp_path)
+
+
+@requires_device
+class TestSleepCommand(unittest.TestCase):
+    """Test sleep command"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_sleep_delays_execution(self):
+        """Test that sleep actually delays execution"""
+        import time
+        start = time.time()
+        self.tool.cmd_sleep(0.5)
+        elapsed = time.time() - start
+        self.assertGreaterEqual(elapsed, 0.4)
+        self.assertLess(elapsed, 1.0)
+
+
+@requires_device
+class TestPartitions(unittest.TestCase):
+    """Test partition operations (ESP32 only)"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        # Check if ESP32
+        try:
+            platform = cls.mpy.comm.exec_eval("repr(__import__('sys').platform)")
+            cls.is_esp32 = 'esp32' in platform.lower()
+        except Exception:
+            cls.is_esp32 = False
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_partitions_list(self):
+        """Test listing partitions on ESP32"""
+        if not self.is_esp32:
+            self.skipTest("Not an ESP32 device")
+        info = self.mpy.partitions()
+        self.assertIn('partitions', info)
+        self.assertIsInstance(info['partitions'], list)
+        self.assertGreater(len(info['partitions']), 0)
+        # Check partition structure
+        part = info['partitions'][0]
+        self.assertIn('label', part)
+        self.assertIn('size', part)
+        self.assertIn('offset', part)
+
+    def test_02_partition_read_nvs(self):
+        """Test reading NVS partition (small, safe to read)"""
+        if not self.is_esp32:
+            self.skipTest("Not an ESP32 device")
+        # Find nvs partition
+        info = self.mpy.partitions()
+        nvs = None
+        for p in info['partitions']:
+            if p['label'] == 'nvs':
+                nvs = p
+                break
+        if not nvs:
+            self.skipTest("No nvs partition found")
+        # Read first 4KB of nvs
+        data = self.mpy.partition_read('nvs')
+        self.assertIsInstance(data, bytes)
+        self.assertEqual(len(data), nvs['size'])
 
 
 if __name__ == "__main__":

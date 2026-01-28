@@ -385,6 +385,173 @@ mpy.reset_state()
 
 Call this after `comm.soft_reset()` to clear cached helper/import state.
 
+### Device Information
+
+#### platform()
+
+Get device platform information.
+
+```python
+mpy.platform()
+```
+
+**Returns:**
+- `dict`: `{'platform': 'esp32', 'version': '...', 'impl': 'micropython', 'machine': '...'}`
+
+#### unique_id()
+
+Get device unique ID.
+
+```python
+mpy.unique_id()
+```
+
+**Returns:**
+- `str`: Hex-encoded unique ID (e.g., `'e660123456789abc'`)
+
+#### memory()
+
+Get memory usage.
+
+```python
+mpy.memory()
+```
+
+**Returns:**
+- `dict`: `{'alloc': bytes_used, 'free': bytes_free, 'total': total_bytes}`
+
+### Reset Methods
+
+#### soft_reset()
+
+Soft reset device (runs boot.py/main.py).
+
+```python
+mpy.soft_reset()
+```
+
+#### soft_reset_raw()
+
+Soft reset in raw REPL mode (clears RAM only, doesn't run boot.py/main.py).
+
+```python
+mpy.soft_reset_raw()
+```
+
+#### machine_reset(reconnect=True)
+
+MCU reset using `machine.reset()`.
+
+```python
+mpy.machine_reset(reconnect=True)
+```
+
+**Parameters:**
+- `reconnect` (bool): If True, attempt to reconnect after reset (for USB-CDC ports)
+
+#### hard_reset()
+
+Hardware reset using RTS signal (serial only).
+
+```python
+mpy.hard_reset()
+```
+
+**Raises:**
+- `NotImplementedError`: If connection doesn't support hardware reset
+
+### ESP32 Partition Methods
+
+#### partitions()
+
+Get partition table information (ESP32 only).
+
+```python
+mpy.partitions()
+```
+
+**Returns:**
+- `dict` with keys:
+  - `'partitions'`: List of partition dicts with keys: `label`, `type`, `type_name`, `subtype`, `subtype_name`, `offset`, `size`, `encrypted`, `running`
+  - `'boot'`: Boot partition label or None
+  - `'next_ota'`: Next OTA partition label or None
+  - `'next_ota_size'`: Next OTA partition size or None
+
+**Example:**
+```python
+>>> info = mpy.partitions()
+>>> for p in info['partitions']:
+...     print(f"{p['label']}: {p['size']} bytes")
+factory: 2031616 bytes
+nvs: 24576 bytes
+vfs: 2097152 bytes
+```
+
+#### partition_read(label, progress_callback=None)
+
+Read partition content by label.
+
+```python
+mpy.partition_read(label, progress_callback=None)
+```
+
+**Parameters:**
+- `label` (str): Partition label (e.g., `'factory'`, `'nvs'`, `'vfs'`)
+- `progress_callback` (callable, optional): Callback `(transferred, total)` for progress
+
+**Returns:**
+- `bytes`: Partition content
+
+**Example:**
+```python
+>>> data = mpy.partition_read('factory')
+>>> with open('backup.bin', 'wb') as f:
+...     f.write(data)
+```
+
+#### partition_write(label, data, progress_callback=None, compress=None)
+
+Write data to partition by label.
+
+```python
+mpy.partition_write(label, data, progress_callback=None, compress=None)
+```
+
+**Parameters:**
+- `label` (str): Partition label
+- `data` (bytes): Data to write
+- `progress_callback` (callable, optional): Callback `(transferred, total, wire_bytes)`
+- `compress` (bool, optional): Enable/disable compression (None = auto-detect)
+
+**Returns:**
+- `dict`: `{'target': label, 'size': bytes_written, 'wire_bytes': bytes_sent, 'compressed': bool}`
+
+**Example:**
+```python
+>>> with open('nvs_backup.bin', 'rb') as f:
+...     data = f.read()
+>>> mpy.partition_write('nvs', data)
+```
+
+#### ota_write(data, progress_callback=None, compress=None)
+
+Write firmware to next OTA partition and set it as boot partition.
+
+```python
+mpy.ota_write(data, progress_callback=None, compress=None)
+```
+
+**Parameters:**
+- `data` (bytes): Firmware content (.app-bin file)
+- `progress_callback` (callable, optional): Callback `(transferred, total, wire_bytes)`
+- `compress` (bool, optional): Enable/disable compression
+
+**Returns:**
+- `dict`: `{'target': label, 'offset': partition_offset, 'size': fw_size, 'wire_bytes': bytes_sent, 'compressed': bool}`
+
+**Raises:**
+- `MpyError`: If OTA not available or firmware too large
+
 ## MpyComm Class
 
 Low-level REPL communication. Usually accessed via `mpy.comm`.

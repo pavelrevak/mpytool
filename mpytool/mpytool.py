@@ -909,137 +909,200 @@ class MpyTool():
             for child in children:
                 self._print_paths(child, path + '/' if path else '')
 
+    def cmd_ota(self, firmware_path):
+        """OTA firmware update from local .app-bin file"""
+        self.verbose("OTA UPDATE", 1)
+
+        # Read firmware file
+        if not _os.path.isfile(firmware_path):
+            raise ParamsError(f"Firmware file not found: {firmware_path}")
+
+        with open(firmware_path, 'rb') as f:
+            firmware = f.read()
+
+        fw_size = len(firmware)
+        self.verbose(f"  Firmware: {self.format_size(fw_size)}", 1)
+
+        # Get partition info to show target
+        info = self._mpy.partitions()
+        if not info['next_ota']:
+            raise _mpytool.MpyError("OTA not available (no OTA partitions)")
+
+        self.verbose(f"  Target: {info['next_ota']} ({self.format_size(info['next_ota_size'])})", 1)
+
+        # Show transfer settings
+        use_compress = self._mpy._detect_deflate()
+        chunk_size = self._mpy._detect_chunk_size()
+        chunk_str = f"{chunk_size // 1024}K" if chunk_size >= 1024 else str(chunk_size)
+        self.verbose(f"  Writing (chunk: {chunk_str}, compress: {'on' if use_compress else 'off'})...", 1)
+
+        # Progress tracking
+        start_time = _time.time()
+
+        def progress_callback(transferred, total, wire_bytes):
+            if self._verbose >= 1:
+                pct = transferred * 100 // total
+                elapsed = _time.time() - start_time
+                speed = transferred / elapsed / 1024 if elapsed > 0 else 0
+                line = f"  Writing: {pct:3d}% {self.format_size(transferred):>6} / {self.format_size(total)}  {speed:.1f} KB/s"
+                self.verbose(line, color='cyan', end='', overwrite=True)
+
+        # Write firmware
+        result = self._mpy.ota_write(firmware, progress_callback, self._compress)
+
+        # Final stats
+        elapsed = _time.time() - start_time
+        speed = fw_size / elapsed / 1024 if elapsed > 0 else 0
+        ratio = fw_size / result['wire_bytes'] if result['wire_bytes'] > 0 else 1
+        self.verbose(
+            f"  Writing: 100% {self.format_size(fw_size):>6}  {elapsed:.1f}s  {speed:.1f} KB/s  ratio {ratio:.2f}x",
+            color='cyan', overwrite=True
+        )
+
+        self.verbose(f"  OTA complete! Use 'mreset' to boot into new firmware.", 1, color='green')
+
+    def cmd_partitions(self):
+        """List ESP32 partitions"""
+        self.verbose("PARTITIONS", 2)
+        info = self._mpy.partitions()
+
+        # Print header
+        print(f"{'Label':<12} {'Type':<8} {'Subtype':<10} {'Address':>10} {'Size':>10} {'Flags'}")
+        print("-" * 65)
+
+        for p in info['partitions']:
+            flags = []
+            if p['encrypted']:
+                flags.append('enc')
+            if p['running']:
+                flags.append('running')
+            print(f"{p['label']:<12} {p['type_name']:<8} {p['subtype_name']:<10} "
+                  f"{p['offset']:>#10x} {self.format_size(p['size']):>10} {', '.join(flags)}")
+
+        if info['boot']:
+            print(f"\nBoot partition: {info['boot']}")
+        if info['next_ota']:
+            print(f"Next OTA:       {info['next_ota']}")
+
+    def cmd_partition_read(self, label, dest_path):
+        """Read partition content to file"""
+        self.verbose(f"PARTITION READ {label} -> {dest_path}", 1)
+
+        def progress(transferred, total):
+            if self._verbose >= 1:
+                pct = (transferred / total * 100) if total > 0 else 0
+                self.verbose(
+                    f"  reading {label}: {pct:.0f}% {self.format_size(transferred)} / {self.format_size(total)}",
+                    color='cyan', end='', overwrite=True
+                )
+
+        data = self._mpy.partition_read(label, progress_callback=progress)
+
+        if self._verbose >= 1:
+            print()  # newline after progress
+
+        with open(dest_path, 'wb') as f:
+            f.write(data)
+
+        self.verbose(f"  saved {self.format_size(len(data))} to {dest_path}", 1, color='green')
+
+    def cmd_partition_write(self, label, src_path):
+        """Write file content to partition"""
+        self.verbose(f"PARTITION WRITE {src_path} -> {label}", 1)
+
+        with open(src_path, 'rb') as f:
+            data = f.read()
+
+        def progress(transferred, total, wire_bytes):
+            if self._verbose >= 1:
+                pct = (transferred / total * 100) if total > 0 else 0
+                self.verbose(
+                    f"  writing {label}: {pct:.0f}% {self.format_size(transferred)} / {self.format_size(total)}",
+                    color='cyan', end='', overwrite=True
+                )
+
+        result = self._mpy.partition_write(
+            label, data,
+            progress_callback=progress,
+            compress=self._compress
+        )
+
+        if self._verbose >= 1:
+            print()  # newline after progress
+
+        comp_info = " (compressed)" if result['compressed'] else ""
+        self.verbose(f"  wrote {self.format_size(result['size'])} to {result['target']}{comp_info}", 1, color='green')
+
     def cmd_info(self):
         self.verbose("INFO", 2)
-        self._mpy.comm.exec("import sys, gc, os")
-        platform = self._mpy.comm.exec_eval("repr(sys.platform)")
-        version = self._mpy.comm.exec_eval("repr(sys.version)")
-        impl = self._mpy.comm.exec_eval("repr(sys.implementation.name)")
-        gc_free = self._mpy.comm.exec_eval("gc.mem_free()")
-        gc_alloc = self._mpy.comm.exec_eval("gc.mem_alloc()")
-        gc_total = gc_free + gc_alloc
-        gc_pct = (gc_alloc / gc_total * 100) if gc_total > 0 else 0
-        try:
-            uname = self._mpy.comm.exec_eval("tuple(os.uname())")
-            machine = uname[4] if len(uname) > 4 else None
-        except _mpytool.MpyError:
-            machine = None
-        # Collect filesystem info - root and any different mount points
-        fs_info = []
-        try:
-            fs_stat = self._mpy.comm.exec_eval("os.statvfs('/')")
-            fs_total = fs_stat[0] * fs_stat[2]
-            fs_free = fs_stat[0] * fs_stat[3]
-            if fs_total > 0:
-                fs_info.append({
-                    'mount': '/', 'total': fs_total,
-                    'used': fs_total - fs_free,
-                    'pct': ((fs_total - fs_free) / fs_total * 100)
-                })
-        except _mpytool.MpyError:
-            pass
-        # Check subdirectories for additional mount points
-        try:
-            root_dirs = self._mpy.comm.exec_eval("[d[0] for d in os.ilistdir('/') if d[1] == 0x4000]")
-            for dirname in root_dirs:
-                try:
-                    path = '/' + dirname
-                    sub_stat = self._mpy.comm.exec_eval(f"os.statvfs('{path}')")
-                    sub_total = sub_stat[0] * sub_stat[2]
-                    sub_free = sub_stat[0] * sub_stat[3]
-                    # Skip if same as root or zero size
-                    if sub_total == 0 or any(f['total'] == sub_total for f in fs_info):
-                        continue
-                    fs_info.append({
-                        'mount': path, 'total': sub_total,
-                        'used': sub_total - sub_free,
-                        'pct': ((sub_total - sub_free) / sub_total * 100)
-                    })
-                except _mpytool.MpyError:
-                    pass
-        except _mpytool.MpyError:
-            pass
-        # Get unique ID (serial number)
-        unique_id = None
-        try:
-            unique_id = self._mpy.comm.exec_eval("repr(__import__('machine').unique_id().hex())")
-        except _mpytool.MpyError:
-            pass
-        # Get MAC addresses (WiFi and/or LAN)
-        mac_addresses = []
-        try:
-            self._mpy.comm.exec("import network")
-            # Try WiFi STA
-            try:
-                mac = self._mpy.comm.exec_eval("repr(network.WLAN(network.STA_IF).config('mac').hex(':'))")
-                mac_addresses.append(('WiFi:', mac))
-            except _mpytool.MpyError:
-                pass
-            # Try WiFi AP (if different)
-            try:
-                mac = self._mpy.comm.exec_eval("repr(network.WLAN(network.AP_IF).config('mac').hex(':'))")
-                if not mac_addresses or mac != mac_addresses[0][1]:
-                    mac_addresses.append(('WiFi AP:', mac))
-            except _mpytool.MpyError:
-                pass
-            # Try LAN/Ethernet
-            try:
-                mac = self._mpy.comm.exec_eval("repr(network.LAN().config('mac').hex(':'))")
-                mac_addresses.append(('LAN:', mac))
-            except _mpytool.MpyError:
-                pass
-        except _mpytool.MpyError:
-            pass
-        print(f"Platform:    {platform}")
-        print(f"Version:     {version}")
-        print(f"Impl:        {impl}")
-        if machine:
-            print(f"Machine:     {machine}")
-        if unique_id:
-            print(f"Serial:      {unique_id}")
-        for iface, mac in mac_addresses:
-            print(f"MAC {iface:8} {mac}")
-        print(f"Memory:      {self.format_size(gc_alloc)} / {self.format_size(gc_total)} ({gc_pct:.2f}%)")
-        for fs in fs_info:
+
+        # Platform info
+        plat = self._mpy.platform()
+        print(f"Platform:    {plat['platform']}")
+        print(f"Version:     {plat['version']}")
+        print(f"Impl:        {plat['impl']}")
+        if plat['machine']:
+            print(f"Machine:     {plat['machine']}")
+
+        # Unique ID
+        uid = self._mpy.unique_id()
+        if uid:
+            print(f"Serial:      {uid}")
+
+        # MAC addresses
+        for iface, mac in self._mpy.mac_addresses():
+            print(f"MAC {iface + ':':<8} {mac}")
+
+        # Memory
+        mem = self._mpy.memory()
+        mem_pct = (mem['alloc'] / mem['total'] * 100) if mem['total'] > 0 else 0
+        print(f"Memory:      {self.format_size(mem['alloc'])} / {self.format_size(mem['total'])} ({mem_pct:.2f}%)")
+
+        # Filesystems
+        for fs in self._mpy.filesystems():
             label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
-            print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs['pct']:.2f}%)")
+            fs_pct = (fs['used'] / fs['total'] * 100) if fs['total'] > 0 else 0
+            print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs_pct:.2f}%)")
 
     def cmd_mreset(self, reconnect=True):
         """MCU reset using machine.reset() with optional auto-reconnect"""
         self.verbose("MRESET", 1)
-        self._mpy.comm.enter_raw_repl()
-        self._conn.write(b"import machine; machine.reset()\x04")
-        self._mpy.reset_state()
         if reconnect:
             try:
                 self.verbose("  reconnecting...", 1, color='yellow')
-                self._conn.reconnect()
+                self._mpy.machine_reset(reconnect=True)
                 self.verbose("  connected", 1, color='green')
             except (_mpytool.ConnError, OSError) as err:
                 self.verbose(f"  reconnect failed: {err}", 1, color='red')
                 raise _mpytool.ConnError(f"Reconnect failed: {err}")
+        else:
+            self._mpy.machine_reset(reconnect=False)
 
     def cmd_sreset(self):
         """Soft reset in raw REPL - clears RAM but doesn't run boot.py/main.py"""
         self.verbose("SRESET", 1)
-        self._mpy.comm.soft_reset_raw()
-        self._mpy.reset_state()
+        self._mpy.soft_reset_raw()
 
-    def cmd_rtsreset(self):
-        """Hardware reset device using RTS signal"""
+    def cmd_rtsreset(self, reconnect=True):
+        """Hardware reset device using RTS signal with optional auto-reconnect"""
         self.verbose("RTSRESET", 1)
         try:
-            self._mpy.conn.hard_reset()
-            self._mpy.reset_state()
+            self._mpy.hard_reset()
+            if reconnect:
+                self.verbose("  reconnecting...", 1, color='yellow')
+                _time.sleep(1.0)  # Wait for device to boot
+                self._mpy._conn.reconnect()
+                self.verbose("  connected", 1, color='green')
         except NotImplementedError:
             raise _mpytool.MpyError("Hardware reset not available (serial only)")
+        except (_mpytool.ConnError, OSError) as err:
+            self.verbose(f"  reconnect failed: {err}", 1, color='red')
+            raise _mpytool.ConnError(f"Reconnect failed: {err}")
 
     def cmd_bootloader(self):
         """Enter bootloader using machine.bootloader()"""
         self.verbose("BOOTLOADER", 1)
-        self._mpy.comm.enter_raw_repl()
-        self._conn.write(b"import machine; machine.bootloader()\x04")
-        self._mpy.reset_state()
+        self._mpy.machine_bootloader()
 
     def cmd_dtrboot(self):
         """Enter bootloader using DTR/RTS signals (ESP32 only)
@@ -1050,9 +1113,14 @@ class MpyTool():
         """
         self.verbose("DTRBOOT", 1)
         try:
-            self._mpy.conn.reset_to_bootloader()
+            self._mpy.reset_to_bootloader()
         except NotImplementedError:
             raise _mpytool.MpyError("DTR boot not available (serial only)")
+
+    def cmd_sleep(self, seconds):
+        """Sleep for specified number of seconds"""
+        self.verbose(f"SLEEP {seconds}s", 1)
+        _time.sleep(seconds)
 
     def process_commands(self, commands, is_last_group=False):
         try:
@@ -1096,8 +1164,7 @@ class MpyTool():
                     break
                 elif command == 'reset':
                     self.verbose("RESET", 1)
-                    self._mpy.comm.soft_reset()
-                    self._mpy.reset_state()
+                    self._mpy.soft_reset()
                 elif command == 'mreset':
                     # Reconnect only if there are more commands (in this or next group)
                     has_more = bool(commands) or not is_last_group
@@ -1118,12 +1185,48 @@ class MpyTool():
                         raise ParamsError('missing code for exec command')
                 elif command == 'info':
                     self.cmd_info()
+                elif command in ('partitions', 'parts'):
+                    if commands and commands[0] == 'read':
+                        commands.pop(0)
+                        if len(commands) >= 2:
+                            label = commands.pop(0)
+                            dest_path = commands.pop(0)
+                            self.cmd_partition_read(label, dest_path)
+                        else:
+                            raise ParamsError('partitions read requires label and destination file')
+                    elif commands and commands[0] == 'write':
+                        commands.pop(0)
+                        if len(commands) >= 2:
+                            label = commands.pop(0)
+                            src_path = commands.pop(0)
+                            self.cmd_partition_write(label, src_path)
+                        else:
+                            raise ParamsError('partitions write requires label and source file')
+                    else:
+                        self.cmd_partitions()
+                elif command == 'ota':
+                    if commands:
+                        firmware_path = commands.pop(0)
+                        self.cmd_ota(firmware_path)
+                    else:
+                        raise ParamsError('ota requires firmware file path')
                 elif command == 'rtsreset':
-                    self.cmd_rtsreset()
+                    # Reconnect only if there are more commands (in this or next group)
+                    has_more = bool(commands) or not is_last_group
+                    self.cmd_rtsreset(reconnect=has_more)
                 elif command == 'bootloader':
                     self.cmd_bootloader()
                 elif command == 'dtrboot':
                     self.cmd_dtrboot()
+                elif command == 'sleep':
+                    if commands:
+                        try:
+                            seconds = float(commands.pop(0))
+                        except ValueError:
+                            raise ParamsError('sleep requires a number (seconds)')
+                        self.cmd_sleep(seconds)
+                    else:
+                        raise ParamsError('sleep requires a number (seconds)')
                 elif command == 'cp':
                     if len(commands) >= 2:
                         self.cmd_cp(*commands)
@@ -1174,11 +1277,17 @@ List of available commands:
   repl                          enter REPL mode [UNIX OS ONLY]
   exec {code}                   execute Python code on device
   info                          show device information
+  partitions                    list ESP32 partitions (OTA info)
+  partitions read {label} {file}   read partition to file
+  partitions write {label} {file}  write file to partition
+  ota {firmware.app-bin}        OTA firmware update (ESP32 only)
+  sleep {seconds}               sleep for specified seconds
 Aliases:
   dir                           alias to ls
   cat                           alias to get
   del, rm                       alias to delete
   follow                        alias to monitor
+  parts                         alias to partitions
 Use -- to separate multiple commands:
   mpytool put main.py / -- reset -- monitor
 """

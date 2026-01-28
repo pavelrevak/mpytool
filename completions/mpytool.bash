@@ -6,7 +6,7 @@ _MPYTOOL_CACHE_FILE="/tmp/mpytool_completion_cache"
 _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 
-_mpytool_commands="ls dir tree get cat put cp mv mkdir delete del rm monitor follow repl exec reset info"
+_mpytool_commands="ls dir tree get cat put cp mv mkdir delete del rm monitor follow repl exec reset sreset mreset rtsreset bootloader dtrboot info partitions parts ota sleep"
 
 _mpytool_get_port() {
     local port=""
@@ -201,7 +201,17 @@ _mpytool() {
                 COMPREPLY=($(compgen -W ":" -- "$cur"))
             fi
             ;;
-        exec|repl|monitor|follow|reset|info)
+        exec|repl|monitor|follow|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info|sleep)
+            ;;
+        partitions|parts)
+            if [[ $pos -eq 2 ]]; then
+                COMPREPLY=($(compgen -W "read write" -- "$cur"))
+            elif [[ $pos -eq 4 ]]; then
+                COMPREPLY=($(compgen -f -- "$cur"))
+            fi
+            ;;
+        ota)
+            COMPREPLY=($(compgen -f -X '!*.bin' -- "$cur"))
             ;;
         --)
             COMPREPLY=($(compgen -W "$_mpytool_commands" -- "$cur"))

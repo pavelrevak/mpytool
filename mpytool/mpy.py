@@ -491,3 +491,606 @@ def _mt_finfo(files):
         self.import_module('gc')
         self._mpy_comm.exec("gc.collect()")
         return encodings_used, wire_bytes
+
+    def platform(self):
+        """Get platform information
+
+        Returns:
+            dict with keys:
+                'platform': platform name (e.g. 'esp32')
+                'version': MicroPython version string
+                'impl': implementation name (e.g. 'micropython')
+                'machine': machine description (or None)
+        """
+        self.import_module('sys')
+        self.import_module('os')
+
+        platform = self._mpy_comm.exec_eval("repr(sys.platform)")
+        version = self._mpy_comm.exec_eval("repr(sys.version)")
+        impl = self._mpy_comm.exec_eval("repr(sys.implementation.name)")
+
+        try:
+            uname = self._mpy_comm.exec_eval("tuple(os.uname())")
+            machine = uname[4] if len(uname) > 4 else None
+        except _mpy_comm.CmdError:
+            machine = None
+
+        return {
+            'platform': platform,
+            'version': version,
+            'impl': impl,
+            'machine': machine,
+        }
+
+    def memory(self):
+        """Get memory (RAM) information
+
+        Returns:
+            dict with keys:
+                'free': free RAM in bytes
+                'alloc': allocated RAM in bytes
+                'total': total RAM in bytes
+        """
+        self.import_module('gc')
+        self._mpy_comm.exec("gc.collect()")
+
+        mem_free = self._mpy_comm.exec_eval("gc.mem_free()")
+        mem_alloc = self._mpy_comm.exec_eval("gc.mem_alloc()")
+
+        return {
+            'free': mem_free,
+            'alloc': mem_alloc,
+            'total': mem_free + mem_alloc,
+        }
+
+    def unique_id(self):
+        """Get device unique ID (serial number)
+
+        Returns:
+            hex string or None if not available
+        """
+        try:
+            return self._mpy_comm.exec_eval(
+                "repr(__import__('machine').unique_id().hex())"
+            )
+        except _mpy_comm.CmdError:
+            return None
+
+    def mac_addresses(self):
+        """Get network MAC addresses
+
+        Returns:
+            list of (interface_name, mac_address) tuples
+        """
+        addresses = []
+        try:
+            self.import_module('network')
+            # WiFi STA
+            try:
+                mac = self._mpy_comm.exec_eval(
+                    "repr(network.WLAN(network.STA_IF).config('mac').hex(':'))"
+                )
+                addresses.append(('WiFi', mac))
+            except _mpy_comm.CmdError:
+                pass
+            # WiFi AP
+            try:
+                mac = self._mpy_comm.exec_eval(
+                    "repr(network.WLAN(network.AP_IF).config('mac').hex(':'))"
+                )
+                if not addresses or mac != addresses[0][1]:
+                    addresses.append(('WiFi AP', mac))
+            except _mpy_comm.CmdError:
+                pass
+            # LAN/Ethernet
+            try:
+                mac = self._mpy_comm.exec_eval(
+                    "repr(network.LAN().config('mac').hex(':'))"
+                )
+                addresses.append(('LAN', mac))
+            except _mpy_comm.CmdError:
+                pass
+        except _mpy_comm.CmdError:
+            pass
+        return addresses
+
+    def filesystems(self):
+        """Get filesystem information
+
+        Returns:
+            list of dicts with keys: mount, total, free, used
+        """
+        self.import_module('os')
+        result = []
+
+        try:
+            fs_stat = self._mpy_comm.exec_eval("os.statvfs('/')")
+            fs_total = fs_stat[0] * fs_stat[2]
+            fs_free = fs_stat[0] * fs_stat[3]
+            if fs_total > 0:
+                result.append({
+                    'mount': '/',
+                    'total': fs_total,
+                    'free': fs_free,
+                    'used': fs_total - fs_free,
+                })
+        except _mpy_comm.CmdError:
+            pass
+
+        # Check subdirectories for additional mount points
+        try:
+            root_dirs = self._mpy_comm.exec_eval(
+                "[d[0] for d in os.ilistdir('/') if d[1] == 0x4000]"
+            )
+            for dirname in root_dirs:
+                try:
+                    path = '/' + dirname
+                    sub_stat = self._mpy_comm.exec_eval(f"os.statvfs('{path}')")
+                    sub_total = sub_stat[0] * sub_stat[2]
+                    sub_free = sub_stat[0] * sub_stat[3]
+                    # Skip if same as root or zero size
+                    if sub_total == 0 or any(f['total'] == sub_total for f in result):
+                        continue
+                    result.append({
+                        'mount': path,
+                        'total': sub_total,
+                        'free': sub_free,
+                        'used': sub_total - sub_free,
+                    })
+                except _mpy_comm.CmdError:
+                    pass
+        except _mpy_comm.CmdError:
+            pass
+
+        return result
+
+    def info(self):
+        """Get all device information (convenience method)
+
+        Returns:
+            dict combining platform(), memory(), unique_id(),
+            mac_addresses() and filesystems()
+        """
+        result = self.platform()
+        result['unique_id'] = self.unique_id()
+        result['mac_addresses'] = self.mac_addresses()
+        result.update({f'mem_{k}': v for k, v in self.memory().items()})
+        result['filesystems'] = self.filesystems()
+        return result
+
+    # Partition type/subtype name mappings
+    _PART_TYPES = {0: 'app', 1: 'data'}
+    _PART_SUBTYPES = {
+        # App subtypes (type 0)
+        0: {0: 'factory', 16: 'ota_0', 17: 'ota_1', 18: 'ota_2', 19: 'ota_3', 32: 'test'},
+        # Data subtypes (type 1)
+        1: {0: 'ota', 1: 'phy', 2: 'nvs', 3: 'coredump', 4: 'nvs_keys',
+            5: 'efuse', 128: 'esphttpd', 129: 'fat', 130: 'spiffs'},
+    }
+
+    def partitions(self):
+        """Get ESP32 partition information
+
+        Returns:
+            dict with keys:
+                'partitions': list of partition info dicts with keys:
+                    label, type, type_name, subtype, subtype_name,
+                    offset, size, encrypted, running
+                'running': label of currently running partition
+                'boot': label of boot partition
+                'next_ota': label of next OTA partition (or None)
+                'next_ota_size': size of next OTA partition (or None)
+
+        Raises:
+            MpyError: if not ESP32 or partition module not available
+        """
+        try:
+            self.import_module('esp32')
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError("Partition info not available (ESP32 only)")
+
+        # Get running partition label
+        running = self._mpy_comm.exec_eval(
+            "repr(esp32.Partition(esp32.Partition.RUNNING).info()[4])"
+        )
+
+        # Get all partitions (app + data)
+        raw_parts = self._mpy_comm.exec_eval(
+            "[p.info() for p in "
+            "esp32.Partition.find(esp32.Partition.TYPE_APP) + "
+            "esp32.Partition.find(esp32.Partition.TYPE_DATA)]"
+        )
+
+        partitions = []
+        next_ota_size = None
+        for ptype, subtype, offset, size, label, encrypted in raw_parts:
+            type_name = self._PART_TYPES.get(ptype, str(ptype))
+            subtype_name = self._PART_SUBTYPES.get(ptype, {}).get(subtype, str(subtype))
+            partitions.append({
+                'label': label,
+                'type': ptype,
+                'type_name': type_name,
+                'subtype': subtype,
+                'subtype_name': subtype_name,
+                'offset': offset,
+                'size': size,
+                'encrypted': encrypted,
+                'running': label == running,
+            })
+
+        # Get boot partition
+        try:
+            boot = self._mpy_comm.exec_eval(
+                "repr(esp32.Partition(esp32.Partition.BOOT).info()[4])"
+            )
+        except _mpy_comm.CmdError:
+            boot = None
+
+        # Get next OTA partition (get size and label separately to handle string eval)
+        try:
+            next_ota_size = self._mpy_comm.exec_eval(
+                "esp32.Partition(esp32.Partition.RUNNING).get_next_update().info()[3]"
+            )
+            next_ota = self._mpy_comm.exec_eval(
+                "repr(esp32.Partition(esp32.Partition.RUNNING).get_next_update().info()[4])"
+            )
+        except _mpy_comm.CmdError:
+            next_ota = None
+            next_ota_size = None
+
+        return {
+            'partitions': partitions,
+            'running': running,
+            'boot': boot,
+            'next_ota': next_ota,
+            'next_ota_size': next_ota_size,
+        }
+
+    def soft_reset(self):
+        """Soft reset device (Ctrl-D in REPL)
+
+        Runs boot.py and main.py after reset.
+        """
+        self._mpy_comm.soft_reset()
+        self.reset_state()
+
+    def soft_reset_raw(self):
+        """Soft reset in raw REPL mode
+
+        Clears RAM but doesn't run boot.py/main.py.
+        """
+        self._mpy_comm.soft_reset_raw()
+        self.reset_state()
+
+    def machine_reset(self, reconnect=True):
+        """MCU reset using machine.reset()
+
+        Arguments:
+            reconnect: if True, attempt to reconnect after reset
+
+        Returns:
+            True if reconnected successfully, False otherwise
+
+        Note: For USB-CDC ports, the port may disappear and reappear.
+        """
+        self._mpy_comm.enter_raw_repl()
+        self._conn.write(b"import machine; machine.reset()\x04")
+        self.reset_state()
+        if reconnect:
+            self._conn.reconnect()
+            return True
+        return False
+
+    def machine_bootloader(self):
+        """Enter bootloader using machine.bootloader()
+
+        Note: Connection will be lost after this call.
+        """
+        self._mpy_comm.enter_raw_repl()
+        self._conn.write(b"import machine; machine.bootloader()\x04")
+        self.reset_state()
+
+    def hard_reset(self):
+        """Hardware reset using RTS signal (serial only)
+
+        Raises:
+            NotImplementedError: if connection doesn't support hardware reset
+        """
+        self._conn.hard_reset()
+        self.reset_state()
+
+    def reset_to_bootloader(self):
+        """Enter bootloader using DTR/RTS signals (ESP32 serial only)
+
+        Raises:
+            NotImplementedError: if connection doesn't support this
+        """
+        self._conn.reset_to_bootloader()
+        self.reset_state()
+
+    def ota_write(self, data, progress_callback=None, compress=None):
+        """Write firmware data to next OTA partition
+
+        Arguments:
+            data: bytes with firmware content (.app-bin)
+            progress_callback: optional callback(transferred, total, wire_bytes)
+            compress: None=auto-detect, True=force, False=disable
+
+        Returns:
+            dict with keys:
+                'target': label of target partition
+                'size': firmware size
+                'wire_bytes': bytes sent over wire
+                'compressed': whether compression was used
+
+        Raises:
+            MpyError: if OTA not available or firmware too large
+        """
+        try:
+            self.import_module('esp32')
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError("OTA not available (ESP32 only)")
+
+        # Get next OTA partition info
+        try:
+            part_info = self._mpy_comm.exec_eval(
+                "esp32.Partition(esp32.Partition.RUNNING).get_next_update().info()"
+            )
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError("OTA not available (no OTA partitions)")
+
+        part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
+        fw_size = len(data)
+
+        if fw_size > part_size:
+            raise _mpy_comm.MpyError(
+                f"Firmware too large: {fw_size} > {part_size} bytes"
+            )
+
+        # Resolve compression setting
+        if compress is None:
+            compress = self._detect_deflate()
+
+        # Flash block size
+        flash_block = 4096
+        # Transfer chunk size (multiple of flash block for efficiency)
+        chunk_size = self._detect_chunk_size()
+        # Round down to flash block multiple
+        chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
+
+        # Prepare partition for writing
+        self._mpy_comm.exec("_ota_p = esp32.Partition(esp32.Partition.RUNNING).get_next_update()")
+        self.import_module('ubinascii as ub')
+        if compress:
+            self.import_module('deflate as df')
+            self.import_module('io as _io')
+
+        # Write firmware
+        block_num = 0
+        offset = 0
+        wire_bytes = 0
+        used_compress = False
+
+        while offset < fw_size:
+            chunk = data[offset:offset + chunk_size]
+            chunk_len = len(chunk)
+
+            # Pad last chunk to flash block size
+            if chunk_len % flash_block:
+                padding = flash_block - (chunk_len % flash_block)
+                chunk = chunk + b'\xff' * padding
+
+            # Encode chunk (reuse _encode_chunk logic)
+            if compress:
+                compressed = zlib.compress(chunk)
+                comp_b64 = base64.b64encode(compressed).decode('ascii')
+                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                # Use compression if significantly smaller
+                if len(comp_b64) < len(raw_b64) - 20:
+                    cmd = f"_ota_p.writeblocks({block_num}, df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read())"
+                    wire_bytes += len(comp_b64)
+                    used_compress = True
+                else:
+                    cmd = f"_ota_p.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
+                    wire_bytes += len(raw_b64)
+            else:
+                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                cmd = f"_ota_p.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
+                wire_bytes += len(raw_b64)
+
+            self._mpy_comm.exec(cmd, timeout=30)
+
+            blocks_written = len(chunk) // flash_block
+            block_num += blocks_written
+            offset += chunk_size
+
+            if progress_callback:
+                progress_callback(min(offset, fw_size), fw_size, wire_bytes)
+
+        # Set as boot partition
+        self._mpy_comm.exec("_ota_p.set_boot()")
+
+        # Cleanup
+        self._mpy_comm.exec("del _ota_p")
+        self.import_module('gc')
+        self._mpy_comm.exec("gc.collect()")
+
+        return {
+            'target': part_label,
+            'offset': part_offset,
+            'size': fw_size,
+            'wire_bytes': wire_bytes,
+            'compressed': used_compress,
+        }
+
+    def partition_read(self, label, progress_callback=None):
+        """Read partition content by label
+
+        Arguments:
+            label: partition label (e.g. 'ota_0', 'nvs', 'spiffs')
+            progress_callback: optional callback(transferred, total)
+
+        Returns:
+            bytes with partition content
+
+        Raises:
+            MpyError: if partition not found or ESP32 only
+        """
+        try:
+            self.import_module('esp32')
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError("Partitions not available (ESP32 only)")
+
+        # Get partition info (search in both APP and DATA types)
+        try:
+            part_info = self._mpy_comm.exec_eval(
+                f"(esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
+                f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0].info()"
+            )
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError(f"Partition '{label}' not found")
+
+        part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
+
+        # Block size for reading
+        block_size = 4096
+        chunk_blocks = 8  # Read 8 blocks at a time (32KB)
+
+        self._mpy_comm.exec(
+            f"_part = (esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
+            f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0]"
+        )
+        self.import_module('ubinascii as ub')
+
+        data = bytearray()
+        block_num = 0
+        total_blocks = (part_size + block_size - 1) // block_size
+
+        while block_num < total_blocks:
+            blocks_to_read = min(chunk_blocks, total_blocks - block_num)
+            bytes_to_read = blocks_to_read * block_size
+
+            # Read blocks and encode as base64
+            self._mpy_comm.exec(f"_buf=bytearray({bytes_to_read}); _part.readblocks({block_num}, _buf)")
+            b64_data = self._mpy_comm.exec_eval("repr(ub.b2a_base64(_buf).decode())")
+            chunk = base64.b64decode(b64_data)
+            data.extend(chunk)
+
+            block_num += blocks_to_read
+
+            if progress_callback:
+                progress_callback(min(block_num * block_size, part_size), part_size)
+
+        # Cleanup
+        self._mpy_comm.exec("del _part")
+
+        return bytes(data[:part_size])
+
+    def partition_write(self, label, data, progress_callback=None, compress=None):
+        """Write data to partition by label
+
+        Arguments:
+            label: partition label (e.g. 'ota_0', 'nvs', 'spiffs')
+            data: bytes to write
+            progress_callback: optional callback(transferred, total, wire_bytes)
+            compress: None=auto-detect, True=force, False=disable
+
+        Returns:
+            dict with keys: 'target', 'size', 'wire_bytes', 'compressed'
+
+        Raises:
+            MpyError: if partition not found, data too large, or ESP32 only
+        """
+        try:
+            self.import_module('esp32')
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError("Partitions not available (ESP32 only)")
+
+        # Get partition info (search in both APP and DATA types)
+        try:
+            part_info = self._mpy_comm.exec_eval(
+                f"(esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
+                f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0].info()"
+            )
+        except _mpy_comm.CmdError:
+            raise _mpy_comm.MpyError(f"Partition '{label}' not found")
+
+        part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
+        data_size = len(data)
+
+        if data_size > part_size:
+            raise _mpy_comm.MpyError(
+                f"Data too large: {data_size} > {part_size} bytes"
+            )
+
+        # Resolve compression setting
+        if compress is None:
+            compress = self._detect_deflate()
+
+        # Flash block size
+        flash_block = 4096
+        chunk_size = self._detect_chunk_size()
+        chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
+
+        # Prepare partition for writing
+        self._mpy_comm.exec(
+            f"_part = (esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
+            f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0]"
+        )
+        self.import_module('ubinascii as ub')
+        if compress:
+            self.import_module('deflate as df')
+            self.import_module('io as _io')
+
+        # Write data
+        block_num = 0
+        offset = 0
+        wire_bytes = 0
+        used_compress = False
+
+        while offset < data_size:
+            chunk = data[offset:offset + chunk_size]
+            chunk_len = len(chunk)
+
+            # Pad last chunk to flash block size
+            if chunk_len % flash_block:
+                padding = flash_block - (chunk_len % flash_block)
+                chunk = chunk + b'\xff' * padding
+
+            # Encode chunk
+            if compress:
+                compressed = zlib.compress(chunk)
+                comp_b64 = base64.b64encode(compressed).decode('ascii')
+                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                if len(comp_b64) < len(raw_b64) - 20:
+                    cmd = f"_part.writeblocks({block_num}, df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read())"
+                    wire_bytes += len(comp_b64)
+                    used_compress = True
+                else:
+                    cmd = f"_part.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
+                    wire_bytes += len(raw_b64)
+            else:
+                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                cmd = f"_part.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
+                wire_bytes += len(raw_b64)
+
+            self._mpy_comm.exec(cmd, timeout=30)
+
+            blocks_written = len(chunk) // flash_block
+            block_num += blocks_written
+            offset += chunk_size
+
+            if progress_callback:
+                progress_callback(min(offset, data_size), data_size, wire_bytes)
+
+        # Cleanup
+        self._mpy_comm.exec("del _part")
+        self.import_module('gc')
+        self._mpy_comm.exec("gc.collect()")
+
+        return {
+            'target': part_label,
+            'size': data_size,
+            'wire_bytes': wire_bytes,
+            'compressed': used_compress,
+        }
