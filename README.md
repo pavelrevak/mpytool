@@ -225,25 +225,21 @@ Command aliases:
 - `del`, `rm` = `delete`
 - `follow` = `monitor`
 
-## Examples using API from Python
+## Python API
 
-```
+```python
 >>> import mpytool
 >>> conn = mpytool.ConnSerial(port='/dev/ttyACM0', baudrate=115200)
 >>> mpy = mpytool.Mpy(conn)
 >>> mpy.ls()
-[('ehome', None), ('boot.py', 215), ('net.py', 2938), ('project.json', 6404)]
->>> mpy.mkdir('a/b/c')
->>> mpy.ls()
-[('a', None),
- ('ehome', None),
- ('boot.py', 215),
- ('net.py', 2938),
- ('project.json', 6404)]
+[('lib', None), ('boot.py', 215), ('main.py', 3102)]
 >>> mpy.get('boot.py')
-b"import time\nimport net\n\nwlan = net.Wlan()\nwlan.refresh_network()\n\nwhile wlan.ifconfig()[0] == '0.0.0.0':\n    time.sleep(.1)\n\nprint('IP: ' + wlan.ifconfig()[0])\n\nimport ehome.ehome\n\nehome.ehome.start('project.json')\n"
->>> mpy.delete('a/b')
+b'import machine\nimport time\n...'
+>>> mpy.put(b'print("Hello")', 'test.py')
+>>> mpy.delete('test.py')
 ```
+
+See [README_API.md](README_API.md) for full API documentation.
 
 ## Progress and verbose output
 
@@ -301,7 +297,7 @@ For reporting bugs, please include `-ddd` output in the issue.
 
 ## Performance
 
-`mpytool` uses optimized chunked transfer with automatic compression, which allows copying files very quickly. See [BENCH.md](BENCH.md) for detailed benchmarks.
+`mpytool` uses optimized chunked transfer with automatic compression, which allows copying files very quickly. See [README_BENCH.md](README_BENCH.md) for detailed benchmarks.
 
 ### Summary
 

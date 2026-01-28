@@ -64,9 +64,17 @@ conn = mpytool.ConnSerial(port='/dev/ttyACM0', baudrate=115200)
 **Raises:**
 - `ConnError`: If unable to open serial port
 
+**Additional methods:**
+
+```python
+conn.hard_reset()           # Hardware reset via RTS signal
+conn.reset_to_bootloader()  # Enter bootloader via DTR/RTS (ESP32)
+conn.reconnect(timeout=5)   # Reconnect after device reset (USB-CDC)
+```
+
 ### ConnSocket
 
-TCP socket connection for network-connected devices (e.g., WebREPL).
+TCP socket connection for network-connected devices.
 
 ```python
 mpytool.ConnSocket(address, log=None)
@@ -91,12 +99,13 @@ conn = mpytool.ConnSocket(address='192.168.1.100:8266')
 High-level API for file operations on MicroPython devices.
 
 ```python
-mpytool.Mpy(conn, log=None)
+mpytool.Mpy(conn, log=None, chunk_size=None)
 ```
 
 **Parameters:**
 - `conn`: Connection instance (`ConnSerial` or `ConnSocket`)
 - `log`: Optional logger instance
+- `chunk_size`: Transfer chunk size (512, 1024, 2048, 4096, 8192, 16384, 32768). Auto-detected from device RAM if not specified.
 
 ### Properties
 
@@ -233,18 +242,22 @@ print("Hello World!")
 **Raises:**
 - `FileNotFound`: If file doesn't exist
 
-#### put(data, path, progress_callback=None)
+#### put(data, path, progress_callback=None, compress=None)
 
 Write file to device.
 
 ```python
-mpy.put(data, path, progress_callback=None)
+mpy.put(data, path, progress_callback=None, compress=None)
 ```
 
 **Parameters:**
 - `data` (bytes): File content to write
 - `path` (str): Destination file path
 - `progress_callback` (callable, optional): Callback function `(transferred, total)` for progress updates
+- `compress` (bool, optional): Enable/disable compression. `None` = auto-detect based on device RAM and deflate availability
+
+**Returns:**
+- `tuple`: `(encodings_used, wire_bytes)` where `encodings_used` is a set of encoding types ('raw', 'base64', 'compressed') and `wire_bytes` is the number of bytes sent over the wire
 
 **Example:**
 ```python
@@ -340,6 +353,28 @@ mpy.hashfile(path)
 'a1b2c3d4...'
 ```
 
+#### fileinfo(files)
+
+Get file info (size and hash) for multiple files in one call.
+
+```python
+mpy.fileinfo(files)
+```
+
+**Parameters:**
+- `files` (dict): Dictionary `{path: expected_size}` - hash is only computed if sizes match
+
+**Returns:**
+- `dict`: `{path: (size, hash)}` - hash is `None` if sizes don't match
+- `dict`: `{path: None}` - if file doesn't exist
+- `None`: If hashlib not available on device
+
+**Example:**
+```python
+>>> mpy.fileinfo({'/main.py': 1234, '/boot.py': 567})
+{'/main.py': (1234, b'\xa1\xb2...'), '/boot.py': (567, b'\xc3\xd4...')}
+```
+
 #### reset_state()
 
 Reset internal state after device reset.
@@ -412,13 +447,23 @@ mpy.comm.exec_eval(command, timeout=5)
 
 #### soft_reset()
 
-Perform soft reset of the device.
+Perform soft reset of the device (exits raw REPL, runs boot.py/main.py).
 
 ```python
 mpy.comm.soft_reset()
 ```
 
 **Note:** Call `mpy.reset_state()` after this to clear cached state.
+
+#### soft_reset_raw()
+
+Perform soft reset in raw REPL mode (clears RAM but doesn't run boot.py/main.py).
+
+```python
+mpy.comm.soft_reset_raw()
+```
+
+**Note:** Call `mpy.reset_state()` after this to clear cached state. Useful for freeing memory before file operations.
 
 #### enter_raw_repl() / exit_raw_repl()
 
