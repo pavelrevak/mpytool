@@ -170,9 +170,9 @@ MAC WiFi:    aa:bb:cc:dd:ee:01
 MAC WiFi AP: aa:bb:cc:dd:ee:02
 ```
 
-ESP32 partitions (list, read, write):
+ESP32 flash partitions (list, read, write):
 ```
-$ mpytool partitions                              # list all partitions
+$ mpytool flash                                   # list all partitions
 Label        Type     Subtype       Address       Size Flags
 -----------------------------------------------------------------
 factory      app      factory       0x10000      1.94M running
@@ -182,8 +182,8 @@ vfs          data     fat          0x200000      2.00M
 Boot partition: factory
 Next OTA:       (none)
 
-$ mpytool partitions read factory backup.bin      # backup partition to file
-$ mpytool partitions write nvs nvs_backup.bin     # restore partition from file
+$ mpytool flash read factory backup.bin           # backup partition to file
+$ mpytool flash write nvs nvs_backup.bin          # restore partition from file
 ```
 
 OTA firmware update (ESP32):

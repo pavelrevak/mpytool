@@ -32,8 +32,7 @@ _mpytool_commands() {
         'bootloader:enter bootloader (machine.bootloader)'
         'dtrboot:enter bootloader via DTR/RTS (ESP32)'
         'info:show device information'
-        'partitions:list/read/write ESP32 partitions'
-        'parts:alias for partitions'
+        'flash:list/read/write ESP32 partitions'
         'ota:OTA firmware update (ESP32)'
         'sleep:sleep for specified seconds'
     )
@@ -267,11 +266,11 @@ _mpytool() {
                 repl|monitor|follow|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info)
                     # No arguments
                     ;;
-                partitions|parts)
-                    # partitions [read|write] [label] [file]
+                flash)
+                    # flash [read|write] [label] [file]
                     if [[ $pos -eq 2 ]]; then
                         local -a subcmds=('read:read partition to file' 'write:write file to partition')
-                        _describe -t subcmds 'partitions subcommand' subcmds
+                        _describe -t subcmds 'flash subcommand' subcmds
                     elif [[ $pos -eq 4 ]]; then
                         _files
                     fi

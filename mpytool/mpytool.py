@@ -1185,7 +1185,7 @@ class MpyTool():
                         raise ParamsError('missing code for exec command')
                 elif command == 'info':
                     self.cmd_info()
-                elif command in ('partitions', 'parts'):
+                elif command == 'flash':
                     if commands and commands[0] == 'read':
                         commands.pop(0)
                         if len(commands) >= 2:
@@ -1193,7 +1193,7 @@ class MpyTool():
                             dest_path = commands.pop(0)
                             self.cmd_partition_read(label, dest_path)
                         else:
-                            raise ParamsError('partitions read requires label and destination file')
+                            raise ParamsError('flash read requires label and destination file')
                     elif commands and commands[0] == 'write':
                         commands.pop(0)
                         if len(commands) >= 2:
@@ -1201,7 +1201,7 @@ class MpyTool():
                             src_path = commands.pop(0)
                             self.cmd_partition_write(label, src_path)
                         else:
-                            raise ParamsError('partitions write requires label and source file')
+                            raise ParamsError('flash write requires label and source file')
                     else:
                         self.cmd_partitions()
                 elif command == 'ota':
@@ -1277,9 +1277,9 @@ List of available commands:
   repl                          enter REPL mode [UNIX OS ONLY]
   exec {code}                   execute Python code on device
   info                          show device information
-  partitions                    list ESP32 partitions (OTA info)
-  partitions read {label} {file}   read partition to file
-  partitions write {label} {file}  write file to partition
+  flash                         list ESP32 partitions (OTA info)
+  flash read {label} {file}     read partition to file
+  flash write {label} {file}    write file to partition
   ota {firmware.app-bin}        OTA firmware update (ESP32 only)
   sleep {seconds}               sleep for specified seconds
 Aliases:
@@ -1287,7 +1287,6 @@ Aliases:
   cat                           alias to get
   del, rm                       alias to delete
   follow                        alias to monitor
-  parts                         alias to partitions
 Use -- to separate multiple commands:
   mpytool put main.py / -- reset -- monitor
 """
