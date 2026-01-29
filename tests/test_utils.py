@@ -40,6 +40,35 @@ class TestRemotePath(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_remote_path("file.py")
 
+    def test_parse_remote_path_with_special_chars(self):
+        # mpremote issue #18658 - equals sign in filename
+        self.assertEqual(parse_remote_path(":file=value.txt"), "file=value.txt")
+        self.assertEqual(parse_remote_path(":/path/file=1.txt"), "/path/file=1.txt")
+        # mpremote issue #18657 - apostrophe in filename
+        self.assertEqual(parse_remote_path(":file's.txt"), "file's.txt")
+        self.assertEqual(parse_remote_path(":/it's/file.txt"), "/it's/file.txt")
+        # Spaces
+        self.assertEqual(parse_remote_path(":file name.txt"), "file name.txt")
+        self.assertEqual(parse_remote_path(":/my path/file.txt"), "/my path/file.txt")
+
+    def test_parse_remote_path_with_unicode(self):
+        # mpremote issues #18656, #18659, #18643 - unicode handling
+        self.assertEqual(parse_remote_path(":súbor.txt"), "súbor.txt")
+        self.assertEqual(parse_remote_path(":/cesta/súbor.txt"), "/cesta/súbor.txt")
+        # Chinese
+        self.assertEqual(parse_remote_path(":文件.txt"), "文件.txt")
+        # Japanese
+        self.assertEqual(parse_remote_path(":ファイル.txt"), "ファイル.txt")
+        # Emoji
+        self.assertEqual(parse_remote_path(":📁file.txt"), "📁file.txt")
+
+    def test_is_remote_path_with_special_chars(self):
+        # Paths with special characters should still be detected as remote
+        self.assertTrue(is_remote_path(":file=value.txt"))
+        self.assertTrue(is_remote_path(":file's.txt"))
+        self.assertTrue(is_remote_path(":súbor.txt"))
+        self.assertTrue(is_remote_path(":文件.txt"))
+
 
 class TestSplitCommands(unittest.TestCase):
     def test_no_separator(self):

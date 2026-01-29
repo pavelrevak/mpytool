@@ -711,6 +711,416 @@ class TestSleepCommand(unittest.TestCase):
 
 
 @requires_device
+class TestSpecialCharacterFilenames(unittest.TestCase):
+    """Test file operations with special characters in filenames
+
+    Based on mpremote issues:
+    - #18657: apostrophe in filename
+    - #18658: equals sign in filename
+    - #18656, #18659, #18643: unicode handling
+    """
+
+    TEST_DIR = "/_mpytool_special_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_filename_with_equals_sign(self):
+        """Test file with equals sign in name (mpremote #18658)"""
+        path = self.TEST_DIR + "/file=value.txt"
+        content = b"equals sign test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_02_filename_with_apostrophe(self):
+        """Test file with apostrophe in name (mpremote #18657)"""
+        path = self.TEST_DIR + "/it's_a_file.txt"
+        content = b"apostrophe test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_03_filename_with_spaces(self):
+        """Test file with spaces in name"""
+        path = self.TEST_DIR + "/file with spaces.txt"
+        content = b"spaces test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_04_filename_with_multiple_special_chars(self):
+        """Test file with multiple special characters"""
+        path = self.TEST_DIR + "/it's a=test file.txt"
+        content = b"multiple special chars test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_05_directory_with_special_chars(self):
+        """Test directory with special characters"""
+        dir_path = self.TEST_DIR + "/dir's=test"
+        file_path = dir_path + "/file.txt"
+        content = b"nested test"
+        self.mpy.mkdir(dir_path)
+        self.mpy.put(content, file_path)
+        self.assertEqual(self.mpy.get(file_path), content)
+        self.mpy.delete(dir_path)
+
+    def test_06_ls_with_special_chars(self):
+        """Test ls on files with special characters"""
+        path = self.TEST_DIR + "/list=test's.txt"
+        self.mpy.put(b"test", path)
+        result = self.mpy.ls(self.TEST_DIR)
+        names = [name for name, size in result]
+        self.assertIn("list=test's.txt", names)
+        self.mpy.delete(path)
+
+    def test_07_tree_with_special_chars(self):
+        """Test tree on directory with special characters"""
+        dir_path = self.TEST_DIR + "/tree's=dir"
+        self.mpy.mkdir(dir_path)
+        self.mpy.put(b"test", dir_path + "/file.txt")
+        path, size, children = self.mpy.tree(dir_path)
+        self.assertEqual(path, dir_path)
+        self.assertIsInstance(children, list)
+        self.mpy.delete(dir_path)
+
+
+@requires_device
+class TestUnicodeFilenames(unittest.TestCase):
+    """Test file operations with unicode filenames
+
+    Based on mpremote issues:
+    - #18656: UnicodeEncodeError on Windows
+    - #18659: Unicode content hangs
+    - #18643: UnicodeError on specific hardware
+    """
+
+    TEST_DIR = "/_mpytool_unicode_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_czech_filename(self):
+        """Test file with Czech characters in name"""
+        path = self.TEST_DIR + "/súbor.txt"
+        content = b"czech filename test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_02_german_filename(self):
+        """Test file with German umlauts in name"""
+        path = self.TEST_DIR + "/größe.txt"
+        content = b"german filename test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_03_chinese_filename(self):
+        """Test file with Chinese characters in name"""
+        path = self.TEST_DIR + "/文件.txt"
+        content = b"chinese filename test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_04_japanese_filename(self):
+        """Test file with Japanese characters in name"""
+        path = self.TEST_DIR + "/ファイル.txt"
+        content = b"japanese filename test"
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_05_unicode_content(self):
+        """Test file with unicode content"""
+        path = self.TEST_DIR + "/unicode_content.txt"
+        content = "Příliš žluťoučký kůň úpěl ďábelské ódy. 日本語テスト".encode('utf-8')
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_06_unicode_directory(self):
+        """Test directory with unicode name"""
+        dir_path = self.TEST_DIR + "/složka"
+        file_path = dir_path + "/soubor.txt"
+        content = b"nested unicode test"
+        self.mpy.mkdir(dir_path)
+        self.mpy.put(content, file_path)
+        self.assertEqual(self.mpy.get(file_path), content)
+        self.mpy.delete(dir_path)
+
+    def test_07_ls_unicode_files(self):
+        """Test ls on files with unicode names"""
+        path = self.TEST_DIR + "/čeština.txt"
+        self.mpy.put(b"test", path)
+        result = self.mpy.ls(self.TEST_DIR)
+        names = [name for name, size in result]
+        self.assertIn("čeština.txt", names)
+        self.mpy.delete(path)
+
+
+@requires_device
+class TestCpSpecialFilenames(unittest.TestCase):
+    """Test cp command with special character filenames
+
+    Based on mpremote issues #18657, #18658
+    """
+
+    TEST_DIR = "/_mpytool_cpspecial_test"
+    LOCAL_DIR = "/tmp/_mpytool_cpspecial_test"
+
+    @classmethod
+    def setUpClass(cls):
+        import os
+        import shutil
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        # Setup local test directory
+        if os.path.exists(cls.LOCAL_DIR):
+            shutil.rmtree(cls.LOCAL_DIR)
+        os.makedirs(cls.LOCAL_DIR)
+        # Setup remote test directory
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        import os
+        import shutil
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        if os.path.exists(cls.LOCAL_DIR):
+            shutil.rmtree(cls.LOCAL_DIR)
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_upload_file_with_equals(self):
+        """Test cp upload file with equals sign (mpremote #18658)"""
+        import os
+        local_file = os.path.join(self.LOCAL_DIR, "test=value.txt")
+        with open(local_file, 'w') as f:
+            f.write("equals upload test")
+        remote_file = self.TEST_DIR + "/test=value.txt"
+        self.tool.cmd_cp(local_file, ':' + remote_file)
+        content = self.mpy.get(remote_file)
+        self.assertEqual(content, b"equals upload test")
+
+    def test_02_download_file_with_equals(self):
+        """Test cp download file with equals sign (mpremote #18658)"""
+        import os
+        remote_file = self.TEST_DIR + "/download=test.txt"
+        self.mpy.put(b"equals download test", remote_file)
+        local_file = os.path.join(self.LOCAL_DIR, "download=test.txt")
+        self.tool.cmd_cp(':' + remote_file, local_file)
+        with open(local_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, "equals download test")
+
+    def test_03_upload_file_with_apostrophe(self):
+        """Test cp upload file with apostrophe (mpremote #18657)"""
+        import os
+        local_file = os.path.join(self.LOCAL_DIR, "it's_test.txt")
+        with open(local_file, 'w') as f:
+            f.write("apostrophe upload test")
+        remote_file = self.TEST_DIR + "/it's_test.txt"
+        self.tool.cmd_cp(local_file, ':' + remote_file)
+        content = self.mpy.get(remote_file)
+        self.assertEqual(content, b"apostrophe upload test")
+
+    def test_04_download_file_with_apostrophe(self):
+        """Test cp download file with apostrophe (mpremote #18657)"""
+        import os
+        remote_file = self.TEST_DIR + "/down's_test.txt"
+        self.mpy.put(b"apostrophe download test", remote_file)
+        local_file = os.path.join(self.LOCAL_DIR, "down's_test.txt")
+        self.tool.cmd_cp(':' + remote_file, local_file)
+        with open(local_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, "apostrophe download test")
+
+    def test_05_upload_file_with_unicode(self):
+        """Test cp upload file with unicode name"""
+        import os
+        local_file = os.path.join(self.LOCAL_DIR, "súbor.txt")
+        with open(local_file, 'w') as f:
+            f.write("unicode upload test")
+        remote_file = self.TEST_DIR + "/súbor.txt"
+        self.tool.cmd_cp(local_file, ':' + remote_file)
+        content = self.mpy.get(remote_file)
+        self.assertEqual(content, b"unicode upload test")
+
+    def test_06_download_file_with_unicode(self):
+        """Test cp download file with unicode name"""
+        import os
+        remote_file = self.TEST_DIR + "/stáhni.txt"
+        self.mpy.put(b"unicode download test", remote_file)
+        local_file = os.path.join(self.LOCAL_DIR, "stáhni.txt")
+        self.tool.cmd_cp(':' + remote_file, local_file)
+        with open(local_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, "unicode download test")
+
+
+@requires_device
+class TestErrorMessages(unittest.TestCase):
+    """Test error messages for various failure cases
+
+    Based on mpremote issue #17267 - misleading error messages
+    """
+
+    TEST_DIR = "/_mpytool_error_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        from mpytool.mpy import PathNotFound, FileNotFound, DirNotFound
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        cls.PathNotFound = PathNotFound
+        cls.FileNotFound = FileNotFound
+        cls.DirNotFound = DirNotFound
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_get_nonexistent_file(self):
+        """Test get on nonexistent file raises FileNotFound"""
+        with self.assertRaises(self.FileNotFound):
+            self.mpy.get(self.TEST_DIR + "/nonexistent.txt")
+
+    def test_02_delete_nonexistent_path(self):
+        """Test delete on nonexistent path raises PathNotFound"""
+        with self.assertRaises(self.PathNotFound):
+            self.mpy.delete(self.TEST_DIR + "/nonexistent.txt")
+
+    def test_03_ls_nonexistent_dir(self):
+        """Test ls on nonexistent directory raises DirNotFound"""
+        with self.assertRaises(self.DirNotFound):
+            self.mpy.ls(self.TEST_DIR + "/nonexistent_dir")
+
+    def test_04_stat_returns_none_for_nonexistent(self):
+        """Test stat returns None for nonexistent path (not error)"""
+        result = self.mpy.stat(self.TEST_DIR + "/definitely_nonexistent.txt")
+        self.assertIsNone(result)
+
+    def test_05_tree_on_nonexistent_raises(self):
+        """Test tree on nonexistent path raises PathNotFound"""
+        with self.assertRaises(self.PathNotFound):
+            self.mpy.tree(self.TEST_DIR + "/nonexistent_path")
+
+
+@requires_device
+class TestLargeFileTransfer(unittest.TestCase):
+    """Test large file transfers with chunking
+
+    Based on mpremote issues about slow/hanging transfers
+    """
+
+    TEST_DIR = "/_mpytool_large_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_upload_10kb_file(self):
+        """Test upload of 10KB file"""
+        path = self.TEST_DIR + "/10kb.bin"
+        content = bytes(range(256)) * 40  # 10KB
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_02_upload_50kb_file(self):
+        """Test upload of 50KB file"""
+        path = self.TEST_DIR + "/50kb.bin"
+        content = bytes(range(256)) * 200  # ~50KB
+        self.mpy.put(content, path)
+        self.assertEqual(self.mpy.get(path), content)
+        self.mpy.delete(path)
+
+    def test_03_upload_compressible_file(self):
+        """Test upload of compressible file"""
+        path = self.TEST_DIR + "/compress.txt"
+        content = b"A" * 20000  # 20KB, highly compressible
+        encodings, wire_bytes = self.mpy.put(content, path, compress=True)
+        self.assertEqual(self.mpy.get(path), content)
+        # Should use compression
+        self.assertIn('compressed', encodings)
+        # Wire bytes should be much less
+        self.assertLess(wire_bytes, len(content) // 2)
+        self.mpy.delete(path)
+
+
+@requires_device
 class TestPartitions(unittest.TestCase):
     """Test partition operations (ESP32 only)"""
 

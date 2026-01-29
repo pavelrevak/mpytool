@@ -8,11 +8,18 @@ import mpytool.mpy_comm as mpy_comm
 
 
 class TestEscapePath(unittest.TestCase):
+    """Tests for _escape_path function
+
+    Based on mpremote issues:
+    - #18657: apostrophe in filename
+    - #18658: equals sign in filename
+    """
     def test_no_escape_needed(self):
         self.assertEqual(_escape_path("simple.txt"), "simple.txt")
         self.assertEqual(_escape_path("/path/to/file"), "/path/to/file")
 
     def test_escape_apostrophe(self):
+        # mpremote issue #18657
         self.assertEqual(_escape_path("file's.txt"), "file\\'s.txt")
         self.assertEqual(_escape_path("it's a file"), "it\\'s a file")
 
@@ -24,6 +31,33 @@ class TestEscapePath(unittest.TestCase):
 
     def test_multiple_apostrophes(self):
         self.assertEqual(_escape_path("a'b'c"), "a\\'b\\'c")
+
+    def test_equals_sign_no_escape_needed(self):
+        # mpremote issue #18658 - equals sign should work without escape
+        self.assertEqual(_escape_path("file=value.txt"), "file=value.txt")
+        self.assertEqual(_escape_path("a=b=c.txt"), "a=b=c.txt")
+
+    def test_spaces_no_escape_needed(self):
+        # Spaces don't need escaping in Python string literals
+        self.assertEqual(_escape_path("file with spaces.txt"), "file with spaces.txt")
+        self.assertEqual(_escape_path("/path/to/my file.txt"), "/path/to/my file.txt")
+
+    def test_unicode_no_escape_needed(self):
+        # Unicode characters don't need escaping
+        self.assertEqual(_escape_path("súbor.txt"), "súbor.txt")
+        self.assertEqual(_escape_path("文件.txt"), "文件.txt")
+        self.assertEqual(_escape_path("ファイル.txt"), "ファイル.txt")
+
+    def test_special_chars_combination(self):
+        # Combination of special characters
+        self.assertEqual(
+            _escape_path("it's a file=test.txt"),
+            "it\\'s a file=test.txt"
+        )
+
+    def test_double_quotes_no_escape_needed(self):
+        # Double quotes don't need escaping in single-quoted strings
+        self.assertEqual(_escape_path('file"name.txt'), 'file"name.txt')
 
 
 class TestFileInfo(unittest.TestCase):
