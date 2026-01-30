@@ -1167,10 +1167,69 @@ class TestPartitions(unittest.TestCase):
                 break
         if not nvs:
             self.skipTest("No nvs partition found")
-        # Read first 4KB of nvs
-        data = self.mpy.partition_read('nvs')
+        # Read nvs partition
+        data = self.mpy.flash_read(label='nvs')
         self.assertIsInstance(data, bytes)
         self.assertEqual(len(data), nvs['size'])
+
+
+@requires_device
+class TestFlashRP2(unittest.TestCase):
+    """Test flash operations (RP2 only)"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        # Check if RP2
+        try:
+            platform = cls.mpy.comm.exec_eval("repr(__import__('sys').platform)")
+            cls.is_rp2 = platform == 'rp2'
+        except Exception:
+            cls.is_rp2 = False
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mpy.comm.exit_raw_repl()
+
+    def test_01_flash_info(self):
+        """Test getting flash info on RP2"""
+        if not self.is_rp2:
+            self.skipTest("Not an RP2 device")
+        info = self.mpy.flash_info()
+        self.assertIn('size', info)
+        self.assertIn('block_size', info)
+        self.assertIn('block_count', info)
+        self.assertIn('filesystem', info)
+        self.assertIn('magic', info)
+        # Check values
+        self.assertIsInstance(info['size'], int)
+        self.assertIsInstance(info['block_size'], int)
+        self.assertIsInstance(info['block_count'], int)
+        self.assertGreater(info['size'], 0)
+        self.assertGreater(info['block_size'], 0)
+        self.assertEqual(info['size'], info['block_size'] * info['block_count'])
+
+    def test_02_flash_info_filesystem(self):
+        """Test filesystem detection on RP2"""
+        if not self.is_rp2:
+            self.skipTest("Not an RP2 device")
+        info = self.mpy.flash_info()
+        # Filesystem should be detected (littlefs2 is default on RP2)
+        self.assertIn(info['filesystem'], ('littlefs2', 'fat', 'unknown'))
+        # Magic should be 16 bytes
+        self.assertIsInstance(info['magic'], bytes)
+        self.assertEqual(len(info['magic']), 16)
+
+    def test_03_flash_info_littlefs_magic(self):
+        """Test LittleFS magic detection on RP2"""
+        if not self.is_rp2:
+            self.skipTest("Not an RP2 device")
+        info = self.mpy.flash_info()
+        if info['filesystem'] == 'littlefs2':
+            # Check magic contains "littlefs" at offset 8
+            self.assertEqual(info['magic'][8:16], b'littlefs')
 
 
 if __name__ == "__main__":

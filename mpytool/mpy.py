@@ -104,6 +104,24 @@ def _mt_finfo(files):
         except:r[p]=None
     gc.collect()
     return r
+""",
+        'partition_magic': """
+def _mt_pmagic(label, size=512):
+    parts = esp32.Partition.find(esp32.Partition.TYPE_DATA, label=label)
+    if not parts:
+        return None
+    p = parts[0]
+    buf = bytearray(size)
+    p.readblocks(0, buf)
+    # Return magic bytes and block size (ioctl 5)
+    return bytes(buf), p.ioctl(5, 0)
+""",
+        'partition_find': """
+def _mt_pfind(label):
+    p = esp32.Partition.find(esp32.Partition.TYPE_APP, label=label)
+    if not p:
+        p = esp32.Partition.find(esp32.Partition.TYPE_DATA, label=label)
+    return p[0] if p else None
 """}
 
     def __init__(self, conn, log=None, chunk_size=None):
@@ -113,6 +131,7 @@ def _mt_finfo(files):
         self._imported = []
         self._load_helpers = []
         self._chunk_size = chunk_size  # None = auto-detect
+        self._platform = None  # Cached platform name
 
     @property
     def conn(self):
@@ -134,8 +153,15 @@ def _mt_finfo(files):
         self._imported = []
         self._load_helpers = []
         self._mpy_comm._repl_mode = None
+        self._platform = None
         Mpy._CHUNK_AUTO_DETECTED = None
         Mpy._DEFLATE_AVAILABLE = None
+
+    def _get_platform(self):
+        """Get cached platform name (e.g. 'esp32', 'rp2')"""
+        if self._platform is None:
+            self._platform = self.platform()['platform']
+        return self._platform
 
     def load_helper(self, helper):
         """Load helper function to MicroPython
@@ -654,8 +680,92 @@ def _mt_finfo(files):
         0: {0: 'factory', 16: 'ota_0', 17: 'ota_1', 18: 'ota_2', 19: 'ota_3', 32: 'test'},
         # Data subtypes (type 1)
         1: {0: 'ota', 1: 'phy', 2: 'nvs', 3: 'coredump', 4: 'nvs_keys',
-            5: 'efuse', 128: 'esphttpd', 129: 'fat', 130: 'spiffs'},
+            5: 'efuse', 128: 'esphttpd', 129: 'fat', 130: 'spiffs', 131: 'littlefs'},
     }
+    # Subtypes that can contain a filesystem (for auto-detection)
+    _FS_SUBTYPES = {129, 130, 131}  # fat, spiffs, littlefs
+
+    def _detect_fs_from_magic(self, magic):
+        """Detect filesystem type and details from magic bytes.
+
+        Args:
+            magic: First 512 bytes from partition/flash (boot sector)
+
+        Returns:
+            dict with keys:
+                'type': filesystem type ('littlefs2', 'fat16', 'fat32', 'exfat', None)
+                'block_size': block/cluster size in bytes (if detected)
+                'label': volume label (if detected)
+            or None if not enough data
+        """
+        if len(magic) < 16:
+            return None
+
+        result = {'type': None, 'block_size': None, 'label': None}
+
+        # LittleFS v2: "littlefs" string at offset 8
+        # Note: LittleFS uses inline metadata format, block_size is not at fixed offset
+        # We detect the filesystem type but can't reliably get block_size from magic
+        if magic[8:16] == b'littlefs':
+            result['type'] = 'littlefs2'
+            # Block size must be obtained from device (ioctl) or partition info
+            return result
+
+        # Check for FAT boot sector signature (need 512 bytes)
+        if len(magic) >= 512:
+            # Boot sector signature at 510-511
+            if magic[510:512] == b'\x55\xAA':
+                import struct
+                # Bytes per sector (offset 11-12)
+                bytes_per_sector = struct.unpack('<H', magic[11:13])[0]
+                # Sectors per cluster (offset 13)
+                sectors_per_cluster = magic[13]
+                result['block_size'] = bytes_per_sector * sectors_per_cluster
+
+                # Check for exFAT first (has "EXFAT   " at offset 3)
+                if magic[3:11] == b'EXFAT   ':
+                    result['type'] = 'exfat'
+                    return result
+
+                # FAT type string location differs between FAT16 and FAT32
+                # FAT16: "FAT16   " at offset 54
+                # FAT32: "FAT32   " at offset 82
+                if magic[54:62] == b'FAT16   ':
+                    result['type'] = 'fat16'
+                    # Volume label at offset 43 (11 bytes)
+                    label = magic[43:54].rstrip(b' \x00').decode('ascii', errors='ignore')
+                    if label and label != 'NO NAME':
+                        result['label'] = label
+                elif magic[82:90] == b'FAT32   ':
+                    result['type'] = 'fat32'
+                    # Volume label at offset 71 (11 bytes)
+                    label = magic[71:82].rstrip(b' \x00').decode('ascii', errors='ignore')
+                    if label and label != 'NO NAME':
+                        result['label'] = label
+                elif magic[54:59] == b'FAT12':
+                    result['type'] = 'fat12'
+                else:
+                    # Generic FAT (can't determine type)
+                    result['type'] = 'fat'
+                return result
+
+        return result if result['type'] else None
+
+    def _read_partition_magic(self, label, size=512):
+        """Read first bytes from partition for filesystem detection.
+
+        Args:
+            label: Partition label
+            size: Number of bytes to read
+
+        Returns:
+            tuple (magic_bytes, block_size) or None if read fails
+        """
+        try:
+            self.load_helper('partition_magic')
+            return self._mpy_comm.exec_eval(f"_mt_pmagic('{label}', {size})")
+        except _mpy_comm.CmdError:
+            return None
 
     def partitions(self):
         """Get ESP32 partition information
@@ -693,7 +803,7 @@ def _mt_finfo(files):
         for ptype, subtype, offset, size, label, encrypted in raw_parts:
             type_name = self._PART_TYPES.get(ptype, str(ptype))
             subtype_name = self._PART_SUBTYPES.get(ptype, {}).get(subtype, str(subtype))
-            partitions.append({
+            part_info = {
                 'label': label,
                 'type': ptype,
                 'type_name': type_name,
@@ -703,7 +813,22 @@ def _mt_finfo(files):
                 'size': size,
                 'encrypted': encrypted,
                 'running': label == running,
-            })
+                'filesystem': None,
+                'fs_block_size': None,
+            }
+            # Detect actual filesystem for data partitions with FS subtypes
+            if ptype == 1 and subtype in self._FS_SUBTYPES:  # TYPE_DATA
+                result = self._read_partition_magic(label)
+                if result:
+                    magic, block_size = result
+                    part_info['fs_block_size'] = block_size
+                    fs_info = self._detect_fs_from_magic(magic)
+                    if fs_info:
+                        part_info['filesystem'] = fs_info.get('type')
+                        # For FAT, use cluster size from magic; for others use partition block size
+                        if fs_info.get('block_size') and 'fat' in (fs_info.get('type') or ''):
+                            part_info['fs_cluster_size'] = fs_info.get('block_size')
+            partitions.append(part_info)
 
         try:
             boot = self._mpy_comm.exec_eval(
@@ -731,6 +856,257 @@ def _mt_finfo(files):
             'next_ota': next_ota,
             'next_ota_size': next_ota_size,
         }
+
+    def flash_info(self):
+        """Get RP2 flash information
+
+        Returns:
+            dict with keys:
+                'size': total flash size in bytes
+                'block_size': block size in bytes
+                'block_count': number of blocks
+                'filesystem': detected filesystem type ('littlefs2', 'fat', 'unknown')
+
+        Raises:
+            MpyError: if not RP2 or rp2.Flash not available
+        """
+        try:
+            self.import_module('rp2')
+        except _mpy_comm.CmdError as err:
+            raise _mpy_comm.MpyError("Flash info not available (RP2 only)") from err
+
+        # Get flash info via ioctl
+        # ioctl(4) = block count, ioctl(5) = block size
+        self._mpy_comm.exec("_f = rp2.Flash()")
+        info = self._mpy_comm.exec_eval("(_f.ioctl(4, 0), _f.ioctl(5, 0))")
+        block_count, block_size = info
+        size = block_count * block_size
+
+        # Read first 512 bytes for filesystem detection
+        self._mpy_comm.exec("_b = bytearray(512); _f.readblocks(0, _b)")
+        magic = self._mpy_comm.exec_eval("bytes(_b)")
+
+        # Use common filesystem detection
+        fs_info = self._detect_fs_from_magic(magic)
+        fs_type = fs_info.get('type') if fs_info else None
+        fs_block_size = fs_info.get('block_size') if fs_info else None
+
+        return {
+            'size': size,
+            'block_size': block_size,
+            'block_count': block_count,
+            'filesystem': fs_type or 'unknown',
+            'fs_block_size': fs_block_size,
+            'magic': magic[:16],
+        }
+
+    def flash_read(self, label=None, progress_callback=None):
+        """Read flash/partition content
+
+        Arguments:
+            label: partition label (ESP32) or None (RP2 entire user flash)
+            progress_callback: optional callback(transferred, total)
+
+        Returns:
+            bytes with flash/partition content
+
+        Raises:
+            MpyError: if wrong platform or partition not found
+        """
+        platform = self._get_platform()
+        self.import_module('ubinascii as ub')
+
+        if label:
+            # ESP32 partition
+            if platform != 'esp32':
+                raise _mpy_comm.MpyError("Partition label requires ESP32")
+            self.import_module('esp32')
+            self.load_helper('partition_find')
+            try:
+                part_info = self._mpy_comm.exec_eval(f"_mt_pfind('{label}').info()")
+            except _mpy_comm.CmdError:
+                raise _mpy_comm.MpyError(f"Partition '{label}' not found")
+            _, _, _, total_size, _, _ = part_info
+            block_size = 4096
+            self._mpy_comm.exec(f"_dev = _mt_pfind('{label}')")
+        else:
+            # RP2 flash
+            if platform != 'rp2':
+                raise _mpy_comm.MpyError("Flash read without label requires RP2")
+            self.import_module('rp2')
+            self._mpy_comm.exec("_dev = rp2.Flash()")
+            info = self._mpy_comm.exec_eval("(_dev.ioctl(4, 0), _dev.ioctl(5, 0))")
+            block_count, block_size = info
+            total_size = block_count * block_size
+
+        total_blocks = (total_size + block_size - 1) // block_size
+        chunk_blocks = 8  # 32KB per iteration
+        data = bytearray()
+        block_num = 0
+
+        while block_num < total_blocks:
+            blocks_to_read = min(chunk_blocks, total_blocks - block_num)
+            bytes_to_read = blocks_to_read * block_size
+            self._mpy_comm.exec(
+                f"_buf=bytearray({bytes_to_read}); _dev.readblocks({block_num}, _buf)")
+            b64_data = self._mpy_comm.exec_eval("repr(ub.b2a_base64(_buf).decode())")
+            chunk = base64.b64decode(b64_data)
+            data.extend(chunk)
+            block_num += blocks_to_read
+            if progress_callback:
+                progress_callback(min(block_num * block_size, total_size), total_size)
+
+        self._mpy_comm.exec("del _dev")
+        return bytes(data[:total_size])
+
+    def flash_write(self, data, label=None, progress_callback=None, compress=None):
+        """Write data to flash/partition
+
+        WARNING: This will overwrite the filesystem! Use with caution.
+
+        Arguments:
+            data: bytes to write (will be padded to block size)
+            label: partition label (ESP32) or None (RP2 entire user flash)
+            progress_callback: optional callback(transferred, total) for RP2,
+                              callback(transferred, total, wire_bytes) for ESP32
+            compress: None=auto-detect, True=force, False=disable (ESP32 only)
+
+        Returns:
+            dict with keys: 'size', 'written', and for ESP32: 'wire_bytes', 'compressed'
+
+        Raises:
+            MpyError: if wrong platform, data too large, or partition not found
+        """
+        platform = self._get_platform()
+
+        if label:
+            # ESP32 partition - use _write_partition_data for compression support
+            if platform != 'esp32':
+                raise _mpy_comm.MpyError("Partition label requires ESP32")
+            self.import_module('esp32')
+            self.load_helper('partition_find')
+            try:
+                part_info = self._mpy_comm.exec_eval(f"_mt_pfind('{label}').info()")
+            except _mpy_comm.CmdError:
+                raise _mpy_comm.MpyError(f"Partition '{label}' not found")
+            _, _, _, part_size, part_label, _ = part_info
+            self._mpy_comm.exec(f"_dev = _mt_pfind('{label}')")
+
+            wire_bytes, used_compress = self._write_partition_data(
+                '_dev', data, len(data), part_size, progress_callback, compress)
+
+            self._mpy_comm.exec("del _dev")
+            self.import_module('gc')
+            self._mpy_comm.exec("gc.collect()")
+
+            return {
+                'size': part_size,
+                'written': len(data),
+                'wire_bytes': wire_bytes,
+                'compressed': used_compress,
+            }
+        else:
+            # RP2 flash - simple block write
+            if platform != 'rp2':
+                raise _mpy_comm.MpyError("Flash write without label requires RP2")
+            self.import_module('rp2')
+            self._mpy_comm.exec("_dev = rp2.Flash()")
+            info = self._mpy_comm.exec_eval("(_dev.ioctl(4, 0), _dev.ioctl(5, 0))")
+            block_count, block_size = info
+            total_size = block_count * block_size
+
+            if len(data) > total_size:
+                raise _mpy_comm.MpyError(
+                    f"Data too large: {len(data)} bytes, flash size: {total_size} bytes")
+
+            self.import_module('ubinascii as ub')
+
+            # Pad data to block size
+            if len(data) % block_size:
+                padding = block_size - (len(data) % block_size)
+                data = data + b'\xff' * padding
+
+            chunk_blocks = 8  # 32KB per iteration
+            block_num = 0
+            total_blocks = len(data) // block_size
+
+            while block_num < total_blocks:
+                blocks_to_write = min(chunk_blocks, total_blocks - block_num)
+                offset = block_num * block_size
+                chunk = data[offset:offset + blocks_to_write * block_size]
+                b64_chunk = base64.b64encode(chunk).decode('ascii')
+                self._mpy_comm.exec(f"_buf=ub.a2b_base64('{b64_chunk}')")
+                self._mpy_comm.exec(f"_dev.writeblocks({block_num}, _buf)")
+                block_num += blocks_to_write
+                if progress_callback:
+                    progress_callback(block_num * block_size, len(data))
+
+            self._mpy_comm.exec("del _dev")
+            return {
+                'size': total_size,
+                'written': len(data),
+            }
+
+    def flash_erase(self, label=None, full=False, progress_callback=None):
+        """Erase flash/partition
+
+        Arguments:
+            label: partition label (ESP32) or None (RP2 entire user flash)
+            full: if True, erase entire flash/partition; if False, erase first 2 blocks
+            progress_callback: optional callback(transferred, total)
+
+        Returns:
+            dict with keys: 'erased', and 'label' for ESP32
+
+        Raises:
+            MpyError: if wrong platform or partition not found
+        """
+        platform = self._get_platform()
+
+        if label:
+            # ESP32 partition
+            if platform != 'esp32':
+                raise _mpy_comm.MpyError("Partition label requires ESP32")
+            self.import_module('esp32')
+            self.load_helper('partition_find')
+            try:
+                part_info = self._mpy_comm.exec_eval(f"_mt_pfind('{label}').info()")
+            except _mpy_comm.CmdError:
+                raise _mpy_comm.MpyError(f"Partition '{label}' not found")
+            _, _, _, part_size, _, _ = part_info
+            block_size = 4096
+            total_blocks = part_size // block_size
+            self._mpy_comm.exec(f"_dev = _mt_pfind('{label}')")
+        else:
+            # RP2 flash
+            if platform != 'rp2':
+                raise _mpy_comm.MpyError("Flash erase without label requires RP2")
+            self.import_module('rp2')
+            self._mpy_comm.exec("_dev = rp2.Flash()")
+            info = self._mpy_comm.exec_eval("(_dev.ioctl(4, 0), _dev.ioctl(5, 0))")
+            total_blocks, block_size = info
+
+        if full:
+            blocks_to_erase = total_blocks
+        else:
+            blocks_to_erase = min(2, total_blocks)  # First 2 blocks for FS reset
+
+        total_bytes = blocks_to_erase * block_size
+
+        # Prepare empty block buffer on device
+        self._mpy_comm.exec(f"_buf = b'\\xff' * {block_size}")
+
+        for block_num in range(blocks_to_erase):
+            self._mpy_comm.exec(f"_dev.writeblocks({block_num}, _buf)")
+            if progress_callback:
+                progress_callback((block_num + 1) * block_size, total_bytes)
+
+        self._mpy_comm.exec("del _dev")
+
+        result = {'erased': total_bytes}
+        if label:
+            result['label'] = label
+        return result
 
     def soft_reset(self):
         """Soft reset device (Ctrl-D in REPL)
@@ -921,113 +1297,3 @@ def _mt_finfo(files):
             'compressed': used_compress,
         }
 
-    def partition_read(self, label, progress_callback=None):
-        """Read partition content by label
-
-        Arguments:
-            label: partition label (e.g. 'ota_0', 'nvs', 'spiffs')
-            progress_callback: optional callback(transferred, total)
-
-        Returns:
-            bytes with partition content
-
-        Raises:
-            MpyError: if partition not found or ESP32 only
-        """
-        try:
-            self.import_module('esp32')
-        except _mpy_comm.CmdError:
-            raise _mpy_comm.MpyError("Partitions not available (ESP32 only)")
-
-        # Get partition info (search in both APP and DATA types)
-        try:
-            part_info = self._mpy_comm.exec_eval(
-                f"(esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
-                f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0].info()"
-            )
-        except _mpy_comm.CmdError:
-            raise _mpy_comm.MpyError(f"Partition '{label}' not found")
-
-        part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
-
-        block_size = 4096
-        chunk_blocks = 8  # 32KB per iteration
-
-        self._mpy_comm.exec(
-            f"_part = (esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
-            f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0]"
-        )
-        self.import_module('ubinascii as ub')
-
-        data = bytearray()
-        block_num = 0
-        total_blocks = (part_size + block_size - 1) // block_size
-
-        while block_num < total_blocks:
-            blocks_to_read = min(chunk_blocks, total_blocks - block_num)
-            bytes_to_read = blocks_to_read * block_size
-
-            self._mpy_comm.exec(f"_buf=bytearray({bytes_to_read}); _part.readblocks({block_num}, _buf)")
-            b64_data = self._mpy_comm.exec_eval("repr(ub.b2a_base64(_buf).decode())")
-            chunk = base64.b64decode(b64_data)
-            data.extend(chunk)
-
-            block_num += blocks_to_read
-
-            if progress_callback:
-                progress_callback(min(block_num * block_size, part_size), part_size)
-
-        self._mpy_comm.exec("del _part")
-        return bytes(data[:part_size])
-
-    def partition_write(self, label, data, progress_callback=None, compress=None):
-        """Write data to partition by label
-
-        Arguments:
-            label: partition label (e.g. 'ota_0', 'nvs', 'spiffs')
-            data: bytes to write
-            progress_callback: optional callback(transferred, total, wire_bytes)
-            compress: None=auto-detect, True=force, False=disable
-
-        Returns:
-            dict with keys: 'target', 'size', 'wire_bytes', 'compressed'
-
-        Raises:
-            MpyError: if partition not found, data too large, or ESP32 only
-        """
-        try:
-            self.import_module('esp32')
-        except _mpy_comm.CmdError:
-            raise _mpy_comm.MpyError("Partitions not available (ESP32 only)")
-
-        # Get partition info (search in both APP and DATA types)
-        try:
-            part_info = self._mpy_comm.exec_eval(
-                f"(esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
-                f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0].info()"
-            )
-        except _mpy_comm.CmdError:
-            raise _mpy_comm.MpyError(f"Partition '{label}' not found")
-
-        part_type, part_subtype, part_offset, part_size, part_label, _ = part_info
-        data_size = len(data)
-
-        self._mpy_comm.exec(
-            f"_part = (esp32.Partition.find(esp32.Partition.TYPE_APP, label='{label}') or "
-            f"esp32.Partition.find(esp32.Partition.TYPE_DATA, label='{label}'))[0]"
-        )
-
-        wire_bytes, used_compress = self._write_partition_data(
-            '_part', data, data_size, part_size, progress_callback, compress
-        )
-
-        self._mpy_comm.exec("del _part")
-        self.import_module('gc')
-        self._mpy_comm.exec("gc.collect()")
-
-        return {
-            'target': part_label,
-            'size': data_size,
-            'wire_bytes': wire_bytes,
-            'compressed': used_compress,
-        }

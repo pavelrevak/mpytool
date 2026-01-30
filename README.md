@@ -170,20 +170,30 @@ MAC WiFi:    aa:bb:cc:dd:ee:01
 MAC WiFi AP: aa:bb:cc:dd:ee:02
 ```
 
-ESP32 flash partitions (list, read, write):
+flash operations (RP2 and ESP32):
 ```
-$ mpytool flash                                   # list all partitions
-Label        Type     Subtype       Address       Size Flags
------------------------------------------------------------------
-factory      app      factory       0x10000      1.94M running
+# RP2 - user flash (entire filesystem area)
+$ mpytool flash                       # show flash info and filesystem type
+$ mpytool flash read backup.bin       # backup entire user flash
+$ mpytool flash write backup.bin      # restore from backup
+$ mpytool flash erase                 # quick erase (reset filesystem)
+$ mpytool flash erase --full          # full erase
+
+# ESP32 - partitions (by label)
+$ mpytool flash                       # list all partitions with filesystem info
+Label        Type     Subtype       Address       Size    Block Actual FS     Flags
+------------------------------------------------------------------------------------------
+factory      app      factory       0x10000      1.94M                        running
 nvs          data     nvs            0x9000      24.0K
-vfs          data     fat          0x200000      2.00M
+vfs          data     littlefs     0x200000      2.00M     4 KB littlefs2
 
 Boot partition: factory
 Next OTA:       (none)
 
-$ mpytool flash read factory backup.bin           # backup partition to file
-$ mpytool flash write nvs nvs_backup.bin          # restore partition from file
+$ mpytool flash read vfs backup.bin        # backup partition to file
+$ mpytool flash write nvs nvs_backup.bin   # restore partition from file
+$ mpytool flash erase vfs                  # quick erase partition
+$ mpytool flash erase vfs --full           # full erase partition
 ```
 
 OTA firmware update (ESP32):

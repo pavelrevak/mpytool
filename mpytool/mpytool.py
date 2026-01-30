@@ -930,40 +930,53 @@ class MpyTool():
 
         self.verbose(f"  OTA complete! Use 'mreset' to boot into new firmware.", 1, color='green')
 
-    def cmd_partitions(self):
-        """List ESP32 partitions"""
-        self.verbose("PARTITIONS", 2)
-        info = self._mpy.partitions()
-        print(f"{'Label':<12} {'Type':<8} {'Subtype':<10} {'Address':>10} {'Size':>10} {'Flags'}")
-        print("-" * 65)
+    def cmd_flash(self):
+        """Show flash information (auto-detect platform)"""
+        self.verbose("FLASH", 2)
+        platform = self._mpy.platform()['platform']
 
-        for p in info['partitions']:
-            flags = []
-            if p['encrypted']:
-                flags.append('enc')
-            if p['running']:
-                flags.append('running')
-            print(f"{p['label']:<12} {p['type_name']:<8} {p['subtype_name']:<10} "
-                  f"{p['offset']:>#10x} {self.format_size(p['size']):>10} {', '.join(flags)}")
+        if platform == 'rp2':
+            self._cmd_flash_rp2()
+        elif platform == 'esp32':
+            self._cmd_flash_esp32()
+        else:
+            raise _mpytool.MpyError(f"Flash info not supported for platform: {platform}")
 
-        if info['boot']:
-            print(f"\nBoot partition: {info['boot']}")
-        if info['next_ota']:
-            print(f"Next OTA:       {info['next_ota']}")
+    def _cmd_flash_rp2(self):
+        """Show RP2 flash information"""
+        info = self._mpy.flash_info()
+        print(f"Platform:    RP2")
+        print(f"Flash size:  {self.format_size(info['size'])}")
+        print(f"Block size:  {info['block_size']} bytes")
+        print(f"Block count: {info['block_count']}")
+        fs_line = f"Filesystem:  {info['filesystem']}"
+        # For FAT, show cluster size if detected from magic
+        if info.get('fs_block_size'):
+            fs_line += f" (cluster: {self.format_size(info['fs_block_size'])})"
+        if info['filesystem'] == 'unknown' and info.get('magic'):
+            magic_hex = ' '.join(f'{b:02x}' for b in info['magic'])
+            fs_line += f"  (magic: {magic_hex})"
+        print(fs_line)
 
-    def cmd_partition_read(self, label, dest_path):
-        """Read partition content to file"""
-        self.verbose(f"PARTITION READ {label} -> {dest_path}", 1)
-
-        def progress(transferred, total):
+    def _make_progress(self, action, label=None):
+        """Create progress callback for flash operations"""
+        def progress(transferred, total, *_):
             if self._verbose >= 1:
                 pct = (transferred / total * 100) if total > 0 else 0
+                prefix = f"{action} {label}" if label else action
                 self.verbose(
-                    f"  reading {label}: {pct:.0f}% {self.format_size(transferred)} / {self.format_size(total)}",
-                    color='cyan', end='', overwrite=True
-                )
+                    f"  {prefix}: {pct:.0f}% {self.format_size(transferred)} / {self.format_size(total)}",
+                    color='cyan', end='', overwrite=True)
+        return progress
 
-        data = self._mpy.partition_read(label, progress_callback=progress)
+    def cmd_flash_read(self, dest_path, label=None):
+        """Read flash/partition content to file"""
+        if label:
+            self.verbose(f"FLASH READ {label} -> {dest_path}", 1)
+        else:
+            self.verbose(f"FLASH READ -> {dest_path}", 1)
+
+        data = self._mpy.flash_read(label=label, progress_callback=self._make_progress("reading", label))
 
         if self._verbose >= 1:
             print()  # newline after progress
@@ -973,32 +986,78 @@ class MpyTool():
 
         self.verbose(f"  saved {self.format_size(len(data))} to {dest_path}", 1, color='green')
 
-    def cmd_partition_write(self, label, src_path):
-        """Write file content to partition"""
-        self.verbose(f"PARTITION WRITE {src_path} -> {label}", 1)
+    def cmd_flash_write(self, src_path, label=None):
+        """Write file content to flash/partition"""
+        if label:
+            self.verbose(f"FLASH WRITE {src_path} -> {label}", 1)
+        else:
+            self.verbose(f"FLASH WRITE {src_path}", 1)
 
         with open(src_path, 'rb') as f:
             data = f.read()
 
-        def progress(transferred, total, wire_bytes):
-            if self._verbose >= 1:
-                pct = (transferred / total * 100) if total > 0 else 0
-                self.verbose(
-                    f"  writing {label}: {pct:.0f}% {self.format_size(transferred)} / {self.format_size(total)}",
-                    color='cyan', end='', overwrite=True
-                )
-
-        result = self._mpy.partition_write(
-            label, data,
-            progress_callback=progress,
-            compress=self._compress
-        )
+        result = self._mpy.flash_write(
+            data, label=label,
+            progress_callback=self._make_progress("writing", label),
+            compress=self._compress)
 
         if self._verbose >= 1:
             print()  # newline after progress
 
-        comp_info = " (compressed)" if result['compressed'] else ""
-        self.verbose(f"  wrote {self.format_size(result['size'])} to {result['target']}{comp_info}", 1, color='green')
+        target = label or "flash"
+        comp_info = " (compressed)" if result.get('compressed') else ""
+        self.verbose(f"  wrote {self.format_size(result['written'])} to {target}{comp_info}", 1, color='green')
+
+    def cmd_flash_erase(self, label=None, full=False):
+        """Erase flash/partition (filesystem reset)"""
+        mode = "full" if full else "quick"
+        if label:
+            self.verbose(f"FLASH ERASE {label} ({mode})", 1)
+        else:
+            self.verbose(f"FLASH ERASE ({mode})", 1)
+
+        result = self._mpy.flash_erase(label=label, full=full, progress_callback=self._make_progress("erasing", label))
+
+        if self._verbose >= 1:
+            print()  # newline after progress
+
+        target = label or "flash"
+        self.verbose(f"  erased {self.format_size(result['erased'])} from {target}", 1, color='green')
+        if not label:
+            self.verbose("  filesystem will be recreated on next boot", 1, color='yellow')
+
+    def _cmd_flash_esp32(self):
+        """List ESP32 partitions"""
+        info = self._mpy.partitions()
+        print(f"{'Label':<12} {'Type':<8} {'Subtype':<10} {'Address':>10} {'Size':>10} "
+              f"{'Block':>8} {'Actual FS':<12} {'Flags'}")
+        print("-" * 90)
+
+        for p in info['partitions']:
+            flags = []
+            if p['encrypted']:
+                flags.append('enc')
+            if p['running']:
+                flags.append('running')
+            # Block size column
+            block_str = ''
+            if p.get('fs_block_size'):
+                block_str = self.format_size(p['fs_block_size'])
+            # Filesystem column
+            fs_info = ''
+            if p.get('filesystem'):
+                fs_info = p['filesystem']
+                # For FAT, append cluster size
+                if p.get('fs_cluster_size'):
+                    fs_info += f" ({self.format_size(p['fs_cluster_size'])})"
+            print(f"{p['label']:<12} {p['type_name']:<8} {p['subtype_name']:<10} "
+                  f"{p['offset']:>#10x} {self.format_size(p['size']):>10} "
+                  f"{block_str:>8} {fs_info:<12} {', '.join(flags)}")
+
+        if info['boot']:
+            print(f"\nBoot partition: {info['boot']}")
+        if info['next_ota']:
+            print(f"Next OTA:       {info['next_ota']}")
 
     def cmd_info(self):
         self.verbose("INFO", 2)
@@ -1146,21 +1205,45 @@ class MpyTool():
                     if commands and commands[0] == 'read':
                         commands.pop(0)
                         if len(commands) >= 2:
+                            # ESP32: flash read <label> <file>
                             label = commands.pop(0)
                             dest_path = commands.pop(0)
-                            self.cmd_partition_read(label, dest_path)
+                            self.cmd_flash_read(dest_path, label=label)
+                        elif len(commands) == 1:
+                            # RP2: flash read <file>
+                            dest_path = commands.pop(0)
+                            self.cmd_flash_read(dest_path)
                         else:
-                            raise ParamsError('flash read requires label and destination file')
+                            raise ParamsError('flash read requires destination file')
                     elif commands and commands[0] == 'write':
                         commands.pop(0)
                         if len(commands) >= 2:
+                            # ESP32: flash write <label> <file>
                             label = commands.pop(0)
                             src_path = commands.pop(0)
-                            self.cmd_partition_write(label, src_path)
+                            self.cmd_flash_write(src_path, label=label)
+                        elif len(commands) == 1:
+                            # RP2: flash write <file>
+                            src_path = commands.pop(0)
+                            self.cmd_flash_write(src_path)
                         else:
-                            raise ParamsError('flash write requires label and source file')
+                            raise ParamsError('flash write requires source file')
+                    elif commands and commands[0] == 'erase':
+                        commands.pop(0)
+                        # Check for --full flag and optional label
+                        full = False
+                        label = None
+                        while commands and (commands[0] == '--full' or not commands[0].startswith('-')):
+                            if commands[0] == '--full':
+                                full = True
+                                commands.pop(0)
+                            elif label is None:
+                                label = commands.pop(0)
+                            else:
+                                break
+                        self.cmd_flash_erase(label=label, full=full)
                     else:
-                        self.cmd_partitions()
+                        self.cmd_flash()
                 elif command == 'ota':
                     if commands:
                         firmware_path = commands.pop(0)
@@ -1234,9 +1317,10 @@ List of available commands:
   repl                          enter REPL mode [UNIX OS ONLY]
   exec {code}                   execute Python code on device
   info                          show device information
-  flash                         list ESP32 partitions (OTA info)
-  flash read {label} {file}     read partition to file
-  flash write {label} {file}    write file to partition
+  flash                         show flash info (RP2) or partitions (ESP32)
+  flash read [{label}] {file}   read flash/partition to file
+  flash write [{label}] {file}  write file to flash/partition
+  flash erase [{label}] [--full]  erase flash/partition
   ota {firmware.app-bin}        OTA firmware update (ESP32 only)
   sleep {seconds}               sleep for specified seconds
 Aliases:

@@ -460,7 +460,7 @@ mpy.hard_reset()
 **Raises:**
 - `NotImplementedError`: If connection doesn't support hardware reset
 
-### ESP32 Partition Methods
+### Flash/Partition Methods
 
 #### partitions()
 
@@ -472,7 +472,7 @@ mpy.partitions()
 
 **Returns:**
 - `dict` with keys:
-  - `'partitions'`: List of partition dicts with keys: `label`, `type`, `type_name`, `subtype`, `subtype_name`, `offset`, `size`, `encrypted`, `running`
+  - `'partitions'`: List of partition dicts with keys: `label`, `type`, `type_name`, `subtype`, `subtype_name`, `offset`, `size`, `encrypted`, `running`, `filesystem`, `fs_block_size`
   - `'boot'`: Boot partition label or None
   - `'next_ota'`: Next OTA partition label or None
   - `'next_ota_size'`: Next OTA partition size or None
@@ -487,50 +487,102 @@ nvs: 24576 bytes
 vfs: 2097152 bytes
 ```
 
-#### partition_read(label, progress_callback=None)
+#### flash_info()
 
-Read partition content by label.
+Get flash information (RP2 only).
 
 ```python
-mpy.partition_read(label, progress_callback=None)
+mpy.flash_info()
+```
+
+**Returns:**
+- `dict`: `{'size': total_bytes, 'block_size': block_size, 'block_count': count, 'filesystem': type, 'fs_block_size': size}`
+
+#### flash_read(label=None, progress_callback=None)
+
+Read flash content (RP2) or partition content (ESP32).
+
+```python
+mpy.flash_read(label=None, progress_callback=None)
 ```
 
 **Parameters:**
-- `label` (str): Partition label (e.g., `'factory'`, `'nvs'`, `'vfs'`)
+- `label` (str, optional): Partition label for ESP32. If None, reads entire RP2 user flash.
 - `progress_callback` (callable, optional): Callback `(transferred, total)` for progress
 
 **Returns:**
-- `bytes`: Partition content
+- `bytes`: Flash/partition content
 
 **Example:**
 ```python
->>> data = mpy.partition_read('factory')
+# RP2 - read entire user flash
+>>> data = mpy.flash_read()
+
+# ESP32 - read partition by label
+>>> data = mpy.flash_read(label='factory')
 >>> with open('backup.bin', 'wb') as f:
 ...     f.write(data)
 ```
 
-#### partition_write(label, data, progress_callback=None, compress=None)
+**Raises:**
+- `MpyError`: If wrong platform (label requires ESP32, no label requires RP2)
 
-Write data to partition by label.
+#### flash_write(data, label=None, progress_callback=None, compress=None)
+
+Write data to flash (RP2) or partition (ESP32).
 
 ```python
-mpy.partition_write(label, data, progress_callback=None, compress=None)
+mpy.flash_write(data, label=None, progress_callback=None, compress=None)
 ```
 
 **Parameters:**
-- `label` (str): Partition label
 - `data` (bytes): Data to write
-- `progress_callback` (callable, optional): Callback `(transferred, total, wire_bytes)`
-- `compress` (bool, optional): Enable/disable compression (None = auto-detect)
+- `label` (str, optional): Partition label for ESP32. If None, writes to RP2 user flash.
+- `progress_callback` (callable, optional): Callback `(transferred, total)` or `(transferred, total, wire_bytes)` for ESP32
+- `compress` (bool, optional): Enable/disable compression (None = auto-detect, ESP32 only)
 
 **Returns:**
-- `dict`: `{'target': label, 'size': bytes_written, 'wire_bytes': bytes_sent, 'compressed': bool}`
+- `dict`: `{'size': total_size, 'written': bytes_written}` for RP2
+- `dict`: `{'size': total_size, 'written': bytes_written, 'wire_bytes': bytes_sent, 'compressed': bool}` for ESP32
 
 **Example:**
 ```python
+# RP2 - write to user flash
+>>> mpy.flash_write(data)
+
+# ESP32 - write to partition
 >>> with open('nvs_backup.bin', 'rb') as f:
 ...     data = f.read()
->>> mpy.partition_write('nvs', data)
+>>> mpy.flash_write(data, label='nvs')
+```
+
+**Raises:**
+- `MpyError`: If wrong platform or data too large
+
+#### flash_erase(label=None, full=False, progress_callback=None)
+
+Erase flash (RP2) or partition (ESP32).
+
+```python
+mpy.flash_erase(label=None, full=False, progress_callback=None)
+```
+
+**Parameters:**
+- `label` (str, optional): Partition label for ESP32. If None, erases RP2 user flash.
+- `full` (bool): If True, erase entire flash/partition. If False, erase only first 2 blocks (filesystem reset).
+- `progress_callback` (callable, optional): Callback `(transferred, total)` for progress
+
+**Returns:**
+- `dict`: `{'erased': bytes_erased}` for RP2
+- `dict`: `{'erased': bytes_erased, 'label': label}` for ESP32
+
+**Example:**
+```python
+# RP2 - quick erase (filesystem reset)
+>>> mpy.flash_erase()
+
+# ESP32 - full partition erase
+>>> mpy.flash_erase(label='nvs', full=True)
 ```
 
 #### ota_write(data, progress_callback=None, compress=None)

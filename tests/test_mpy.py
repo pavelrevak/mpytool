@@ -332,49 +332,58 @@ class TestPut(unittest.TestCase):
         callback.assert_called()
 
 
-class TestPartitionRead(unittest.TestCase):
-    """Tests for Mpy.partition_read method"""
+class TestFlashReadWithLabel(unittest.TestCase):
+    """Tests for Mpy.flash_read with label (ESP32 partition)"""
 
     def setUp(self):
         self.mock_conn = Mock()
         self.mpy = Mpy(self.mock_conn)
         self.mpy._mpy_comm = Mock()
+        self.mpy._platform = 'esp32'  # Set platform for partition operations
 
-    def test_partition_read_returns_bytes(self):
-        """Test that partition_read returns bytes"""
+    def test_flash_read_with_label_returns_bytes(self):
+        """Test that flash_read with label returns bytes"""
         # Mock partition info (type, subtype, offset, size, label, encrypted)
         self.mpy._mpy_comm.exec_eval.side_effect = [
             (0, 0, 0x10000, 4096, 'test', False),  # partition info
             base64.b64encode(b'\xff' * 4096).decode()  # base64 data
         ]
-        result = self.mpy.partition_read('test')
+        result = self.mpy.flash_read(label='test')
         self.assertIsInstance(result, bytes)
         self.assertEqual(len(result), 4096)
 
-    def test_partition_read_raises_on_not_found(self):
-        """Test that partition_read raises error if partition not found"""
+    def test_flash_read_with_label_raises_on_not_found(self):
+        """Test that flash_read with label raises error if partition not found"""
         self.mpy._mpy_comm.exec_eval.side_effect = mpy_comm.CmdError("cmd", b"", b"error")
         with self.assertRaises(mpy_comm.MpyError):
-            self.mpy.partition_read('nonexistent')
+            self.mpy.flash_read(label='nonexistent')
 
-    def test_partition_read_calls_progress_callback(self):
+    def test_flash_read_with_label_calls_progress_callback(self):
         """Test that progress callback is called during read"""
         self.mpy._mpy_comm.exec_eval.side_effect = [
             (0, 0, 0x10000, 4096, 'test', False),
             base64.b64encode(b'\xff' * 4096).decode()
         ]
         callback = Mock()
-        self.mpy.partition_read('test', progress_callback=callback)
+        self.mpy.flash_read(label='test', progress_callback=callback)
         callback.assert_called()
 
+    def test_flash_read_with_label_requires_esp32(self):
+        """Test that flash_read with label requires ESP32 platform"""
+        self.mpy._platform = 'rp2'
+        with self.assertRaises(mpy_comm.MpyError) as ctx:
+            self.mpy.flash_read(label='test')
+        self.assertIn('ESP32', str(ctx.exception))
 
-class TestPartitionWrite(unittest.TestCase):
-    """Tests for Mpy.partition_write method"""
+
+class TestFlashWriteWithLabel(unittest.TestCase):
+    """Tests for Mpy.flash_write with label (ESP32 partition)"""
 
     def setUp(self):
         self.mock_conn = Mock()
         self.mpy = Mpy(self.mock_conn)
         self.mpy._mpy_comm = Mock()
+        self.mpy._platform = 'esp32'  # Set platform for partition operations
         # Mock partition info
         self.mpy._mpy_comm.exec_eval.return_value = (0, 0, 0x10000, 8192, 'test', False)
         # Mock chunk size detection
@@ -383,35 +392,42 @@ class TestPartitionWrite(unittest.TestCase):
     def tearDown(self):
         Mpy._CHUNK_AUTO_DETECTED = None
 
-    def test_partition_write_returns_dict(self):
-        """Test that partition_write returns result dict"""
+    def test_flash_write_with_label_returns_dict(self):
+        """Test that flash_write with label returns result dict"""
         data = b'\xff' * 4096
-        result = self.mpy.partition_write('test', data)
+        result = self.mpy.flash_write(data, label='test')
         self.assertIsInstance(result, dict)
-        self.assertIn('target', result)
         self.assertIn('size', result)
+        self.assertIn('written', result)
         self.assertIn('wire_bytes', result)
         self.assertIn('compressed', result)
 
-    def test_partition_write_raises_on_too_large(self):
-        """Test that partition_write raises error if data too large"""
+    def test_flash_write_with_label_raises_on_too_large(self):
+        """Test that flash_write with label raises error if data too large"""
         # Partition is 8192 bytes, try to write 16384
         data = b'\xff' * 16384
         with self.assertRaises(mpy_comm.MpyError):
-            self.mpy.partition_write('test', data)
+            self.mpy.flash_write(data, label='test')
 
-    def test_partition_write_raises_on_not_found(self):
-        """Test that partition_write raises error if partition not found"""
+    def test_flash_write_with_label_raises_on_not_found(self):
+        """Test that flash_write with label raises error if partition not found"""
         self.mpy._mpy_comm.exec_eval.side_effect = mpy_comm.CmdError("cmd", b"", b"error")
         with self.assertRaises(mpy_comm.MpyError):
-            self.mpy.partition_write('nonexistent', b'data')
+            self.mpy.flash_write(b'data', label='nonexistent')
 
-    def test_partition_write_calls_progress_callback(self):
+    def test_flash_write_with_label_calls_progress_callback(self):
         """Test that progress callback is called during write"""
         data = b'\xff' * 4096
         callback = Mock()
-        self.mpy.partition_write('test', data, progress_callback=callback)
+        self.mpy.flash_write(data, label='test', progress_callback=callback)
         callback.assert_called()
+
+    def test_flash_write_with_label_requires_esp32(self):
+        """Test that flash_write with label requires ESP32 platform"""
+        self.mpy._platform = 'rp2'
+        with self.assertRaises(mpy_comm.MpyError) as ctx:
+            self.mpy.flash_write(b'data', label='test')
+        self.assertIn('ESP32', str(ctx.exception))
 
 
 if __name__ == "__main__":
