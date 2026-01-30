@@ -28,9 +28,12 @@ class ConnSerial(_conn.Conn):
 
     def _read_available(self):
         """Read available data from serial port"""
-        in_waiting = self._serial.in_waiting
-        if in_waiting > 0:
-            return self._serial.read(in_waiting)
+        try:
+            in_waiting = self._serial.in_waiting
+            if in_waiting > 0:
+                return self._serial.read(in_waiting)
+        except OSError:
+            pass  # Transient error, let select() retry
         return None
 
     def _write_raw(self, data):
