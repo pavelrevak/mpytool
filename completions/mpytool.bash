@@ -204,10 +204,17 @@ _mpytool() {
         exec|repl|monitor|follow|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info|sleep)
             ;;
         flash)
+            local flash_subcmd="${COMP_WORDS[cmd_start+1]}"
             if [[ $pos -eq 2 ]]; then
-                COMPREPLY=($(compgen -W "read write" -- "$cur"))
-            elif [[ $pos -eq 4 ]]; then
+                COMPREPLY=($(compgen -W "read write erase" -- "$cur"))
+            elif [[ $pos -eq 3 && "$flash_subcmd" == "erase" ]]; then
+                # erase: optional --full flag
+                COMPREPLY=($(compgen -W "--full" -- "$cur"))
+            elif [[ $pos -eq 4 && "$flash_subcmd" != "erase" ]]; then
+                # read/write: file
                 COMPREPLY=($(compgen -f -- "$cur"))
+            elif [[ "$flash_subcmd" == "erase" ]]; then
+                COMPREPLY=($(compgen -W "--full" -- "$cur"))
             fi
             ;;
         ota)

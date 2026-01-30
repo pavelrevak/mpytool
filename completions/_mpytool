@@ -32,7 +32,7 @@ _mpytool_commands() {
         'bootloader:enter bootloader (machine.bootloader)'
         'dtrboot:enter bootloader via DTR/RTS (ESP32)'
         'info:show device information'
-        'flash:list/read/write ESP32 partitions'
+        'flash:flash/partition operations (list, read, write, erase)'
         'ota:OTA firmware update (ESP32)'
         'sleep:sleep for specified seconds'
     )
@@ -267,14 +267,27 @@ _mpytool() {
                     # No arguments
                     ;;
                 flash)
-                    # flash [read|write] [label] [file]
+                    # flash [read|write|erase] [label] [file]
+                    local flash_subcmd="${words[cmd_start+1]}"
                     if [[ $pos -eq 2 ]]; then
-                        local -a subcmds=('read:read partition to file' 'write:write file to partition')
+                        local -a subcmds=(
+                            'read:read flash/partition to file'
+                            'write:write file to flash/partition'
+                            'erase:erase flash/partition'
+                        )
                         _describe -t subcmds 'flash subcommand' subcmds
-                    elif [[ $pos -eq 4 ]]; then
+                    elif [[ $pos -eq 3 && "$flash_subcmd" == "erase" ]]; then
+                        # erase: optional label or --full
+                        compadd -- '--full'
+                    elif [[ $pos -eq 3 ]]; then
+                        # read/write: label (device-specific, no completion)
+                        :
+                    elif [[ $pos -eq 4 && "$flash_subcmd" != "erase" ]]; then
+                        # read/write: file
                         _files
+                    elif [[ "$flash_subcmd" == "erase" ]]; then
+                        compadd -- '--full'
                     fi
-                    # pos 3 = partition label, no completion (device-specific)
                     ;;
                 ota)
                     # ota takes firmware file
