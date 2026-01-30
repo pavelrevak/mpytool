@@ -38,7 +38,12 @@ class ConnSerial(_conn.Conn):
 
     def _write_raw(self, data):
         """Write data to serial port"""
-        return self._serial.write(data)
+        for _ in range(3):
+            try:
+                return self._serial.write(data)
+            except (OSError, _serial.serialutil.SerialException):
+                _time.sleep(0.001)
+        raise _conn.ConnError("Serial write failed after retries")
 
     def _is_usb_cdc(self):
         """Check if this is a USB-CDC port (native USB on ESP32-S/C)"""
