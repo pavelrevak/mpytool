@@ -39,6 +39,33 @@ _mpytool_commands() {
     _describe -t commands 'mpytool command' commands
 }
 
+_mpytool_detect_ports() {
+    # Detect serial ports based on platform (same logic as mpytool)
+    local -a ports=()
+    case "$(uname)" in
+        Darwin)
+            # macOS: use cu.* (call-up) instead of tty.*
+            for p in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/cu.usb*; do
+                [[ -e "$p" ]] && ports+=("$p")
+            done
+            ;;
+        Linux)
+            for p in /dev/ttyACM* /dev/ttyUSB*; do
+                [[ -e "$p" ]] && ports+=("$p")
+            done
+            ;;
+    esac
+    # Remove duplicates and sort
+    echo "${(u)ports[@]}" | tr ' ' '\n' | sort -u
+}
+
+_mpytool_ports() {
+    # Complete serial ports
+    local -a ports
+    ports=(${(f)"$(_mpytool_detect_ports)"})
+    [[ ${#ports[@]} -gt 0 ]] && compadd -a ports
+}
+
 _mpytool_get_port() {
     # Try to get port from command line arguments
     local port=""
@@ -50,15 +77,9 @@ _mpytool_get_port() {
         fi
     done
 
-    # If no port specified, try auto-detect
+    # If no port specified, try auto-detect (first available)
     if [[ -z "$port" ]]; then
-        # Simple auto-detect: first /dev/tty.usb* or /dev/ttyACM* or /dev/ttyUSB*
-        for p in /dev/tty.usbmodem* /dev/tty.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
-            if [[ -e "$p" ]]; then
-                port="$p"
-                break
-            fi
-        done
+        port=$(_mpytool_detect_ports | head -1)
     fi
     echo "$port"
 }
@@ -186,8 +207,8 @@ _mpytool() {
     _arguments -C \
         '-V[show version]' \
         '--version[show version]' \
-        '-p[serial port]:port:_files -g "/dev/tty*"' \
-        '--port[serial port]:port:_files -g "/dev/tty*"' \
+        '-p[serial port]:port:_mpytool_ports' \
+        '--port[serial port]:port:_mpytool_ports' \
         '-a[network address]:address:' \
         '--address[network address]:address:' \
         '-b[baud rate]:baud:(9600 19200 38400 57600 115200 230400 460800 921600)' \

@@ -8,6 +8,26 @@ _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 
 _mpytool_commands="ls dir tree get cat put cp mv mkdir delete del rm monitor follow repl exec reset sreset mreset rtsreset bootloader dtrboot info flash ota sleep"
 
+_mpytool_detect_ports() {
+    # Detect serial ports based on platform (same logic as mpytool)
+    local -a ports=()
+    case "$(uname)" in
+        Darwin)
+            # macOS: use cu.* (call-up) instead of tty.*
+            for p in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/cu.usb*; do
+                [[ -e "$p" ]] && ports+=("$p")
+            done
+            ;;
+        Linux)
+            for p in /dev/ttyACM* /dev/ttyUSB*; do
+                [[ -e "$p" ]] && ports+=("$p")
+            done
+            ;;
+    esac
+    # Print sorted unique ports
+    printf '%s\n' "${ports[@]}" | sort -u
+}
+
 _mpytool_get_port() {
     local port=""
     local i
@@ -18,14 +38,9 @@ _mpytool_get_port() {
         fi
     done
 
-    # Auto-detect if not specified
+    # Auto-detect if not specified (first available)
     if [[ -z "$port" ]]; then
-        for p in /dev/tty.usbmodem* /dev/tty.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
-            if [[ -e "$p" ]]; then
-                port="$p"
-                break
-            fi
-        done
+        port=$(_mpytool_detect_ports | head -1)
     fi
     echo "$port"
 }
@@ -149,7 +164,7 @@ _mpytool() {
     # Handle option arguments
     case "$prev" in
         -p|--port)
-            COMPREPLY=($(compgen -f -G "/dev/tty*" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(_mpytool_detect_ports)" -- "$cur"))
             return
             ;;
         -b|--baud)
