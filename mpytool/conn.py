@@ -63,6 +63,23 @@ class Conn():
             return self._read_available()
         return None
 
+    def read_bytes(self, count, timeout=1):
+        """Read exactly count bytes from device"""
+        start_time = _time.time()
+        while len(self._buffer) < count:
+            if self._read_to_buffer(wait_timeout=0.001):
+                start_time = _time.time()
+            if timeout is not None and start_time + timeout < _time.time():
+                if self._buffer:
+                    raise Timeout(
+                        f"During timeout received: {bytes(self._buffer)}")
+                raise Timeout("No data received")
+        data = bytes(self._buffer[:count])
+        del self._buffer[:count]
+        if self._log:
+            self._log.debug("rd: %s", data)
+        return data
+
     def write(self, data):
         """Write data to device"""
         if self._log:

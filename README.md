@@ -13,6 +13,7 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 - **Multiple reset options** - soft, MCU, hardware (RTS), bootloader entry
 - **General-purpose serial terminal** - `repl` and `monitor` work with any serial device
 - **Python API** - suitable for IDE integration and automation
+- **Raw-paste mode** - flow-controlled code execution with reduced RAM usage (API)
 - **Shell completion** - ZSH and Bash with remote path completion
 - **Network support** - connect over TCP
 
@@ -270,6 +271,12 @@ Command aliases:
 b'import machine\nimport time\n...'
 >>> mpy.put(b'print("Hello")', 'test.py')
 >>> mpy.delete('test.py')
+```
+
+Raw-paste mode for efficient code execution (MicroPython 1.17+):
+```python
+>>> mpy.comm.exec_raw_paste("print('Hello')")  # flow-controlled, less RAM
+b'Hello\r\n'
 ```
 
 See [README_API.md](README_API.md) for full API documentation.

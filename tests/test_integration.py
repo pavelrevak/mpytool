@@ -1232,5 +1232,92 @@ class TestFlashRP2(unittest.TestCase):
             self.assertEqual(info['magic'][8:16], b'littlefs')
 
 
+@requires_device
+class TestRawPasteMode(unittest.TestCase):
+    """Test raw-paste mode for code execution"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial
+        from mpytool.mpy_comm import MpyComm
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.comm = MpyComm(cls.conn)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.comm.exit_raw_repl()
+
+    def test_01_raw_paste_simple(self):
+        """Test simple code execution via raw-paste"""
+        result = self.comm.exec_raw_paste('print(1+1)')
+        self.assertEqual(result, bytearray(b'2\r\n'))
+        self.assertTrue(self.comm._raw_paste_supported)
+
+    def test_02_raw_paste_multiline(self):
+        """Test multiline code via raw-paste"""
+        code = 'for i in range(3):\n    print(i)'
+        result = self.comm.exec_raw_paste(code)
+        self.assertEqual(result, bytearray(b'0\r\n1\r\n2\r\n'))
+
+    def test_03_raw_paste_large_code(self):
+        """Test larger code that exceeds window size"""
+        # Generate code larger than typical window size (128 bytes)
+        lines = [f'x{i} = {i}' for i in range(50)]
+        lines.append('print(x49)')
+        code = '\n'.join(lines)
+        self.assertGreater(len(code), 128)
+        result = self.comm.exec_raw_paste(code)
+        self.assertEqual(result, bytearray(b'49\r\n'))
+
+    def test_04_raw_paste_syntax_error(self):
+        """Test syntax error handling in raw-paste"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.comm.exec_raw_paste('print(')
+        self.assertIn('SyntaxError', ctx.exception.error)
+
+    def test_05_raw_paste_runtime_error(self):
+        """Test runtime error handling in raw-paste"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.comm.exec_raw_paste('1/0')
+        self.assertIn('ZeroDivisionError', ctx.exception.error)
+
+    def test_06_try_raw_paste(self):
+        """Test try_raw_paste wrapper"""
+        result = self.comm.try_raw_paste('print("hello")')
+        self.assertEqual(result, bytearray(b'hello\r\n'))
+
+    def test_07_raw_paste_binary_output(self):
+        """Test raw-paste with binary output"""
+        code = 'import sys; sys.stdout.buffer.write(bytes([0,1,2,255]))'
+        result = self.comm.exec_raw_paste(code)
+        self.assertEqual(result, bytearray(b'\x00\x01\x02\xff'))
+
+    def test_08_raw_paste_after_regular_exec(self):
+        """Test raw-paste works after regular exec"""
+        # First use regular exec
+        result1 = self.comm.exec('print("regular")')
+        self.assertEqual(result1, bytearray(b'regular\r\n'))
+        # Then use raw-paste
+        result2 = self.comm.exec_raw_paste('print("raw-paste")')
+        self.assertEqual(result2, bytearray(b'raw-paste\r\n'))
+
+    def test_09_raw_paste_recovery(self):
+        """Test recovery from interrupted raw-paste"""
+        # Enter raw-paste mode manually
+        self.comm.enter_raw_repl()
+        self.conn.write(b'\x05A\x01')  # Enter raw-paste
+        self.conn.read_bytes(4)  # R + status + window size
+        # Send partial data and abandon
+        self.conn.write(b'print(')
+        # Reset internal state (simulate reconnect)
+        self.comm._repl_mode = None
+        self.comm._raw_paste_supported = None
+        # Try to recover and execute
+        result = self.comm.exec('print("recovered")')
+        self.assertEqual(result, bytearray(b'recovered\r\n'))
+
+
 if __name__ == "__main__":
     unittest.main()

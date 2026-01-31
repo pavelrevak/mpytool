@@ -693,6 +693,65 @@ mpy.comm.enter_raw_repl()
 mpy.comm.exit_raw_repl()
 ```
 
+#### exec_raw_paste(command, timeout=5)
+
+Execute Python command using raw-paste mode with flow control.
+
+Raw-paste mode compiles code as it receives it, using less RAM and providing
+better reliability for large code transfers. Requires MicroPython 1.17+.
+
+```python
+mpy.comm.exec_raw_paste(command, timeout=5)
+```
+
+**Parameters:**
+- `command` (str or bytes): Python code to execute
+- `timeout` (int): Maximum wait time in seconds
+
+**Returns:**
+- `bytes`: Command stdout output
+
+**Example:**
+```python
+>>> mpy.comm.exec_raw_paste("print('Hello')")
+b'Hello\r\n'
+
+# Large code that exceeds window size
+>>> large_code = '\n'.join(f'x{i} = {i}' for i in range(100))
+>>> mpy.comm.exec_raw_paste(large_code + '\nprint(x99)')
+b'99\r\n'
+```
+
+**Raises:**
+- `MpyError`: If raw-paste mode is not supported by device
+- `CmdError`: If command raises an exception on device
+
+#### try_raw_paste(command, timeout=5)
+
+Try raw-paste mode, fall back to regular exec if not supported.
+
+```python
+mpy.comm.try_raw_paste(command, timeout=5)
+```
+
+**Parameters:**
+- `command` (str): Python code to execute
+- `timeout` (int): Maximum wait time in seconds
+
+**Returns:**
+- `bytes`: Command stdout output
+
+**Example:**
+```python
+# Works on any MicroPython version
+>>> result = mpy.comm.try_raw_paste("print(1+1)")
+b'2\r\n'
+```
+
+This method automatically detects if raw-paste mode is supported and caches
+the result. On older MicroPython versions, it silently falls back to regular
+`exec()`.
+
 ## Exception Classes
 
 ### MpyError
