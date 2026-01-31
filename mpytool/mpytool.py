@@ -1445,7 +1445,7 @@ def main():
             return
         if len(ports) == 1:
             port = ports[0]
-            log.verbose(f"Using {port}", level=1)
+            log.verbose(f"Using {port}", level=2)
         else:
             log.error("Multiple serial ports found. Use -p to specify one:")
             for p in ports:

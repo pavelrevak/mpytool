@@ -212,7 +212,6 @@ $ mpytool delete old.py -- cp new.py :/ -- reset
 auto-detect serial port (if only one device is connected):
 ```
 $ mpytool ls lib/
-Using /dev/tty.usbmodem1101
           uhttp/
   23.2 KB wlan.py
   4.95 KB wlan_http.py
@@ -221,7 +220,6 @@ Using /dev/tty.usbmodem1101
 tree view:
 ```
 $ mpytool tree
-Using /dev/tty.usbmodem1101
    142 KB ./
   41.3 KB ├─ html/
     587 B │  ├─ index.html
@@ -306,7 +304,6 @@ $ mpytool -q cp main.py :/
 Complete workflow - upload changed files, reset device, and monitor output:
 ```
 $ mpytool cp ~/Work/mpy/wlan/main.py ~/Work/mpy/wlan/html :/ -- cp ~/Work/mpy/wlan/wlan_http.py ~/Work/mpy/wlan/wlan.py ~/Work/mpy/uhttp/uhttp :/lib/ -- cp ~/Tmp/test0.bin :/lib/ -- reset -- monitor
-Using /dev/tty.usbmodem1101
 COPY (chunk: 16K, compress: on)
   [1/9] 100% 3.03K ../mpy/wlan/main.py            -> :/main.py                (compressed)
   [2/9] skip  587B ../mpy/wlan/html/index.html    -> :/html/index.html        (unchanged)
