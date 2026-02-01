@@ -73,15 +73,13 @@ class TestCollectDstFiles(unittest.TestCase):
         self.assertEqual(files["/dest/nested/c.txt"], 3)
         self.assertEqual(len(files), 3)
 
-    def test_excludes_pycache(self):
-        """Test that __pycache__ is excluded"""
-        pycache = os.path.join(self.test_subdir, "__pycache__")
-        os.makedirs(pycache)
-        pycache_file = os.path.join(pycache, "test.pyc")
-        with open(pycache_file, "w") as f:
+    def test_excludes_pyc_files(self):
+        """Test that *.pyc files are excluded"""
+        pyc_file = os.path.join(self.test_subdir, "module.pyc")
+        with open(pyc_file, "w") as f:
             f.write("bytecode")
         files = self.tool._collect_dst_files(self.test_subdir, "/", add_src_basename=True)
-        self.assertNotIn("/subdir/__pycache__/test.pyc", files)
+        self.assertNotIn("/subdir/module.pyc", files)
         self.assertEqual(len(files), 3)  # only a.txt, b.txt, nested/c.txt
 
     def test_nonexistent_path(self):
@@ -227,6 +225,138 @@ class TestResetBatchProgress(unittest.TestCase):
         self.tool._remote_file_cache["/b.txt"] = (200, b"hash")
         self.tool.reset_batch_progress()
         self.assertEqual(self.tool._remote_file_cache, {})
+
+
+class TestIsExcluded(unittest.TestCase):
+    """Tests for _is_excluded method with wildcard patterns"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+
+    def test_default_excludes_pyc(self):
+        """Test that *.pyc files are excluded by default"""
+        self.assertTrue(self.tool._is_excluded("module.pyc"))
+        self.assertTrue(self.tool._is_excluded("test.pyc"))
+
+    def test_default_excludes_hidden(self):
+        """Test that hidden files/dirs (.*) are excluded by default"""
+        self.assertTrue(self.tool._is_excluded(".git"))
+        self.assertTrue(self.tool._is_excluded(".svn"))
+        self.assertTrue(self.tool._is_excluded(".DS_Store"))
+        self.assertTrue(self.tool._is_excluded(".hidden"))
+
+    def test_default_allows_regular_files(self):
+        """Test that regular files are not excluded"""
+        self.assertFalse(self.tool._is_excluded("main.py"))
+        self.assertFalse(self.tool._is_excluded("README.md"))
+        self.assertFalse(self.tool._is_excluded("src"))
+
+    def test_custom_exclude_pattern(self):
+        """Test custom exclude patterns"""
+        tool = MpyTool(self.mock_conn, verbose=None, exclude_dirs=["*.pyc", "build*"])
+        self.assertTrue(tool._is_excluded("test.pyc"))
+        self.assertTrue(tool._is_excluded("module.pyc"))
+        self.assertTrue(tool._is_excluded("build"))
+        self.assertTrue(tool._is_excluded("build_temp"))
+        self.assertFalse(tool._is_excluded("test.py"))
+
+    def test_wildcard_question_mark(self):
+        """Test ? wildcard matches single character"""
+        tool = MpyTool(self.mock_conn, verbose=None, exclude_dirs=["test?"])
+        self.assertTrue(tool._is_excluded("test1"))
+        self.assertTrue(tool._is_excluded("testA"))
+        self.assertFalse(tool._is_excluded("test"))
+        self.assertFalse(tool._is_excluded("test12"))
+
+    def test_custom_adds_to_defaults(self):
+        """Test that custom patterns add to defaults, not replace"""
+        tool = MpyTool(self.mock_conn, verbose=None, exclude_dirs=["*.log"])
+        # Custom pattern works
+        self.assertTrue(tool._is_excluded("debug.log"))
+        # Defaults still work
+        self.assertTrue(tool._is_excluded("module.pyc"))
+        self.assertTrue(tool._is_excluded(".git"))
+
+
+class TestExcludeInCollect(unittest.TestCase):
+    """Tests for exclude behavior in file collection methods"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+        # Create temp directory structure
+        self.temp_dir = tempfile.mkdtemp()
+        # Create regular files
+        with open(os.path.join(self.temp_dir, "main.py"), "w") as f:
+            f.write("code")
+        with open(os.path.join(self.temp_dir, "README.md"), "w") as f:
+            f.write("docs")
+        # Create hidden files
+        with open(os.path.join(self.temp_dir, ".gitignore"), "w") as f:
+            f.write("*.pyc")
+        with open(os.path.join(self.temp_dir, ".DS_Store"), "w") as f:
+            f.write("mac")
+        # Create .pyc files
+        with open(os.path.join(self.temp_dir, "module.pyc"), "w") as f:
+            f.write("bytecode")
+        # Create hidden directory
+        hidden_dir = os.path.join(self.temp_dir, ".git")
+        os.makedirs(hidden_dir)
+        with open(os.path.join(hidden_dir, "config"), "w") as f:
+            f.write("git config")
+        # Create regular subdirectory
+        subdir = os.path.join(self.temp_dir, "src")
+        os.makedirs(subdir)
+        with open(os.path.join(subdir, "app.py"), "w") as f:
+            f.write("app")
+        with open(os.path.join(subdir, ".env"), "w") as f:
+            f.write("secret")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_collect_dst_files_excludes_hidden(self):
+        """Test that _collect_dst_files excludes hidden files and dirs"""
+        files = self.tool._collect_dst_files(self.temp_dir, "/", add_src_basename=False)
+        paths = list(files.keys())
+        # Should include regular files
+        self.assertIn("/main.py", paths)
+        self.assertIn("/README.md", paths)
+        self.assertIn("/src/app.py", paths)
+        # Should exclude hidden files
+        self.assertNotIn("/.gitignore", paths)
+        self.assertNotIn("/.DS_Store", paths)
+        self.assertNotIn("/src/.env", paths)
+        # Should exclude .pyc files
+        self.assertNotIn("/module.pyc", paths)
+        # Should exclude .git contents
+        self.assertNotIn("/.git/config", paths)
+
+    def test_collect_local_paths_excludes_hidden(self):
+        """Test that _collect_local_paths excludes hidden files and dirs"""
+        paths = self.tool._collect_local_paths(self.temp_dir)
+        path_names = [os.path.basename(p) for p in paths]
+        # Should include regular files
+        self.assertIn("main.py", path_names)
+        self.assertIn("README.md", path_names)
+        self.assertIn("app.py", path_names)
+        # Should exclude hidden
+        self.assertNotIn(".gitignore", path_names)
+        self.assertNotIn(".DS_Store", path_names)
+        self.assertNotIn(".env", path_names)
+        self.assertNotIn("config", path_names)  # .git/config
+        # Should exclude .pyc files
+        self.assertNotIn("module.pyc", path_names)
+
+    def test_collect_counts_only_included_files(self):
+        """Test that file count matches only included files"""
+        files = self.tool._collect_dst_files(self.temp_dir, "/", add_src_basename=False)
+        paths = self.tool._collect_local_paths(self.temp_dir)
+        # Both should return same count
+        self.assertEqual(len(files), len(paths))
+        # Should be exactly 3: main.py, README.md, src/app.py
+        self.assertEqual(len(files), 3)
 
 
 if __name__ == "__main__":

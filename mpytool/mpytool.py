@@ -1,6 +1,7 @@
 """MicroPython tool"""
 
 import argparse as _argparse
+import fnmatch as _fnmatch
 import hashlib as _hashlib
 import importlib.metadata as _metadata
 import os as _os
@@ -34,7 +35,7 @@ class MpyTool():
         self._conn = conn
         self._log = log if log is not None else SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
-        self._exclude_dirs = {'__pycache__', '.git', '.svn'}
+        self._exclude_dirs = {'.*', '*.pyc'}
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
         self._mpy = _mpytool.Mpy(conn, log=self._log, chunk_size=chunk_size)
@@ -56,6 +57,13 @@ class MpyTool():
         self._stats_start_time = None
         # Remote file info cache for batch operations
         self._remote_file_cache = {}  # {path: (size, hash) or None}
+
+    def _is_excluded(self, name):
+        """Check if name matches any exclude pattern (supports wildcards)"""
+        for pattern in self._exclude_dirs:
+            if _fnmatch.fnmatch(name, pattern):
+                return True
+        return False
 
     @property
     def _is_tty(self):
@@ -171,7 +179,8 @@ class MpyTool():
             return [self._format_local_path(path)]
         paths = []
         for root, dirs, files in _os.walk(path, topdown=True):
-            dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
+            dirs[:] = [d for d in dirs if not self._is_excluded(d)]
+            files = [f for f in files if not self._is_excluded(f)]
             paths.extend(self._format_local_path(_os.path.join(root, f)) for f in files)
         return paths
 
@@ -218,11 +227,12 @@ class MpyTool():
         elif _os.path.isdir(src_path):
             # For directories, mimic _put_dir behavior
             if add_src_basename:
-                basename = _os.path.basename(src_path)
+                basename = _os.path.basename(_os.path.abspath(src_path))
                 if basename:
                     dst_path = _os.path.join(dst_path, basename)
             for root, dirs, filenames in _os.walk(src_path, topdown=True):
-                dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
+                dirs[:] = [d for d in dirs if not self._is_excluded(d)]
+                filenames = [f for f in filenames if not self._is_excluded(f)]
                 rel_path = _os.path.relpath(root, src_path)
                 if rel_path == '.':
                     rel_path = ''
@@ -518,19 +528,22 @@ class MpyTool():
         return True  # uploaded
 
     def _put_dir(self, src_path, dst_path, show_progress=True):
-        basename = _os.path.basename(src_path)
+        basename = _os.path.basename(_os.path.abspath(src_path))
         if basename:
             dst_path = _os.path.join(dst_path, basename)
         self.verbose(f"PUT DIR: {src_path} -> {dst_path}", 2)
+        created_dirs = set()
         for path, dirs, files in _os.walk(src_path, topdown=True):
-            dirs[:] = [d for d in dirs if d not in self._exclude_dirs]
-            if _os.path.basename(path) in self._exclude_dirs:
+            dirs[:] = [d for d in dirs if not self._is_excluded(d)]
+            files = [f for f in files if not self._is_excluded(f)]
+            if not files:
                 continue
             rel_path = _os.path.relpath(path, src_path)
             rel_path = _os.path.join(dst_path, '' if rel_path == '.' else rel_path)
-            if rel_path:
+            if rel_path and rel_path not in created_dirs:
                 self.verbose(f'MKDIR: {rel_path}', 2)
                 self._mpy.mkdir(rel_path)
+                created_dirs.add(rel_path)
             for file_name in files:
                 spath = _os.path.join(path, file_name)
                 with open(spath, 'rb') as f:
@@ -616,6 +629,8 @@ class MpyTool():
         if src_is_dir:
             if copy_contents:
                 for item in _os.listdir(src_path):
+                    if self._is_excluded(item):
+                        continue
                     item_src = _os.path.join(src_path, item)
                     if _os.path.isdir(item_src):
                         self._put_dir(item_src, dst_path)
@@ -1412,8 +1427,8 @@ def main():
     parser.add_argument(
         '-q', '--quiet', action='store_true', help='quiet mode (no progress)')
     parser.add_argument(
-        "-e", "--exclude-dir", type=str, action='append', help='exclude dir, '
-        'by default are excluded directories: __pycache__, .git, .svn')
+        "-e", "--exclude", type=str, action='append', dest='exclude',
+        help='exclude files/dirs (wildcards: *, ?), default: *.pyc, .*')
     parser.add_argument(
         '-f', '--force', action='store_true', help='force overwrite (skip unchanged check)')
     parser.add_argument(
@@ -1468,7 +1483,7 @@ def main():
     elif args.compress:
         compress = True
     mpy_tool = MpyTool(
-        conn, log=log, verbose=log, exclude_dirs=args.exclude_dir,
+        conn, log=log, verbose=log, exclude_dirs=args.exclude,
         force=args.force, compress=compress, chunk_size=args.chunk_size)
     command_groups = _utils.split_commands(args.commands)
     try:

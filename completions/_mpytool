@@ -67,27 +67,24 @@ _mpytool_ports() {
 }
 
 _mpytool_get_port() {
-    # Try to get port from command line arguments
-    local port=""
-    local i
-    for ((i=1; i < ${#words[@]}; i++)); do
-        if [[ "${words[i]}" == "-p" || "${words[i]}" == "--port" ]]; then
-            port="${words[i+1]}"
-            break
-        fi
-    done
-
-    # If no port specified, try auto-detect (first available)
-    if [[ -z "$port" ]]; then
-        port=$(_mpytool_detect_ports | head -1)
+    # Use global _mpytool_current_port if set (from main function)
+    if [[ -n "$_mpytool_current_port" ]]; then
+        echo "$_mpytool_current_port"
+        return
     fi
-    echo "$port"
+
+    # Fallback: auto-detect only if single port available
+    local -a ports
+    ports=(${(f)"$(_mpytool_detect_ports)"})
+    if [[ ${#ports[@]} -eq 1 ]]; then
+        echo "${ports[1]}"
+    fi
 }
 
 _mpytool_fetch_paths() {
     # Fetch and cache paths, returns via $_mpytool_cached_files array
     local port=$(_mpytool_get_port)
-    [[ -z "$port" || ! -e "$port" ]] && return 1
+    [[ -z "$port" ]] && return 1
 
     local cache_key="${port//\//_}"
     local now=$(date +%s)
@@ -224,6 +221,9 @@ _mpytool() {
         '-e[exclude directory]:dir:_files -/' \
         '--exclude-dir[exclude directory]:dir:_files -/' \
         '*::command:->commands'
+
+    # Set port for helper functions to use
+    _mpytool_current_port="${opt_args[-p]:-${opt_args[--port]:-}}"
 
     case "$state" in
         commands)

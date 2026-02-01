@@ -47,7 +47,7 @@ _mpytool_get_port() {
 
 _mpytool_fetch_paths() {
     local port=$(_mpytool_get_port)
-    [[ -z "$port" || ! -e "$port" ]] && return 1
+    [[ -z "$port" ]] && return 1
 
     local now=$(date +%s)
     local cache_time=0
