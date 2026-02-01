@@ -66,7 +66,7 @@ try:
                         self._read_event(ret[0])
             except OSError as err:
                 if self._log:
-                    self._log.error("OSError: %s", err)
+                    self._log.error(err)
             _termios.tcsetattr(self._stdin_fd, _termios.TCSANOW, self._last_attr)
             self._last_attr = None
             self.write(b'\r\n')

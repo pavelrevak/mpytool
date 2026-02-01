@@ -28,22 +28,14 @@ class ConnSerial(_conn.Conn):
 
     def _read_available(self):
         """Read available data from serial port"""
-        try:
-            in_waiting = self._serial.in_waiting
-            if in_waiting > 0:
-                return self._serial.read(in_waiting)
-        except OSError:
-            pass  # Transient error, let select() retry
+        in_waiting = self._serial.in_waiting
+        if in_waiting > 0:
+            return self._serial.read(in_waiting)
         return None
 
     def _write_raw(self, data):
         """Write data to serial port"""
-        for _ in range(3):
-            try:
-                return self._serial.write(data)
-            except (OSError, _serial.serialutil.SerialException):
-                _time.sleep(0.001)
-        raise _conn.ConnError("Serial write failed after retries")
+        return self._serial.write(data)
 
     def _is_usb_cdc(self):
         """Check if this is a USB-CDC port (native USB on ESP32-S/C)"""

@@ -832,7 +832,7 @@ class MpyTool():
                 print(line)
         except KeyboardInterrupt:
             self.verbose('', level=0, overwrite=True)  # newline after ^C
-        except _mpytool.ConnError as err:
+        except (_mpytool.ConnError, OSError) as err:
             if self._log:
                 self._log.error(err)
 
