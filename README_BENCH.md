@@ -64,8 +64,5 @@ Higher speed achieved by automatic compression of text-based files during transf
 - **Large files upload: 3.3x - 5.6x faster** than mpremote
 - **Small files upload: 2.2x - 3.0x faster** than mpremote
 - **Skip unchanged: 1.5x - 2.9x faster** than mpremote
-- **Robust REPL handling** - works reliably with ESP32 via USB-UART bridges (CP2102, CH340) where mpremote crashes on MacOS
 
 Many more test scenarios could be designed (different file types, sizes, mixed workloads), but in most cases mpytool would be **at least 2x faster** than mpremote.
-
-mpytool also provides a **Python API** suitable for integration into IDEs and custom automation tools.
