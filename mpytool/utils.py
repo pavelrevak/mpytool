@@ -15,12 +15,11 @@ def parse_remote_path(path: str) -> str:
         path: path with : prefix
 
     Returns:
-        path without : prefix, or '/' if path is just ':'
+        path without : prefix (empty string for ':' means CWD)
     """
     if not is_remote_path(path):
         raise ValueError(f"Not a remote path: {path}")
-    result = path[1:]
-    return result if result else "/"
+    return path[1:]
 
 
 def split_commands(args: list[str], separator: str = "--") -> list[list[str]]:

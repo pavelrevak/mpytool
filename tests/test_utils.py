@@ -24,7 +24,10 @@ class TestRemotePath(unittest.TestCase):
 
     def test_parse_remote_path_root(self):
         self.assertEqual(parse_remote_path(":/"), "/")
-        self.assertEqual(parse_remote_path(":"), "/")
+
+    def test_parse_remote_path_cwd(self):
+        # ':' alone means CWD (empty string)
+        self.assertEqual(parse_remote_path(":"), "")
 
     def test_parse_remote_path_absolute(self):
         self.assertEqual(parse_remote_path(":/dir/file.py"), "/dir/file.py")

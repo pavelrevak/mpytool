@@ -69,27 +69,29 @@ $ mpytool --help
 
 list files:
 ```
-$ mpytool -p /dev/ttyACM0 ls
-$ mpytool -p /dev/ttyACM0 ls lib
+$ mpytool -p /dev/ttyACM0 ls         # list CWD (default)
+$ mpytool -p /dev/ttyACM0 ls :/lib   # list /lib
 ```
 
-tree files:
+tree:
 ```
-$ mpytool -p /dev/ttyACM0 tree
+$ mpytool -p /dev/ttyACM0 tree       # tree of CWD (default)
 ```
 
 copy files (: prefix = device path):
 ```
 $ mpytool cp main.py :/             # upload file to device root
 $ mpytool cp main.py lib.py :/lib/  # upload multiple files to directory
-$ mpytool cp myapp/ :/              # upload directory (creates /myapp/)
-$ mpytool cp myapp/ :/lib/          # upload directory into /lib/
+$ mpytool cp myapp :/               # upload directory (creates :/myapp/)
+$ mpytool cp myapp :/lib/           # upload directory into :/lib/ (creates :/lib/myapp/)
+$ mpytool cp myapp/ :/lib/          # upload directory contents into :/lib/
 $ mpytool cp :/main.py ./           # download file to current directory
 $ mpytool cp :/ ./backup/           # download entire device to backup/
 $ mpytool cp :/old.py :/new.py      # copy file on device
 $ mpytool cp -f main.py :/          # force upload even if unchanged
 ```
 
+Path semantics: `:` = device CWD, `:/` = device root. Trailing `/` on source = copy contents only.
 Unchanged files are automatically skipped (compares size and SHA256 hash).
 Use `-f` or `--force` to upload all files regardless.
 
@@ -110,18 +112,21 @@ $ mpytool mv :/file.py :/lib/       # move file to directory
 $ mpytool mv :/a.py :/b.py :/lib/   # move multiple files to directory
 ```
 
-legacy upload/download (still available):
+view file contents:
 ```
-$ mpytool put boot.py /
-$ mpytool get boot.py >> boot.py
+$ mpytool cat :boot.py            # print file from CWD
+$ mpytool cat :/lib/module.py     # print file with absolute path
 ```
 
-make directory, delete files:
+make directory, delete files (: prefix = device path):
 ```
-$ mpytool mkdir a/b/c/d xyz/abc   # create directories
-$ mpytool rm mydir                # delete directory and contents
-$ mpytool rm mydir/               # delete contents only, keep directory
-$ mpytool rm /                    # delete everything on device
+$ mpytool mkdir :lib :data        # create directories in CWD
+$ mpytool mkdir :/lib/subdir      # create with absolute path
+$ mpytool rm :old.py              # delete file in CWD
+$ mpytool rm :mydir               # delete directory and contents
+$ mpytool rm :mydir/              # delete contents only, keep directory
+$ mpytool rm :                    # delete everything in CWD
+$ mpytool rm :/                   # delete everything on device (root)
 ```
 
 reset and REPL:
@@ -207,8 +212,8 @@ $ mpytool ota firmware.app-bin -- mreset -t 30    # flash and reboot with 30s ti
 
 multiple commands separated by `--`:
 ```
-$ mpytool cp main.py boot.py :/ -- reset -- monitor
-$ mpytool delete old.py -- cp new.py :/ -- reset
+$ mpytool cp main.py boot.py : -- reset -- monitor
+$ mpytool rm :old.py -- cp new.py : -- reset
 ```
 
 auto-detect serial port (if only one device is connected):
@@ -252,12 +257,6 @@ show version:
 ```
 $ mpytool -V
 ```
-
-Command aliases:
-- `dir` = `ls`
-- `cat` = `get`
-- `del`, `rm` = `delete`
-- `follow` = `monitor`
 
 ## Python API
 

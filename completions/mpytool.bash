@@ -6,7 +6,7 @@ _MPYTOOL_CACHE_FILE="/tmp/mpytool_completion_cache"
 _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 
-_mpytool_commands="ls dir tree get cat put cp mv mkdir delete del rm monitor follow repl exec reset sreset mreset rtsreset bootloader dtrboot info flash ota sleep"
+_mpytool_commands="ls tree cat cp mv mkdir rm monitor repl exec reset sreset mreset rtsreset bootloader dtrboot info flash ota sleep"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -188,17 +188,12 @@ _mpytool() {
 
     # Command-specific completions
     case "$cmd" in
-        ls|dir|tree|mkdir|delete|del|rm|get|cat)
-            # Remote paths without : prefix
-            _mpytool_complete_remote '' "$cur"
-            ;;
-        put)
-            if [[ $pos -eq 2 ]]; then
-                # First arg: local file
-                COMPREPLY=($(compgen -f -- "$cur"))
+        ls|tree|cat|mkdir|rm|mv)
+            # These require : prefix for device paths
+            if [[ "$cur" == :* ]]; then
+                _mpytool_complete_remote ':' "$cur"
             else
-                # Second arg: remote path
-                _mpytool_complete_remote '' "$cur"
+                COMPREPLY=($(compgen -W ":" -- "$cur"))
             fi
             ;;
         cp)
@@ -209,14 +204,7 @@ _mpytool() {
                 COMPREPLY+=($(compgen -W ":" -- "$cur"))
             fi
             ;;
-        mv)
-            if [[ "$cur" == :* ]]; then
-                _mpytool_complete_remote ':' "$cur"
-            else
-                COMPREPLY=($(compgen -W ":" -- "$cur"))
-            fi
-            ;;
-        exec|repl|monitor|follow|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info|sleep)
+        exec|repl|monitor|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info|sleep)
             ;;
         flash)
             local flash_subcmd="${COMP_WORDS[cmd_start+1]}"

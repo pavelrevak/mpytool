@@ -23,6 +23,38 @@ class ParamsError(_mpytool.MpyError):
     """Invalid command parameters"""
 
 
+def _join_remote_path(base, name):
+    """Join remote path components (handles empty string and '/' correctly)"""
+    if not name:
+        return base
+    if base == '/':
+        return '/' + name
+    elif base:
+        return base + '/' + name
+    else:
+        return name
+
+
+def _remote_basename(path):
+    """Get basename from remote path"""
+    return path.rstrip('/').split('/')[-1]
+
+
+def _parse_device_path(path, cmd_name):
+    """Parse device path with : prefix, raise ParamsError if missing
+
+    Args:
+        path: path string (should start with :)
+        cmd_name: command name for error message
+
+    Returns:
+        path without : prefix
+    """
+    if not path.startswith(':'):
+        raise ParamsError(f'{cmd_name} requires device path (: prefix): {path}')
+    return path[1:]
+
+
 class MpyTool():
     SPACE = '   '
     BRANCH = '│  '
@@ -298,9 +330,6 @@ class MpyTool():
                     paths.extend(self._collect_remote_paths(src_path))
                 else:
                     paths.extend(self._collect_local_paths(src_path))
-        elif cmd == 'put' and len(commands) >= 2:
-            src_path = commands[1]
-            paths.extend(self._collect_local_paths(src_path))
         return paths
 
     def _collect_remote_paths(self, path):
@@ -352,15 +381,9 @@ class MpyTool():
                     # remote -> remote (file only)
                     stat = self._mpy.stat(src_path)
                     if stat is not None and stat >= 0:
-                        basename = src_path.split('/')[-1]
-                        dst_paths.append(':' + (dest_path + basename if dest_is_dir else dest_path))
+                        dst = _join_remote_path(dest_path, _remote_basename(src_path)) if dest_is_dir else dest_path
+                        dst_paths.append(':' + dst)
             return dst_paths
-        elif cmd == 'put' and len(commands) >= 2:
-            src_path = commands[1]
-            dst_path = commands[2] if len(commands) > 2 else '/'
-            if _os.path.exists(src_path):
-                files = self._collect_dst_files(src_path, dst_path.rstrip('/') or '/', add_src_basename=True)
-                return [':' + p for p in files]
         return []
 
     def _collect_remote_to_local_dst(self, src_path, dest_path, dest_is_dir, copy_contents):
@@ -370,10 +393,10 @@ class MpyTool():
             return []
         base_dst = dest_path.rstrip('/') or '.'
         if dest_is_dir and not copy_contents and src_path != '/':
-            base_dst = _os.path.join(base_dst, src_path.split('/')[-1])
+            base_dst = _os.path.join(base_dst, _remote_basename(src_path))
         if stat >= 0:  # file
             if _os.path.isdir(base_dst) or dest_is_dir:
-                return [self._format_local_path(_os.path.join(base_dst, src_path.split('/')[-1]))]
+                return [self._format_local_path(_os.path.join(base_dst, _remote_basename(src_path)))]
             return [self._format_local_path(base_dst)]
         return self._collect_remote_dir_dst(src_path, base_dst)
 
@@ -449,7 +472,9 @@ class MpyTool():
         self.verbose(f"  {summary}  ({file_info})", color='green')
 
     def cmd_ls(self, dir_name):
-        result = self._mpy.ls(dir_name)
+        """List files on device"""
+        path = _parse_device_path(dir_name, 'ls')
+        result = self._mpy.ls(path)
         for name, size in result:
             if size is not None:
                 print(f'{self.format_size(size):>9} {name}')
@@ -498,13 +523,17 @@ class MpyTool():
             last=True)
 
     def cmd_tree(self, dir_name):
-        tree = self._mpy.tree(dir_name)
+        """Show directory tree on device"""
+        path = _parse_device_path(dir_name, 'tree')
+        tree = self._mpy.tree(path)
         self.print_tree(tree)
 
-    def cmd_get(self, *file_names):
+    def cmd_cat(self, *file_names):
+        """Print file contents to stdout"""
         for file_name in file_names:
-            self.verbose(f"GET: {file_name}", 2)
-            data = self._mpy.get(file_name)
+            path = _parse_device_path(file_name, 'cat')
+            self.verbose(f"CAT: {path}", 2)
+            data = self._mpy.get(path)
             print(data.decode('utf-8'))
 
     def _upload_file(self, data, src_path, dst_path, show_progress):
@@ -531,10 +560,21 @@ class MpyTool():
             self._stats_wire_bytes += wire
         return True  # uploaded
 
-    def _put_dir(self, src_path, dst_path, show_progress=True):
-        basename = _os.path.basename(_os.path.abspath(src_path))
+    def _put_dir(self, src_path, dst_path, show_progress=True, target_name=None):
+        """Upload directory to device
+
+        Arguments:
+            src_path: local source directory
+            dst_path: remote destination parent directory
+            show_progress: show progress bar
+            target_name: if set, use this as directory name instead of src basename
+        """
+        if target_name is not None:
+            basename = target_name
+        else:
+            basename = _os.path.basename(_os.path.abspath(src_path))
         if basename:
-            dst_path = _os.path.join(dst_path, basename)
+            dst_path = _join_remote_path(dst_path, basename)
         self.verbose(f"PUT DIR: {src_path} -> {dst_path}", 2)
         created_dirs = set()
         for path, dirs, files in _os.walk(src_path, topdown=True):
@@ -569,17 +609,6 @@ class MpyTool():
                 raise _mpytool.MpyError(f'Error creating file under file: {parent}')
         self._upload_file(data, src_path, dst_path, show_progress)
 
-    def cmd_put(self, src_path, dst_path):
-        if self._verbose >= 1 and not self._batch_mode:
-            self._progress_total_files = len(self._collect_local_paths(src_path))
-            self._progress_current_file = 0
-        if _os.path.isdir(src_path):
-            self._put_dir(src_path, dst_path)
-        elif _os.path.isfile(src_path):
-            self._put_file(src_path, dst_path)
-        else:
-            raise ParamsError(f'No file or directory to upload: {src_path}')
-
     def _get_file(self, src_path, dst_path, show_progress=True):
         """Download single file from device"""
         self.verbose(f"GET FILE: {src_path} -> {dst_path}", 2)
@@ -603,7 +632,7 @@ class MpyTool():
     def _get_dir(self, src_path, dst_path, copy_contents=False, show_progress=True):
         """Download directory from device"""
         if not copy_contents:
-            basename = src_path.rstrip('/').split('/')[-1]
+            basename = _remote_basename(src_path)
             if basename:
                 dst_path = _os.path.join(dst_path, basename)
         self.verbose(f"GET DIR: {src_path} -> {dst_path}", 2)
@@ -619,19 +648,28 @@ class MpyTool():
                 self._get_file(src_entry, dst_entry, show_progress=show_progress)
 
     def _cp_local_to_remote(self, src_path, dst_path, dst_is_dir):
-        """Upload local file/dir to device"""
-        src_is_dir = _os.path.isdir(src_path)
+        """Upload local file/dir to device
+
+        Path semantics:
+        - dst_is_dir=True: add source basename to dst_path (unless copy_contents)
+        - dst_is_dir=False: dst_path is the target name (rename)
+        - copy_contents (src ends with /): copy contents, not directory itself
+        """
+        src_is_dir = _os.path.isdir(src_path.rstrip('/'))
         copy_contents = src_path.endswith('/')
         src_path = src_path.rstrip('/')
         if not _os.path.exists(src_path):
             raise ParamsError(f'Source not found: {src_path}')
-        if dst_is_dir:
-            if not copy_contents:
-                basename = _os.path.basename(src_path)
-                dst_path = dst_path + basename
+        # Normalize dst_path (remove trailing slash, but keep '/' for root)
+        if dst_path == '/':
+            pass  # Keep '/' as is
+        elif dst_path:
             dst_path = dst_path.rstrip('/')
+        else:
+            dst_path = ''
         if src_is_dir:
             if copy_contents:
+                # Copy directory contents to dst_path
                 for item in _os.listdir(src_path):
                     if self._is_excluded(item):
                         continue
@@ -639,10 +677,19 @@ class MpyTool():
                     if _os.path.isdir(item_src):
                         self._put_dir(item_src, dst_path)
                     else:
-                        self._put_file(item_src, dst_path + '/')
+                        self._put_file(item_src, _join_remote_path(dst_path, item))
+            elif dst_is_dir:
+                # Copy directory to destination directory (_put_dir adds basename)
+                self._put_dir(src_path, dst_path)
             else:
-                self._put_dir(src_path, _os.path.dirname(dst_path) or '/')
+                # Rename: copy directory with new name
+                parent = _os.path.dirname(dst_path)
+                target_name = _os.path.basename(dst_path)
+                self._put_dir(src_path, parent, target_name=target_name)
         else:
+            # File: add basename if dst_is_dir
+            if dst_is_dir:
+                dst_path = _join_remote_path(dst_path, _os.path.basename(src_path))
             self._put_file(src_path, dst_path)
 
     def _cp_remote_to_local(self, src_path, dst_path, dst_is_dir):
@@ -657,14 +704,12 @@ class MpyTool():
             if not _os.path.exists(dst_path):
                 _os.makedirs(dst_path)
             if not copy_contents and src_path != '/':
-                basename = src_path.split('/')[-1]
-                dst_path = _os.path.join(dst_path, basename)
+                dst_path = _os.path.join(dst_path, _remote_basename(src_path))
         if src_is_dir:
             self._get_dir(src_path, dst_path, copy_contents=copy_contents)
         else:
             if _os.path.isdir(dst_path):
-                basename = src_path.split('/')[-1]
-                dst_path = _os.path.join(dst_path, basename)
+                dst_path = _os.path.join(dst_path, _remote_basename(src_path))
             self._get_file(src_path, dst_path)
 
     def _cp_remote_to_remote(self, src_path, dst_path, dst_is_dir):
@@ -676,8 +721,7 @@ class MpyTool():
         if stat == -1:
             raise ParamsError('Remote-to-remote directory copy not supported yet')
         if dst_is_dir:
-            basename = src_path.split('/')[-1]
-            dst_path = dst_path + basename
+            dst_path = _join_remote_path(dst_path, _remote_basename(src_path))
         self.verbose(f"COPY: {src_path} -> {dst_path}", 2)
         if self._verbose >= 1:
             self._progress_current_file += 1
@@ -744,11 +788,18 @@ class MpyTool():
         dest = args[-1]
         dest_is_remote = dest.startswith(':')
         dest_path = dest[1:] if dest_is_remote else dest
-        if not dest_path:
-            dest_path = '/'
-        dest_is_dir = dest_path.endswith('/')
-        if len(sources) > 1 and not dest_is_dir:
-            raise ParamsError('multiple sources require destination directory (ending with /)')
+        # Determine if destination is a directory:
+        # - Remote: '' (CWD) or '/' (root) or ends with '/'
+        # - Local: ends with '/' or exists as directory
+        if dest_is_remote:
+            dest_is_dir = dest_path == '' or dest_path == '/' or dest_path.endswith('/')
+        else:
+            dest_is_dir = dest_path.endswith('/') or _os.path.isdir(dest_path)
+        # Check if any source copies contents (trailing slash) or multiple sources
+        has_multi_source = len(sources) > 1
+        has_contents_copy = any(s.rstrip('/') != s for s in sources)  # any source has trailing /
+        if (has_multi_source or has_contents_copy) and not dest_is_dir:
+            raise ParamsError('multiple sources or directory contents require destination directory (ending with /)')
         if self._verbose >= 1 and not self._batch_mode:
             total_files = 0
             for src in sources:
@@ -770,8 +821,9 @@ class MpyTool():
                     copy_contents = src.endswith('/')
                     src_path = src.rstrip('/')
                     if _os.path.exists(src_path):
-                        add_basename = not copy_contents
-                        all_dst_files.update(self._collect_dst_files(src_path, dest_path.rstrip('/') or '/', add_basename))
+                        add_basename = dest_is_dir and not copy_contents
+                        base_path = dest_path.rstrip('/') if dest_path else ''
+                        all_dst_files.update(self._collect_dst_files(src_path, base_path, add_basename))
             if all_dst_files and not self._batch_mode:
                 self._progress_max_dst_len = max(len(':' + p) for p in all_dst_files)
                 if not self._force:
@@ -796,50 +848,58 @@ class MpyTool():
             raise ParamsError('mv requires source and destination')
         sources = list(args[:-1])
         dest = args[-1]
-        if not dest.startswith(':'):
-            raise ParamsError('mv destination must be device path (: prefix)')
+        dest_path = _parse_device_path(dest, 'mv destination')
         for src in sources:
-            if not src.startswith(':'):
-                raise ParamsError('mv source must be device path (: prefix)')
-        dest_path = dest[1:] or '/'
-        dest_is_dir = dest_path.endswith('/')
+            _parse_device_path(src, 'mv source')  # validate only
+        # ':' = CWD (empty string), ':/' = root
+        dest_is_dir = dest_path == '' or dest_path == '/' or dest_path.endswith('/')
         if len(sources) > 1 and not dest_is_dir:
             raise ParamsError('multiple sources require destination directory (ending with /)')
         self._mpy.import_module('os')
         for src in sources:
-            src_path = src[1:]
+            src_path = _parse_device_path(src, 'mv')
             stat = self._mpy.stat(src_path)
             if stat is None:
                 raise ParamsError(f'Source not found on device: {src_path}')
             if dest_is_dir:
-                dst_dir = dest_path.rstrip('/')
-                if dst_dir and self._mpy.stat(dst_dir) is None:
+                # Preserve '/' as root, strip trailing slash from others
+                dst_dir = '/' if dest_path == '/' else dest_path.rstrip('/')
+                if dst_dir and dst_dir != '/' and self._mpy.stat(dst_dir) is None:
                     self._mpy.mkdir(dst_dir)
-                basename = src_path.rstrip('/').split('/')[-1]
-                final_dest = dest_path + basename
+                final_dest = _join_remote_path(dst_dir, _remote_basename(src_path))
             else:
                 final_dest = dest_path
             self.verbose(f"MV: {src_path} -> {final_dest}", 1)
             self._mpy.rename(src_path, final_dest)
 
     def cmd_mkdir(self, *dir_names):
+        """Create directories on device"""
         for dir_name in dir_names:
-            self.verbose(f"MKDIR: {dir_name}", 1)
-            self._mpy.mkdir(dir_name)
+            path = _parse_device_path(dir_name, 'mkdir')
+            self.verbose(f"MKDIR: {path}", 1)
+            self._mpy.mkdir(path)
 
-    def cmd_delete(self, *file_names):
+    def cmd_rm(self, *file_names):
+        """Delete files/directories on device"""
         for file_name in file_names:
-            contents_only = file_name.endswith('/')
-            path = file_name.rstrip('/') or '/'
+            raw_path = _parse_device_path(file_name, 'rm')
+            contents_only = raw_path.endswith('/') or raw_path == ''
+            # ':' = CWD contents, ':/' = root, ':/path' = path, ':path/' = path contents
+            if raw_path == '':
+                path = ''  # CWD
+            elif raw_path == '/':
+                path = '/'  # root
+            else:
+                path = raw_path.rstrip('/') if contents_only else raw_path
             if contents_only:
-                self.verbose(f"DELETE contents: {path}", 1)
+                self.verbose(f"RM contents: {path or 'CWD'}", 1)
                 entries = self._mpy.ls(path)
                 for name, size in entries:
-                    entry_path = path + '/' + name if path != '/' else '/' + name
+                    entry_path = _join_remote_path(path, name)
                     self.verbose(f"  {entry_path}", 1)
                     self._mpy.delete(entry_path)
             else:
-                self.verbose(f"DELETE: {path}", 1)
+                self.verbose(f"RM: {path}", 1)
                 self._mpy.delete(path)
 
     def cmd_monitor(self):
@@ -1161,42 +1221,38 @@ class MpyTool():
         try:
             while commands:
                 command = commands.pop(0)
-                if command in ('ls', 'dir'):
+                if command == 'ls':
                     if commands:
                         dir_name = commands.pop(0)
-                        if dir_name != '/':
+                        # Strip trailing / except for root
+                        if dir_name not in (':', ':/'):
                             dir_name = dir_name.rstrip('/')
                         self.cmd_ls(dir_name)
                         continue
-                    self.cmd_ls('.')
+                    self.cmd_ls(':')  # default: CWD
                 elif command == 'tree':
                     if commands:
                         dir_name = commands.pop(0)
-                        if dir_name != '/':
+                        if dir_name not in (':', ':/'):
                             dir_name = dir_name.rstrip('/')
                         self.cmd_tree(dir_name)
                         continue
-                    self.cmd_tree('.')
-                elif command in ('get', 'cat'):
+                    self.cmd_tree(':')  # default: CWD
+                elif command == 'cat':
                     if commands:
-                        self.cmd_get(*commands)
+                        self.cmd_cat(*commands)
                         break
-                    raise ParamsError('missing file name for get command')
-                elif command == 'put':
-                    if commands:
-                        src_path = commands.pop(0)
-                        dst_path = ''
-                        if commands:
-                            dst_path = commands.pop(0)
-                        self.cmd_put(src_path, dst_path)
-                    else:
-                        raise ParamsError('missing file name for put command')
+                    raise ParamsError('missing file name for cat command')
                 elif command == 'mkdir':
-                    self.cmd_mkdir(*commands)
-                    break
-                elif command in ('del', 'delete', 'rm'):
-                    self.cmd_delete(*commands)
-                    break
+                    if commands:
+                        self.cmd_mkdir(*commands)
+                        break
+                    raise ParamsError('missing directory name for mkdir command')
+                elif command == 'rm':
+                    if commands:
+                        self.cmd_rm(*commands)
+                        break
+                    raise ParamsError('missing file name for rm command')
                 elif command == 'reset':
                     self.verbose("RESET", 1)
                     self._mpy.soft_reset()
@@ -1213,7 +1269,7 @@ class MpyTool():
                     self.cmd_mreset(reconnect=has_more, timeout=timeout)
                 elif command == 'sreset':
                     self.cmd_sreset()
-                elif command in ('monitor', 'follow'):
+                elif command == 'monitor':
                     self.cmd_monitor()
                     break
                 elif command == 'repl':
@@ -1324,38 +1380,32 @@ if _about:
 else:
     _VERSION_STR = "mpytool (not installed version)"
 _COMMANDS_HELP_STR = """
-List of available commands:
-  ls [{path}]                   list files and its sizes
-  tree [{path}]                 list tree of structure and sizes
-  cp [-f] {src} [...] {dst}     copy files (: prefix = device path, -f = force)
-  mv {src} [...] {dst}          move/rename on device (: prefix required)
-  get {path} [...]              get file and print it
-  put {src_path} [{dst_path}]   put file or directory to destination
-  mkdir {path} [...]            create directory (also create all parents)
-  delete {path} [...]           remove file/dir (path/ = contents only)
-  reset                         soft reset (Ctrl-D, runs boot.py/main.py)
-  sreset                        soft reset in raw REPL (clears RAM only)
-  mreset [-t|--timeout {secs}]  MCU reset (machine.reset, auto-reconnect)
-  rtsreset                      RTS reset (hardware reset via RTS signal)
+Commands (: prefix = device path, :/ = root, : = CWD):
+  ls [:path]                    list files and sizes (default: CWD)
+  tree [:path]                  list directory tree (default: CWD)
+  cat {:path} [...]             print file content to stdout
+  cp [-f] {src} [...] {dst}     copy files (-f = force overwrite)
+  mv {:src} [...] {:dst}        move/rename on device
+  mkdir {:path} [...]           create directory (with parents)
+  rm {:path} [...]              delete file/dir (:path/ = contents only)
+  reset                         soft reset (Ctrl-D)
+  sreset                        soft reset in raw REPL
+  mreset [-t {secs}]            MCU reset (machine.reset, reconnect)
+  rtsreset                      hardware reset via RTS signal
   bootloader                    enter bootloader (machine.bootloader)
-  dtrboot                       enter bootloader via DTR/RTS (ESP32 only)
-  monitor                       print output of running program
-  repl                          enter REPL mode [UNIX OS ONLY]
-  exec {code}                   execute Python code on device
+  dtrboot                       bootloader via DTR/RTS (ESP32)
+  monitor                       print device output (Ctrl+C to stop)
+  repl                          interactive REPL [Unix only]
+  exec {code}                   execute Python code
   info                          show device information
-  flash                         show flash info (RP2) or partitions (ESP32)
+  flash                         show flash/partitions info
   flash read [{label}] {file}   read flash/partition to file
   flash write [{label}] {file}  write file to flash/partition
   flash erase [{label}] [--full]  erase flash/partition
-  ota {firmware.app-bin}        OTA firmware update (ESP32 only)
-  sleep {seconds}               sleep for specified seconds
-Aliases:
-  dir                           alias to ls
-  cat                           alias to get
-  del, rm                       alias to delete
-  follow                        alias to monitor
-Use -- to separate multiple commands:
-  mpytool put main.py / -- reset -- monitor
+  ota {firmware.app-bin}        OTA update (ESP32)
+  sleep {seconds}               pause between commands
+Use -- to chain commands:
+  mpytool cp main.py : -- reset -- monitor
 """
 
 

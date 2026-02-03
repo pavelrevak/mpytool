@@ -435,44 +435,44 @@ class TestDeleteCommand(unittest.TestCase):
         cls.mpy.comm.exit_raw_repl()
 
     def test_01_delete_file(self):
-        """Test delete single file"""
+        """Test rm single file"""
         path = self.TEST_DIR + "/file.txt"
         self.mpy.mkdir(self.TEST_DIR)
         self.mpy.put(b"test", path)
         self.assertIsNotNone(self.mpy.stat(path))
-        self.tool.cmd_delete(path)
+        self.tool.cmd_rm(':' + path)
         self.assertIsNone(self.mpy.stat(path))
 
     def test_02_delete_dir(self):
-        """Test delete directory and contents"""
+        """Test rm directory and contents"""
         subdir = self.TEST_DIR + "/subdir"
         self.mpy.mkdir(subdir)
         self.mpy.put(b"test", subdir + "/file.txt")
         self.assertIsNotNone(self.mpy.stat(subdir))
-        self.tool.cmd_delete(subdir)
+        self.tool.cmd_rm(':' + subdir)
         self.assertIsNone(self.mpy.stat(subdir))
 
     def test_03_delete_contents_only(self):
-        """Test delete with trailing / keeps directory"""
+        """Test rm with trailing / keeps directory"""
         subdir = self.TEST_DIR + "/keepme"
         self.mpy.mkdir(subdir)
         self.mpy.put(b"file1", subdir + "/a.txt")
         self.mpy.put(b"file2", subdir + "/b.txt")
         # Delete contents only
-        self.tool.cmd_delete(subdir + '/')
+        self.tool.cmd_rm(':' + subdir + '/')
         # Directory should still exist
         self.assertEqual(self.mpy.stat(subdir), -1)
         # But be empty
         self.assertEqual(self.mpy.ls(subdir), [])
 
     def test_04_delete_nested_contents(self):
-        """Test delete contents with nested directories"""
+        """Test rm contents with nested directories"""
         subdir = self.TEST_DIR + "/nested"
         self.mpy.mkdir(subdir + "/deep")
         self.mpy.put(b"file1", subdir + "/file.txt")
         self.mpy.put(b"file2", subdir + "/deep/file.txt")
         # Delete contents only
-        self.tool.cmd_delete(subdir + '/')
+        self.tool.cmd_rm(':' + subdir + '/')
         # Directory should still exist but be empty
         self.assertEqual(self.mpy.stat(subdir), -1)
         self.assertEqual(self.mpy.ls(subdir), [])

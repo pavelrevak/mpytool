@@ -65,7 +65,8 @@ def _mt_tree(p):
 def _mt_mkdir(p):
     p=p.rstrip('/');c='';f=1
     for d in p.split('/'):
-        c+='/'+d if c else d
+        if not d:c='/';continue
+        c='/'+d if c=='/' else (c+'/'+d if c else d)
         if f:
             try:
                 if os.stat(c)[0]=={_ATTR_FILE}:return 1
