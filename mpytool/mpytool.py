@@ -128,7 +128,11 @@ class MpyTool():
         """Format progress/skip line: [2/5] 100% 24.1K source -> dest (base64)"""
         size_str = self.format_size(total)
         multi = self._progress_total_files > 1
-        prefix = f"[{self._progress_current_file}/{self._progress_total_files}]" if multi else ""
+        if multi:
+            width = len(str(self._progress_total_files))
+            prefix = f"[{self._progress_current_file:>{width}}/{self._progress_total_files}]"
+        else:
+            prefix = ""
         src_w = max(len(self._progress_src), self._progress_max_src_len)
         dst_w = max(len(self._progress_dst), self._progress_max_dst_len)
         enc = self._format_encoding_info(encodings, pad=multi) if encodings else (" " * self._ENC_WIDTH if multi else "")
@@ -167,7 +171,7 @@ class MpyTool():
         else:
             self._progress_src = self._format_local_path(src)
         if is_dst_remote:
-            self._progress_dst = ':' + dst
+            self._progress_dst = ':' + ('/' + dst if not dst.startswith('/') else dst)
         else:
             self._progress_dst = self._format_local_path(dst)
         if len(self._progress_dst) > self._progress_max_dst_len:
@@ -1095,13 +1099,13 @@ class MpyTool():
             fs_pct = (fs['used'] / fs['total'] * 100) if fs['total'] > 0 else 0
             print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs_pct:.2f}%)")
 
-    def cmd_mreset(self, reconnect=True):
+    def cmd_mreset(self, reconnect=True, timeout=None):
         """MCU reset using machine.reset() with optional auto-reconnect"""
         self.verbose("MRESET", 1)
         if reconnect:
             try:
                 self.verbose("  reconnecting...", 1, color='yellow')
-                self._mpy.machine_reset(reconnect=True)
+                self._mpy.machine_reset(reconnect=True, timeout=timeout)
                 self.verbose("  connected", 1, color='green')
             except (_mpytool.ConnError, OSError) as err:
                 self.verbose(f"  reconnect failed: {err}", 1, color='red')
@@ -1199,7 +1203,14 @@ class MpyTool():
                 elif command == 'mreset':
                     # Reconnect only if there are more commands (in this or next group)
                     has_more = bool(commands) or not is_last_group
-                    self.cmd_mreset(reconnect=has_more)
+                    timeout = None
+                    if commands and commands[0] in ('--timeout', '-t'):
+                        commands.pop(0)
+                        if commands:
+                            timeout = int(commands.pop(0))
+                        else:
+                            raise ParamsError('missing value for --timeout')
+                    self.cmd_mreset(reconnect=has_more, timeout=timeout)
                 elif command == 'sreset':
                     self.cmd_sreset()
                 elif command in ('monitor', 'follow'):
@@ -1324,7 +1335,7 @@ List of available commands:
   delete {path} [...]           remove file/dir (path/ = contents only)
   reset                         soft reset (Ctrl-D, runs boot.py/main.py)
   sreset                        soft reset in raw REPL (clears RAM only)
-  mreset                        MCU reset (machine.reset, auto-reconnect)
+  mreset [-t|--timeout {secs}]  MCU reset (machine.reset, auto-reconnect)
   rtsreset                      RTS reset (hardware reset via RTS signal)
   bootloader                    enter bootloader (machine.bootloader)
   dtrboot                       enter bootloader via DTR/RTS (ESP32 only)

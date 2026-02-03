@@ -1124,11 +1124,12 @@ def _mt_pfind(label):
         self._mpy_comm.soft_reset_raw()
         self.reset_state()
 
-    def machine_reset(self, reconnect=True):
+    def machine_reset(self, reconnect=True, timeout=None):
         """MCU reset using machine.reset()
 
         Arguments:
             reconnect: if True, attempt to reconnect after reset
+            timeout: reconnect timeout in seconds (None = default)
 
         Returns:
             True if reconnected successfully, False otherwise
@@ -1139,7 +1140,7 @@ def _mt_pfind(label):
         self._conn.write(b"import machine; machine.reset()\x04")
         self.reset_state()
         if reconnect:
-            self._conn.reconnect()
+            self._conn.reconnect(timeout=timeout)
             return True
         return False
 
