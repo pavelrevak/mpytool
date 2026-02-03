@@ -6,7 +6,7 @@ import mpytool.conn as _conn
 
 
 class ConnSerial(_conn.Conn):
-    RECONNECT_TIMEOUT = 5  # seconds
+    RECONNECT_TIMEOUT = 10  # seconds
 
     def __init__(self, log=None, **serial_config):
         super().__init__(log)
@@ -28,14 +28,24 @@ class ConnSerial(_conn.Conn):
 
     def _read_available(self):
         """Read available data from serial port"""
-        in_waiting = self._serial.in_waiting
-        if in_waiting > 0:
-            return self._serial.read(in_waiting)
-        return None
+        if self._serial is None:
+            raise _conn.ConnError("Not connected")
+        try:
+            in_waiting = self._serial.in_waiting
+            if in_waiting > 0:
+                return self._serial.read(in_waiting)
+            return None
+        except OSError as err:
+            raise _conn.ConnError(f"Connection lost: {err}") from err
 
     def _write_raw(self, data):
         """Write data to serial port"""
-        return self._serial.write(data)
+        if self._serial is None:
+            raise _conn.ConnError("Not connected")
+        try:
+            return self._serial.write(data)
+        except OSError as err:
+            raise _conn.ConnError(f"Connection lost: {err}") from err
 
     def _is_usb_cdc(self):
         """Check if this is a USB-CDC port (native USB on ESP32-S/C)"""
