@@ -1362,15 +1362,12 @@ class MpyTool():
     })
 
     def process_commands(self, commands, is_last_group=False):
-        try:
-            while commands:
-                command = commands.pop(0)
-                if command not in self._COMMANDS:
-                    raise ParamsError(f"unknown command: '{command}'")
-                dispatch = getattr(self, f'_dispatch_{command.lstrip("_")}')
-                dispatch(commands, is_last_group)
-        except (_mpytool.MpyError, _mpytool.ConnError) as err:
-            self._log.error(err)
+        while commands:
+            command = commands.pop(0)
+            if command not in self._COMMANDS:
+                raise ParamsError(f"unknown command: '{command}'")
+            dispatch = getattr(self, f'_dispatch_{command.lstrip("_")}')
+            dispatch(commands, is_last_group)
         try:
             self._mpy.comm.exit_raw_repl()
         except _mpytool.ConnError:
@@ -1553,11 +1550,11 @@ def main():
     command_groups = _utils.split_commands(args.commands)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))
+    except (_mpytool.MpyError, _mpytool.ConnError, _mpytool.Timeout) as err:
+        log.error(err)
     except KeyboardInterrupt:
         # Clear partial progress line and show clean message
         log.verbose('Interrupted', level=0, overwrite=True)
-    except (_mpytool.MpyError, _mpytool.ConnError, _mpytool.Timeout) as err:
-        log.error(err)
 
 
 if __name__ == '__main__':

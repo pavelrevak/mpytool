@@ -9,7 +9,7 @@ import hashlib
 import unittest
 from unittest.mock import Mock, patch, MagicMock
 
-from mpytool.mpytool import MpyTool
+from mpytool.mpytool import MpyTool, ParamsError
 
 
 class TestCollectDstFiles(unittest.TestCase):
@@ -888,9 +888,8 @@ class TestCatCommand(unittest.TestCase):
 
     def test_cat_without_prefix_invalid(self, mock_stdout):
         """'cat file.py' -> INVALID (missing : prefix)"""
-        self.tool.process_commands(['cat', 'file.py'])
-        self.tool._log.error.assert_called_once()
-        self.assertIn(':', str(self.tool._log.error.call_args))
+        with self.assertRaises(ParamsError):
+            self.tool.process_commands(['cat', 'file.py'])
 
 
 class TestRmCommand(unittest.TestCase):
@@ -976,9 +975,8 @@ class TestMkdirCommand(unittest.TestCase):
 
     def test_mkdir_without_prefix_invalid(self):
         """'mkdir dir' -> INVALID (missing : prefix)"""
-        self.tool.process_commands(['mkdir', 'dir'])
-        self.tool._log.error.assert_called_once()
-        self.assertIn(':', str(self.tool._log.error.call_args))
+        with self.assertRaises(ParamsError):
+            self.tool.process_commands(['mkdir', 'dir'])
 
 
 @patch('sys.stdout', new_callable=io.StringIO)
@@ -1014,9 +1012,8 @@ class TestLsCommand(unittest.TestCase):
 
     def test_ls_without_prefix_invalid(self, mock_stdout):
         """'ls /lib' -> INVALID (missing : prefix)"""
-        self.tool.process_commands(['ls', '/lib'])
-        self.tool._log.error.assert_called_once()
-        self.assertIn(':', str(self.tool._log.error.call_args))
+        with self.assertRaises(ParamsError):
+            self.tool.process_commands(['ls', '/lib'])
 
 
 @patch('sys.stdout', new_callable=io.StringIO)
@@ -1048,9 +1045,8 @@ class TestTreeCommand(unittest.TestCase):
 
     def test_tree_without_prefix_invalid(self, mock_stdout):
         """'tree /lib' -> INVALID (missing : prefix)"""
-        self.tool.process_commands(['tree', '/lib'])
-        self.tool._log.error.assert_called_once()
-        self.assertIn(':', str(self.tool._log.error.call_args))
+        with self.assertRaises(ParamsError):
+            self.tool.process_commands(['tree', '/lib'])
 
 
 if __name__ == "__main__":
