@@ -238,6 +238,150 @@ class TestDeviceInfo(unittest.TestCase):
 
 
 @requires_device
+class TestCwdOperations(unittest.TestCase):
+    """Test current working directory operations (pwd, cd)"""
+
+    TEST_DIR = "/_mpytool_cwd_test"
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        # Setup test directory
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.mkdir(cls.TEST_DIR)
+        cls.mpy.mkdir(cls.TEST_DIR + "/subdir")
+
+    @classmethod
+    def tearDownClass(cls):
+        # Return to root before cleanup
+        try:
+            cls.mpy.chdir('/')
+        except Exception:
+            pass
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+
+    def setUp(self):
+        # Always start from root
+        self.mpy.chdir('/')
+
+    def test_01_getcwd_root(self):
+        """Test getcwd returns root directory"""
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, '/')
+
+    def test_02_chdir_absolute(self):
+        """Test chdir to absolute path"""
+        self.mpy.chdir(self.TEST_DIR)
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, self.TEST_DIR)
+
+    def test_03_chdir_relative(self):
+        """Test chdir to relative path"""
+        self.mpy.chdir(self.TEST_DIR)
+        self.mpy.chdir('subdir')
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, self.TEST_DIR + '/subdir')
+
+    def test_04_chdir_parent(self):
+        """Test chdir to parent directory"""
+        self.mpy.chdir(self.TEST_DIR + '/subdir')
+        self.mpy.chdir('..')
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, self.TEST_DIR)
+
+    def test_05_chdir_to_root(self):
+        """Test chdir back to root"""
+        self.mpy.chdir(self.TEST_DIR)
+        self.mpy.chdir('/')
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, '/')
+
+    def test_06_chdir_nonexistent_raises(self):
+        """Test chdir to nonexistent directory raises DirNotFound"""
+        from mpytool.mpy import DirNotFound
+        with self.assertRaises(DirNotFound):
+            self.mpy.chdir('/nonexistent_dir_12345')
+
+    def test_07_chdir_to_file_raises(self):
+        """Test chdir to file raises error"""
+        from mpytool.mpy import DirNotFound
+        # Create a file
+        test_file = self.TEST_DIR + '/testfile.txt'
+        self.mpy.put(b'test', test_file)
+        with self.assertRaises(DirNotFound):
+            self.mpy.chdir(test_file)
+        self.mpy.delete(test_file)
+
+    def test_08_cmd_pwd(self):
+        """Test pwd command via MpyTool"""
+        import io
+        import sys
+        self.mpy.chdir(self.TEST_DIR)
+        # Capture stdout
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            self.tool.cmd_pwd()
+        finally:
+            sys.stdout = old_stdout
+        output = captured.getvalue().strip()
+        self.assertEqual(output, self.TEST_DIR)
+
+    def test_09_cmd_cd(self):
+        """Test cd command via MpyTool"""
+        self.tool.cmd_cd(':' + self.TEST_DIR)
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, self.TEST_DIR)
+
+    def test_10_cmd_cd_relative(self):
+        """Test cd command with relative path"""
+        self.tool.cmd_cd(':' + self.TEST_DIR)
+        self.tool.cmd_cd(':subdir')
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, self.TEST_DIR + '/subdir')
+
+    def test_11_cmd_cd_parent(self):
+        """Test cd command to parent"""
+        self.tool.cmd_cd(':' + self.TEST_DIR + '/subdir')
+        self.tool.cmd_cd(':..')
+        cwd = self.mpy.getcwd()
+        self.assertEqual(cwd, self.TEST_DIR)
+
+    def test_12_ls_respects_cwd(self):
+        """Test that ls respects current working directory"""
+        # Create file in test dir
+        test_file = self.TEST_DIR + '/cwd_test.txt'
+        self.mpy.put(b'test', test_file)
+        # Change to test dir and ls
+        self.mpy.chdir(self.TEST_DIR)
+        result = self.mpy.ls('')
+        names = [name for name, size in result]
+        self.assertIn('cwd_test.txt', names)
+        self.mpy.delete(test_file)
+
+    def test_13_put_respects_cwd(self):
+        """Test that put respects current working directory"""
+        self.mpy.chdir(self.TEST_DIR)
+        self.mpy.put(b'cwd put test', 'cwd_put.txt')
+        # Verify file was created in TEST_DIR
+        content = self.mpy.get(self.TEST_DIR + '/cwd_put.txt')
+        self.assertEqual(content, b'cwd put test')
+        self.mpy.delete(self.TEST_DIR + '/cwd_put.txt')
+
+
+@requires_device
 class TestCpCommand(unittest.TestCase):
     """Test cp command for file copying"""
 

@@ -296,6 +296,27 @@ def _mt_pfind(label):
         self.import_module('os')
         self._mpy_comm.exec(f"os.rename('{_escape_path(src)}', '{_escape_path(dst)}')")
 
+    def getcwd(self):
+        """Get current working directory
+
+        Returns:
+            current working directory path
+        """
+        self.import_module('os')
+        return self._mpy_comm.exec_eval("repr(os.getcwd())")
+
+    def chdir(self, path):
+        """Change current working directory
+
+        Arguments:
+            path: directory path to change to
+        """
+        self.import_module('os')
+        try:
+            self._mpy_comm.exec(f"os.chdir('{_escape_path(path)}')")
+        except _mpy_comm.CmdError as err:
+            raise DirNotFound(path) from err
+
     def hashfile(self, path):
         """Compute SHA256 hash of file
 

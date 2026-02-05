@@ -430,5 +430,100 @@ class TestFlashWriteWithLabel(unittest.TestCase):
         self.assertIn('ESP32', str(ctx.exception))
 
 
+class TestGetcwd(unittest.TestCase):
+    """Tests for Mpy.getcwd method"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mpy = Mpy(self.mock_conn)
+        self.mpy._mpy_comm = Mock()
+
+    def test_getcwd_returns_string(self):
+        """Test that getcwd returns current directory string"""
+        self.mpy._mpy_comm.exec_eval.return_value = '/'
+        result = self.mpy.getcwd()
+        self.assertEqual(result, '/')
+
+    def test_getcwd_returns_subdirectory(self):
+        """Test that getcwd returns subdirectory path"""
+        self.mpy._mpy_comm.exec_eval.return_value = '/lib'
+        result = self.mpy.getcwd()
+        self.assertEqual(result, '/lib')
+
+    def test_getcwd_calls_os_getcwd(self):
+        """Test that getcwd calls os.getcwd()"""
+        self.mpy._mpy_comm.exec_eval.return_value = '/'
+        self.mpy.getcwd()
+        call_args = self.mpy._mpy_comm.exec_eval.call_args[0][0]
+        self.assertIn('os.getcwd()', call_args)
+
+    def test_getcwd_imports_os(self):
+        """Test that getcwd imports os module"""
+        self.mpy._mpy_comm.exec_eval.return_value = '/'
+        self.mpy.getcwd()
+        exec_calls = [str(c) for c in self.mpy._mpy_comm.exec.call_args_list]
+        os_imported = any('import os' in c for c in exec_calls)
+        self.assertTrue(os_imported)
+
+
+class TestChdir(unittest.TestCase):
+    """Tests for Mpy.chdir method"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mpy = Mpy(self.mock_conn)
+        self.mpy._mpy_comm = Mock()
+
+    def test_chdir_calls_os_chdir(self):
+        """Test that chdir calls os.chdir() with path"""
+        self.mpy.chdir('/lib')
+        call_args = self.mpy._mpy_comm.exec.call_args_list[-1][0][0]
+        self.assertIn("os.chdir('/lib')", call_args)
+
+    def test_chdir_escapes_path(self):
+        """Test that chdir escapes special characters in path"""
+        self.mpy.chdir("/it's")
+        call_args = self.mpy._mpy_comm.exec.call_args_list[-1][0][0]
+        self.assertIn("it\\'s", call_args)
+
+    def test_chdir_imports_os(self):
+        """Test that chdir imports os module"""
+        self.mpy.chdir('/lib')
+        exec_calls = [str(c) for c in self.mpy._mpy_comm.exec.call_args_list]
+        os_imported = any('import os' in c for c in exec_calls)
+        self.assertTrue(os_imported)
+
+    def test_chdir_raises_on_not_found(self):
+        """Test that chdir raises DirNotFound on invalid path"""
+        from mpytool.mpy import DirNotFound
+
+        def exec_side_effect(cmd, *args, **kwargs):
+            if 'os.chdir' in cmd:
+                raise mpy_comm.CmdError("cmd", b"", b"OSError")
+            return None
+
+        self.mpy._mpy_comm.exec.side_effect = exec_side_effect
+        with self.assertRaises(DirNotFound):
+            self.mpy.chdir('/nonexistent')
+
+    def test_chdir_to_root(self):
+        """Test that chdir to root works"""
+        self.mpy.chdir('/')
+        call_args = self.mpy._mpy_comm.exec.call_args_list[-1][0][0]
+        self.assertIn("os.chdir('/')", call_args)
+
+    def test_chdir_to_relative_path(self):
+        """Test that chdir to relative path works"""
+        self.mpy.chdir('lib')
+        call_args = self.mpy._mpy_comm.exec.call_args_list[-1][0][0]
+        self.assertIn("os.chdir('lib')", call_args)
+
+    def test_chdir_to_parent(self):
+        """Test that chdir to parent directory works"""
+        self.mpy.chdir('..')
+        call_args = self.mpy._mpy_comm.exec.call_args_list[-1][0][0]
+        self.assertIn("os.chdir('..')", call_args)
+
+
 if __name__ == "__main__":
     unittest.main()

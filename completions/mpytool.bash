@@ -1,12 +1,13 @@
 # Bash completion for mpytool
 # Install: source this file or copy to /etc/bash_completion.d/mpytool
 
-# Cache for remote files (using temp file)
+# Cache for remote paths
 _MPYTOOL_CACHE_FILE="/tmp/mpytool_completion_cache"
 _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
+_MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm monitor repl exec reset sreset mreset rtsreset bootloader dtrboot info flash ota sleep"
+_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd monitor repl exec reset sreset mreset rtsreset bootloader dtrboot info flash ota sleep"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -45,97 +46,59 @@ _mpytool_get_port() {
     echo "$port"
 }
 
-_mpytool_fetch_paths() {
+_mpytool_complete_remote() {
+    # $1 = current word
+    # $2 = "dirs" for directories only (optional)
+    local cur="$1"
+    local dirs_only="$2"
+
+    # Extract dir_query: directory part to list
+    local dir_query=""
+    if [[ "$cur" == */* ]]; then
+        dir_query="${cur%/*}/"
+    else
+        dir_query=":"
+    fi
+
     local port=$(_mpytool_get_port)
     [[ -z "$port" ]] && return 1
 
+    # Cache per (port, dir_query), 10 seconds
     local now=$(date +%s)
     local cache_time=0
     local cache_port=""
+    local cache_dir=""
 
     [[ -f "$_MPYTOOL_CACHE_TIME" ]] && cache_time=$(cat "$_MPYTOOL_CACHE_TIME")
     [[ -f "$_MPYTOOL_CACHE_PORT" ]] && cache_port=$(cat "$_MPYTOOL_CACHE_PORT")
+    [[ -f "$_MPYTOOL_CACHE_DIR" ]] && cache_dir=$(cat "$_MPYTOOL_CACHE_DIR")
 
     local cache_age=$((now - cache_time))
 
-    # Use cache if less than 60 seconds old and same port
-    if [[ $cache_age -lt 60 && "$cache_port" == "$port" && -f "$_MPYTOOL_CACHE_FILE" ]]; then
-        return 0
-    fi
-
-    # Fetch from device
-    mpytool -p "$port" _paths 2>/dev/null > "$_MPYTOOL_CACHE_FILE"
-    if [[ $? -ne 0 ]]; then
-        rm -f "$_MPYTOOL_CACHE_FILE"
-        return 1
-    fi
-
-    echo "$now" > "$_MPYTOOL_CACHE_TIME"
-    echo "$port" > "$_MPYTOOL_CACHE_PORT"
-    return 0
-}
-
-_mpytool_complete_remote() {
-    local colon_prefix="$1"
-    local cur="$2"
-
-    _mpytool_fetch_paths || return 1
-
-    # Remove leading : for processing
-    cur="${cur#:}"
-
-    local prefix=""
-    # Handle absolute vs relative paths
-    if [[ "$cur" == /* ]]; then
-        prefix="/"
-        cur="${cur#/}"
-    fi
-
-    # Extract directory part
-    local dir_part=""
-    if [[ "$cur" == */* ]]; then
-        dir_part="${cur%/*}/"
-    fi
-
-    # Read cache and filter
-    local -a matches=()
-    local -A seen=()
-    while IFS= read -r f; do
-        [[ -z "$f" ]] && continue
-
-        # Check if in target directory
-        if [[ -n "$dir_part" ]]; then
-            [[ "$f" != "$dir_part"* ]] && continue
-            local child="${f#$dir_part}"
-        else
-            local child="$f"
+    if [[ $cache_age -ge 10 || "$cache_port" != "$port" || "$cache_dir" != "$dir_query" || ! -f "$_MPYTOOL_CACHE_FILE" ]]; then
+        mpytool -p "$port" _paths "$dir_query" 2>/dev/null > "$_MPYTOOL_CACHE_FILE"
+        if [[ $? -ne 0 ]]; then
+            rm -f "$_MPYTOOL_CACHE_FILE"
+            return 1
         fi
+        echo "$now" > "$_MPYTOOL_CACHE_TIME"
+        echo "$port" > "$_MPYTOOL_CACHE_PORT"
+        echo "$dir_query" > "$_MPYTOOL_CACHE_DIR"
+    fi
 
-        # If child contains /, show parent dir
-        if [[ "$child" == */* ]]; then
-            child="${child%%/*}/"
-        fi
-
-        local full="${colon_prefix}${prefix}${dir_part}${child}"
-
-        # Avoid duplicates
-        if [[ -z "${seen[$full]}" ]]; then
-            seen[$full]=1
-            matches+=("$full")
+    # Build completions: prefix each entry with dir_query
+    while IFS= read -r e; do
+        [[ -z "$e" ]] && continue
+        [[ -n "$dirs_only" && "$e" != */ ]] && continue
+        local full="${dir_query}${e}"
+        if [[ "$full" == "$cur"* ]]; then
+            COMPREPLY+=("$full")
         fi
     done < "$_MPYTOOL_CACHE_FILE"
-
-    # Filter by current word and add to COMPREPLY
-    local word
-    for word in "${matches[@]}"; do
-        if [[ "$word" == "${colon_prefix}${prefix}${cur}"* ]]; then
-            COMPREPLY+=("$word")
-        fi
-    done
 }
 
 _mpytool_clear_cache() {
-    rm -f "$_MPYTOOL_CACHE_FILE" "$_MPYTOOL_CACHE_TIME" "$_MPYTOOL_CACHE_PORT"
+    rm -f "$_MPYTOOL_CACHE_FILE" "$_MPYTOOL_CACHE_TIME" "$_MPYTOOL_CACHE_PORT" "$_MPYTOOL_CACHE_DIR"
 }
 
 _mpytool() {
@@ -187,41 +150,113 @@ _mpytool() {
     fi
 
     # Command-specific completions
+    # pos=2 is first arg after command, pos=3 is second, etc.
+    local nargs=$((pos - 2))  # number of already completed args
     case "$cmd" in
-        ls|tree|cat|mkdir|rm|mv)
-            # These require : prefix for device paths
+        ls|tree)
+            # Optional remote path, -- anytime
+            if [[ $pos -eq 2 ]]; then
+                if [[ "$cur" == :* ]]; then
+                    _mpytool_complete_remote "$cur"
+                else
+                    COMPREPLY=($(compgen -W ":" -- "$cur"))
+                fi
+            fi
+            [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            ;;
+        cat)
+            # 1+ remote files required, -- after at least one
             if [[ "$cur" == :* ]]; then
-                _mpytool_complete_remote ':' "$cur"
+                _mpytool_complete_remote "$cur"
             else
                 COMPREPLY=($(compgen -W ":" -- "$cur"))
             fi
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
+            ;;
+        mkdir|rm)
+            # 1+ remote paths required, -- after at least one
+            if [[ "$cur" == :* ]]; then
+                _mpytool_complete_remote "$cur"
+            else
+                COMPREPLY=($(compgen -W ":" -- "$cur"))
+            fi
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
+            ;;
+        mv)
+            # 2+ remote paths required, -- after at least two
+            if [[ "$cur" == :* ]]; then
+                _mpytool_complete_remote "$cur"
+            else
+                COMPREPLY=($(compgen -W ":" -- "$cur"))
+            fi
+            [[ $nargs -ge 2 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
+            ;;
+        cd)
+            # Exactly 1 remote dir, -- only after it
+            if [[ $pos -eq 2 ]]; then
+                if [[ "$cur" == :* ]]; then
+                    _mpytool_complete_remote "$cur" 'dirs'
+                else
+                    COMPREPLY=($(compgen -W ":" -- "$cur"))
+                fi
+            else
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            fi
             ;;
         cp)
+            # 2+ args (mix of local and remote), -- after at least two
             if [[ "$cur" == :* ]]; then
-                _mpytool_complete_remote ':' "$cur"
+                _mpytool_complete_remote "$cur"
             else
                 COMPREPLY=($(compgen -f -- "$cur"))
                 COMPREPLY+=($(compgen -W ":" -- "$cur"))
             fi
+            [[ $nargs -ge 2 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
-        exec|repl|monitor|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info|sleep)
+        exec)
+            # 1 code string, -- after it
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
+            ;;
+        pwd)
+            # No arguments, -- immediately
+            [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            ;;
+        reset|sreset|mreset|rtsreset|bootloader|dtrboot|info)
+            # No arguments, -- immediately
+            [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            ;;
+        repl|monitor)
+            # Interactive, no chaining
             ;;
         flash)
             local flash_subcmd="${COMP_WORDS[cmd_start+1]}"
             if [[ $pos -eq 2 ]]; then
                 COMPREPLY=($(compgen -W "read write erase" -- "$cur"))
             elif [[ $pos -eq 3 && "$flash_subcmd" == "erase" ]]; then
-                # erase: optional --full flag
                 COMPREPLY=($(compgen -W "--full" -- "$cur"))
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            elif [[ $pos -eq 3 ]]; then
+                # read/write: label (device-specific, no completion)
+                :
             elif [[ $pos -eq 4 && "$flash_subcmd" != "erase" ]]; then
-                # read/write: file
                 COMPREPLY=($(compgen -f -- "$cur"))
             elif [[ "$flash_subcmd" == "erase" ]]; then
                 COMPREPLY=($(compgen -W "--full" -- "$cur"))
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             fi
+            [[ "$flash_subcmd" != "erase" && $pos -ge 5 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         ota)
-            COMPREPLY=($(compgen -f -X '!*.bin' -- "$cur"))
+            # 1 firmware file, -- after it
+            if [[ $pos -eq 2 ]]; then
+                COMPREPLY=($(compgen -f -X '!*.bin' -- "$cur"))
+            else
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            fi
+            ;;
+        sleep)
+            # 1 number, -- after it
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         --)
             COMPREPLY=($(compgen -W "$_mpytool_commands" -- "$cur"))
@@ -230,11 +265,6 @@ _mpytool() {
             COMPREPLY=($(compgen -W "$_mpytool_commands" -- "$cur"))
             ;;
     esac
-
-    # Always offer -- for chaining
-    if [[ -z "$cur" || "--" == "$cur"* ]]; then
-        COMPREPLY+=("--")
-    fi
 }
 
 complete -o nospace -o default -F _mpytool mpytool

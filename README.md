@@ -129,6 +129,16 @@ $ mpytool rm :                    # delete everything in CWD
 $ mpytool rm :/                   # delete everything on device (root)
 ```
 
+current working directory:
+```
+$ mpytool pwd                     # print current directory
+/
+$ mpytool cd :/lib                # change to /lib
+$ mpytool cd :subdir              # change to relative path (from CWD)
+$ mpytool cd :..                  # change to parent directory
+$ mpytool cd :/lib -- ls          # change directory and list files
+```
+
 reset and REPL:
 ```
 $ mpytool reset              # soft reset (Ctrl-D, runs boot.py/main.py)

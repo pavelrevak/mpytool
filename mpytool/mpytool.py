@@ -493,12 +493,14 @@ class MpyTool():
             else:
                 this_prefix = cls.TEE
         sufix = ''
-        if sub_tree is not None and name != ('/'):
+        if sub_tree is not None and name != '/':
             sufix = '/'
+        # For root, display './' only for empty path (CWD)
+        display_name = '.' if first and name in ('', '.') else name
         line = ''
         if print_size:
             line += f'{cls.format_size(size):>9} '
-        line += prefix + this_prefix + name + sufix
+        line += prefix + this_prefix + display_name + sufix
         print(line)
         if not sub_tree:
             return
@@ -527,6 +529,17 @@ class MpyTool():
         path = _parse_device_path(dir_name, 'tree')
         tree = self._mpy.tree(path)
         self.print_tree(tree)
+
+    def cmd_pwd(self):
+        """Print current working directory on device"""
+        cwd = self._mpy.getcwd()
+        print(cwd)
+
+    def cmd_cd(self, dir_name):
+        """Change current working directory on device"""
+        path = _parse_device_path(dir_name, 'cd')
+        self.verbose(f"CD: {path}", 2)
+        self._mpy.chdir(path)
 
     def cmd_cat(self, *file_names):
         """Print file contents to stdout"""
@@ -946,27 +959,15 @@ class MpyTool():
                 return f"{size:.0f}{unit}"
         return f"{size:.0f}T"
 
-    def cmd_paths(self, dir_name='.'):
+    def cmd_paths(self, dir_name=':'):
         """Print all paths (for shell completion) - undocumented"""
-        tree = self._mpy.tree(dir_name)
-        self._print_paths(tree, '')
-
-    def _print_paths(self, entry, prefix):
-        """Recursively print paths from tree structure"""
-        name, size, children = entry
-        if name in ('.', './'):
-            path = ''
-        else:
-            path = prefix + name
-        if children is None:
-            # File
-            print(path)
-        else:
-            # Directory
-            if path:
-                print(path + '/')
-            for child in children:
-                self._print_paths(child, path + '/' if path else '')
+        path = _parse_device_path(dir_name, '_paths')
+        try:
+            entries = self._mpy.ls(path)
+        except (_mpytool.DirNotFound, _mpytool.MpyError):
+            return
+        for name, size in entries:
+            print(name + '/' if size is None else name)
 
     def cmd_ota(self, firmware_path):
         """OTA firmware update from local .app-bin file"""
@@ -1253,6 +1254,13 @@ class MpyTool():
                         self.cmd_rm(*commands)
                         break
                     raise ParamsError('missing file name for rm command')
+                elif command == 'pwd':
+                    self.cmd_pwd()
+                elif command == 'cd':
+                    if commands:
+                        self.cmd_cd(commands.pop(0))
+                    else:
+                        raise ParamsError('missing directory for cd command')
                 elif command == 'reset':
                     self.verbose("RESET", 1)
                     self._mpy.soft_reset()
@@ -1364,7 +1372,7 @@ class MpyTool():
                     if commands:
                         self.cmd_paths(commands.pop(0))
                     else:
-                        self.cmd_paths()
+                        self.cmd_paths(':')  # default: CWD
                 else:
                     raise ParamsError(f"unknown command: '{command}'")
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
@@ -1388,6 +1396,8 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   mv {:src} [...] {:dst}        move/rename on device
   mkdir {:path} [...]           create directory (with parents)
   rm {:path} [...]              delete file/dir (:path/ = contents only)
+  pwd                           print current working directory
+  cd {:path}                    change current working directory
   reset                         soft reset (Ctrl-D)
   sreset                        soft reset in raw REPL
   mreset [-t {secs}]            MCU reset (machine.reset, reconnect)

@@ -331,6 +331,49 @@ mpy.rename(src, dst)
 >>> mpy.rename('file.py', 'subdir/file.py')  # Move to subdirectory
 ```
 
+#### getcwd()
+
+Get current working directory on device.
+
+```python
+mpy.getcwd()
+```
+
+**Returns:**
+- `str`: Current working directory path
+
+**Example:**
+```python
+>>> mpy.getcwd()
+'/'
+
+>>> mpy.chdir('/lib')
+>>> mpy.getcwd()
+'/lib'
+```
+
+#### chdir(path)
+
+Change current working directory on device.
+
+```python
+mpy.chdir(path)
+```
+
+**Parameters:**
+- `path` (str): Directory path to change to (absolute or relative)
+
+**Example:**
+```python
+>>> mpy.chdir('/lib')           # Absolute path
+>>> mpy.chdir('subdir')         # Relative path
+>>> mpy.chdir('..')             # Parent directory
+>>> mpy.chdir('/')              # Root directory
+```
+
+**Raises:**
+- `DirNotFound`: If directory doesn't exist or path is a file
+
 #### hashfile(path)
 
 Compute SHA256 hash of a file on device.

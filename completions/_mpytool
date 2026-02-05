@@ -3,7 +3,7 @@
 # ZSH completion for mpytool
 # Install: copy to ~/.zsh/completions/_mpytool and add to fpath
 
-# Cache for remote files (per port)
+# Cache for remote paths (per port+dir)
 typeset -gA _mpytool_cache
 typeset -gA _mpytool_cache_time
 
@@ -16,6 +16,8 @@ _mpytool_commands() {
         'mv:move/rename files on device (: prefix)'
         'mkdir:create directory (: prefix for device path)'
         'rm:delete files/directories (: prefix for device path)'
+        'pwd:print current working directory'
+        'cd:change current working directory (: prefix)'
         'monitor:monitor device output (Ctrl+C to exit)'
         'repl:interactive REPL session'
         'exec:execute Python code on device'
@@ -75,110 +77,57 @@ _mpytool_get_port() {
     fi
 }
 
-_mpytool_fetch_paths() {
-    # Fetch and cache paths, returns via $_mpytool_cached_files array
+_mpytool_complete_remote() {
+    # $1 = "dirs" for directories only (optional)
+    local dirs_only="$1"
+
+    # Use compset to handle : and path prefixes (like _files does)
+    # This sets IPREFIX so compadd -S '/' works correctly
+    compset -P ':'
+    compset -P '*/'
+    # IPREFIX now contains the directory part (e.g., ":", ":/lib/", ":lib/sub/")
+    # PREFIX contains the partial filename being completed
+
+    local dir_query="${IPREFIX}"
+
+    # Get port
     local port=$(_mpytool_get_port)
     [[ -z "$port" ]] && return 1
 
-    local cache_key="${port//\//_}"
+    # Cache per (port, dir_query), 10 seconds
+    local cache_key="${port//\//_}_${dir_query}"
     local now=$(date +%s)
     local cache_age=$((now - ${_mpytool_cache_time[$cache_key]:-0}))
 
-    # Use cache if less than 60 seconds old
-    if [[ $cache_age -lt 60 && -n "${_mpytool_cache[$cache_key]}" ]]; then
-        _mpytool_cached_files=(${(f)_mpytool_cache[$cache_key]})
-        return 0
-    fi
-
-    # Fetch file list from device using _paths command
-    local output
-    output=$(mpytool -p "$port" _paths 2>/dev/null)
-    if [[ $? -ne 0 ]]; then
-        return 1
-    fi
-
-    # Split output into array (one path per line)
-    _mpytool_cached_files=("${(@f)output}")
-
-    # Cache results
-    _mpytool_cache[$cache_key]="${(F)_mpytool_cached_files}"
-    _mpytool_cache_time[$cache_key]=$now
-    return 0
-}
-
-_mpytool_complete_remote() {
-    # $1 = colon prefix (":" or "")
-    local colon_prefix="$1"
-    local -a _mpytool_cached_files=()
-    _mpytool_fetch_paths || return 1
-
-    local cur="${words[CURRENT]}"
-    # Remove leading : for processing
-    cur="${cur#:}"
-
-    local prefix=""
-    local filter=""
-
-    # Handle absolute vs relative paths
-    if [[ "$cur" == "/"* ]]; then
-        prefix="/"
-        filter="${cur#/}"
+    local -a entries=()
+    if [[ $cache_age -lt 10 && -n "${_mpytool_cache[$cache_key]}" ]]; then
+        entries=(${(f)_mpytool_cache[$cache_key]})
     else
-        filter="$cur"
+        local output
+        output=$(mpytool -p "$port" _paths "$dir_query" 2>/dev/null)
+        [[ $? -ne 0 ]] && return 1
+        entries=("${(@f)output}")
+        _mpytool_cache[$cache_key]="${(F)entries}"
+        _mpytool_cache_time[$cache_key]=$now
     fi
 
-    # Extract directory part (everything up to and including last /)
-    local dir_part=""
-    if [[ "$filter" == */* ]]; then
-        dir_part="${filter%/*}/"
-    fi
-
-    # Filter and show only direct children of current directory
-    local -a matches=()
-    local f child
-    for f in "${_mpytool_cached_files[@]}"; do
-        # Check if file is in the target directory
-        if [[ -n "$dir_part" ]]; then
-            [[ "$f" != "$dir_part"* ]] && continue
-            child="${f#$dir_part}"
+    # Add completions - compset already handles the prefix via IPREFIX
+    # -S '/' -q for directories: removable suffix (bold, Tab enters, Space removes)
+    # -d for display: show names with / in menu to distinguish from files
+    local -a dirs=() dirs_display=() files=()
+    local e
+    for e in "${entries[@]}"; do
+        [[ -z "$e" ]] && continue
+        if [[ "$e" == */ ]]; then
+            dirs+=("${e%/}")
+            dirs_display+=("$e")
         else
-            child="$f"
-        fi
-
-        # If child contains /, show parent dir instead
-        if [[ "$child" == */* ]]; then
-            child="${child%%/*}/"
-        fi
-
-        local full="${prefix}${dir_part}${child}"
-
-        # Avoid duplicates
-        if [[ ! " ${matches[*]} " =~ " ${full} " ]]; then
-            matches+=("$full")
+            files+=("$e")
         fi
     done
 
-    # Add with appropriate suffix (none for dirs, space for files)
-    local -a dirs=() files=()
-    for f in "${matches[@]}"; do
-        if [[ "$f" == */ ]]; then
-            dirs+=("$f")
-        else
-            files+=("$f")
-        fi
-    done
-
-    if [[ -n "$colon_prefix" ]]; then
-        [[ ${#dirs[@]} -gt 0 ]] && compadd -p ':' -S '' -a dirs
-        [[ ${#files[@]} -gt 0 ]] && compadd -p ':' -a files
-    else
-        [[ ${#dirs[@]} -gt 0 ]] && compadd -S '' -a dirs
-        [[ ${#files[@]} -gt 0 ]] && compadd -a files
-    fi
-}
-
-_mpytool_remote_files() {
-    _mpytool_complete_remote ':'
+    [[ ${#dirs[@]} -gt 0 ]] && compadd -S '/' -q -d dirs_display -- "${dirs[@]}"
+    [[ -z "$dirs_only" && ${#files[@]} -gt 0 ]] && compadd -- "${files[@]}"
 }
 
 _mpytool_clear_cache() {
@@ -241,29 +190,83 @@ _mpytool() {
             fi
 
             # Command-specific completions (pos is position within current command group)
+            # pos=2 is first arg after command, pos=3 is second, etc.
+            local nargs=$((pos - 2))  # number of already completed args
             case "$cmd" in
-                ls|tree|cat|mkdir|rm|mv)
-                    # These require : prefix for device paths
+                ls|tree)
+                    # Optional remote path, -- anytime
+                    if [[ $pos -eq 2 ]]; then
+                        if [[ "$words[CURRENT]" == :* ]]; then
+                            _mpytool_complete_remote
+                        else
+                            compadd -S '' ':'
+                        fi
+                    fi
+                    compadd -- '--'
+                    ;;
+                cat)
+                    # 1+ remote files required, -- after at least one
                     if [[ "$words[CURRENT]" == :* ]]; then
-                        _mpytool_remote_files
+                        _mpytool_complete_remote
                     else
                         compadd -S '' ':'
                     fi
+                    [[ $nargs -ge 1 ]] && compadd -- '--'
+                    ;;
+                mkdir|rm)
+                    # 1+ remote paths required, -- after at least one
+                    if [[ "$words[CURRENT]" == :* ]]; then
+                        _mpytool_complete_remote
+                    else
+                        compadd -S '' ':'
+                    fi
+                    [[ $nargs -ge 1 ]] && compadd -- '--'
+                    ;;
+                mv)
+                    # 2+ remote paths required, -- after at least two
+                    if [[ "$words[CURRENT]" == :* ]]; then
+                        _mpytool_complete_remote
+                    else
+                        compadd -S '' ':'
+                    fi
+                    [[ $nargs -ge 2 ]] && compadd -- '--'
+                    ;;
+                cd)
+                    # Exactly 1 remote dir, -- only after it
+                    if [[ $pos -eq 2 ]]; then
+                        if [[ "$words[CURRENT]" == :* ]]; then
+                            _mpytool_complete_remote 'dirs'
+                        else
+                            compadd -S '' ':'
+                        fi
+                    else
+                        compadd -- '--'
+                    fi
                     ;;
                 cp)
-                    # cp: either arg can be local or remote (: prefix for device)
+                    # 2+ args (mix of local and remote), -- after at least two
                     if [[ "$words[CURRENT]" == :* ]]; then
-                        _mpytool_remote_files
+                        _mpytool_complete_remote
                     else
                         _files
                         compadd -S '' ':'
                     fi
+                    [[ $nargs -ge 2 ]] && compadd -- '--'
                     ;;
                 exec)
-                    # exec takes Python code, no completion
+                    # 1 code string, -- after it
+                    [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
-                repl|monitor|reset|sreset|mreset|rtsreset|bootloader|dtrboot|info)
-                    # No arguments
+                pwd)
+                    # No arguments, -- immediately
+                    compadd -- '--'
+                    ;;
+                reset|sreset|mreset|rtsreset|bootloader|dtrboot|info)
+                    # No arguments, -- immediately
+                    compadd -- '--'
+                    ;;
+                repl|monitor)
+                    # Interactive, no chaining
                     ;;
                 flash)
                     # flash [read|write|erase] [label] [file]
@@ -276,37 +279,43 @@ _mpytool() {
                         )
                         _describe -t subcmds 'flash subcommand' subcmds
                     elif [[ $pos -eq 3 && "$flash_subcmd" == "erase" ]]; then
-                        # erase: optional label or --full
                         compadd -- '--full'
+                        compadd -- '--'
                     elif [[ $pos -eq 3 ]]; then
                         # read/write: label (device-specific, no completion)
                         :
                     elif [[ $pos -eq 4 && "$flash_subcmd" != "erase" ]]; then
-                        # read/write: file
                         _files
                     elif [[ "$flash_subcmd" == "erase" ]]; then
                         compadd -- '--full'
+                        compadd -- '--'
+                    fi
+                    # -- after complete subcommand
+                    if [[ "$flash_subcmd" == "erase" && $pos -ge 3 ]]; then
+                        :  # already handled above
+                    elif [[ "$flash_subcmd" != "erase" && $pos -ge 5 ]]; then
+                        compadd -- '--'
                     fi
                     ;;
                 ota)
-                    # ota takes firmware file
-                    _files -g "*.bin"
+                    # 1 firmware file, -- after it
+                    if [[ $pos -eq 2 ]]; then
+                        _files -g "*.bin"
+                    else
+                        compadd -- '--'
+                    fi
                     ;;
                 sleep)
-                    # sleep takes number, no completion
+                    # 1 number, -- after it
+                    [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
                 --)
-                    # After --, complete commands
                     _mpytool_commands
                     ;;
                 *)
-                    # Unknown command or first position
                     _mpytool_commands
                     ;;
             esac
-
-            # Always offer -- to chain commands
-            compadd -- '--'
             ;;
     esac
 }
