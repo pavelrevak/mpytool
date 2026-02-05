@@ -204,14 +204,28 @@ _mpytool() {
             fi
             ;;
         cp)
-            # 2+ args (mix of local and remote), -- after at least two
-            if [[ "$cur" == :* ]]; then
-                _mpytool_complete_remote "$cur"
+            # n local + 1 remote OR n remote + 1 local
+            # Count local and remote args (excluding current word)
+            local n_local=0 n_remote=0
+            for ((j=cmd_start+1; j < COMP_CWORD; j++)); do
+                if [[ "${COMP_WORDS[j]}" == :* ]]; then
+                    ((n_remote++))
+                else
+                    ((n_local++))
+                fi
+            done
+            if [[ $n_local -ge 1 && $n_remote -ge 1 ]]; then
+                # Complete, only offer --
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             else
-                COMPREPLY=($(compgen -f -- "$cur"))
-                COMPREPLY+=($(compgen -W ":" -- "$cur"))
+                # Need more args, offer files and :
+                if [[ "$cur" == :* ]]; then
+                    _mpytool_complete_remote "$cur"
+                else
+                    COMPREPLY=($(compgen -f -- "$cur"))
+                    COMPREPLY+=($(compgen -W ":" -- "$cur"))
+                fi
             fi
-            [[ $nargs -ge 2 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         exec)
             # 1 code string, -- after it

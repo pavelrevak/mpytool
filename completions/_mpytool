@@ -92,7 +92,10 @@ _mpytool_complete_remote() {
 
     # Get port
     local port=$(_mpytool_get_port)
-    [[ -z "$port" ]] && return 1
+    if [[ -z "$port" ]]; then
+        compadd -x 'no device connected'
+        return
+    fi
 
     # Cache per (port, dir_query), 10 seconds
     local cache_key="${port//\//_}_${dir_query}"
@@ -105,7 +108,10 @@ _mpytool_complete_remote() {
     else
         local output
         output=$(mpytool -p "$port" _paths "$dir_query" 2>/dev/null)
-        [[ $? -ne 0 ]] && return 1
+        if [[ $? -ne 0 ]]; then
+            compadd -x 'cannot read device'
+            return
+        fi
         entries=("${(@f)output}")
         _mpytool_cache[$cache_key]="${(F)entries}"
         _mpytool_cache_time[$cache_key]=$now
@@ -244,14 +250,28 @@ _mpytool() {
                     fi
                     ;;
                 cp)
-                    # 2+ args (mix of local and remote), -- after at least two
-                    if [[ "$words[CURRENT]" == :* ]]; then
-                        _mpytool_complete_remote
+                    # n local + 1 remote OR n remote + 1 local
+                    # Count local and remote args (excluding current word)
+                    local n_local=0 n_remote=0
+                    for ((i=cmd_start+1; i < CURRENT; i++)); do
+                        if [[ "${words[i]}" == :* ]]; then
+                            ((n_remote++))
+                        else
+                            ((n_local++))
+                        fi
+                    done
+                    if [[ $n_local -ge 1 && $n_remote -ge 1 ]]; then
+                        # Complete, only offer --
+                        compadd -- '--'
                     else
-                        _files
-                        compadd -S '' ':'
+                        # Need more args, offer files and :
+                        if [[ "$words[CURRENT]" == :* ]]; then
+                            _mpytool_complete_remote
+                        else
+                            _files
+                            compadd -S '' ':'
+                        fi
                     fi
-                    [[ $nargs -ge 2 ]] && compadd -- '--'
                     ;;
                 exec)
                     # 1 code string, -- after it
