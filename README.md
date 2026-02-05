@@ -142,13 +142,13 @@ $ mpytool cd :/lib -- ls          # change directory and list files
 reset and REPL:
 ```
 $ mpytool reset              # soft reset (Ctrl-D, runs boot.py/main.py)
-$ mpytool sreset             # soft reset in raw REPL (clears RAM only)
-$ mpytool mreset             # MCU reset (machine.reset, auto-reconnect, 10s timeout)
-$ mpytool mreset -t 30       # MCU reset with 30s reconnect timeout
-$ mpytool rtsreset           # hardware reset via RTS signal (serial only)
-$ mpytool bootloader         # enter bootloader (machine.bootloader)
-$ mpytool dtrboot            # enter bootloader via DTR/RTS (ESP32 only)
-$ mpytool reset monitor      # reset and monitor output
+$ mpytool reset --raw        # soft reset in raw REPL (clears RAM only)
+$ mpytool reset --machine    # MCU reset (machine.reset, auto-reconnect)
+$ mpytool reset --machine -t 30  # MCU reset with 30s reconnect timeout
+$ mpytool reset --rts        # hardware reset via RTS signal (serial only)
+$ mpytool reset --boot       # enter bootloader (machine.bootloader)
+$ mpytool reset --dtr-boot   # enter bootloader via DTR/RTS (ESP32 only)
+$ mpytool reset -- monitor   # reset and monitor output
 $ mpytool repl               # enter REPL mode
 $ mpytool sleep 2            # sleep for 2 seconds (useful between commands)
 ```
@@ -216,8 +216,8 @@ $ mpytool flash erase vfs --full           # full erase partition
 OTA firmware update (ESP32):
 ```
 $ mpytool ota firmware.app-bin                    # flash to next OTA partition
-$ mpytool ota firmware.app-bin -- mreset          # flash and reboot (10s timeout)
-$ mpytool ota firmware.app-bin -- mreset -t 30    # flash and reboot with 30s timeout
+$ mpytool ota firmware.app-bin -- reset --machine          # flash and reboot
+$ mpytool ota firmware.app-bin -- reset --machine -t 30    # flash and reboot with 30s timeout
 ```
 
 multiple commands separated by `--`:

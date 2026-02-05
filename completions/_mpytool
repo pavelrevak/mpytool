@@ -21,12 +21,7 @@ _mpytool_commands() {
         'monitor:monitor device output (Ctrl+C to exit)'
         'repl:interactive REPL session'
         'exec:execute Python code on device'
-        'reset:soft reset device (Ctrl-D)'
-        'sreset:soft reset in raw REPL (clears RAM only)'
-        'mreset:MCU reset (machine.reset, auto-reconnect)'
-        'rtsreset:hardware reset via RTS signal'
-        'bootloader:enter bootloader (machine.bootloader)'
-        'dtrboot:enter bootloader via DTR/RTS (ESP32)'
+        'reset:reset device (soft/machine/rts/raw/boot/dtr-boot)'
         'info:show device information'
         'flash:flash/partition operations (list, read, write, erase)'
         'ota:OTA firmware update (ESP32)'
@@ -281,7 +276,28 @@ _mpytool() {
                     # No arguments, -- immediately
                     compadd -- '--'
                     ;;
-                reset|sreset|mreset|rtsreset|bootloader|dtrboot|info)
+                reset)
+                    # Reset flags or --
+                    local -a reset_flags=(
+                        '--machine:machine.reset() with reconnect'
+                        '--rts:hardware reset via DTR/RTS signal'
+                        '--raw:soft reset in raw REPL'
+                        '--boot:enter bootloader (machine.bootloader)'
+                        '--dtr-boot:bootloader via DTR/RTS (ESP32)'
+                        '-t:reconnect timeout in seconds'
+                    )
+                    local has_mode=0
+                    for w in "${words[cmd_start+1,-1]}"; do
+                        case "$w" in
+                            --machine|--rts|--raw|--boot|--dtr-boot) has_mode=1 ;;
+                        esac
+                    done
+                    if [[ $has_mode -eq 0 ]]; then
+                        _describe -t flags 'reset flag' reset_flags
+                    fi
+                    compadd -- '--'
+                    ;;
+                info)
                     # No arguments, -- immediately
                     compadd -- '--'
                     ;;

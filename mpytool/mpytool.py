@@ -1160,58 +1160,61 @@ class MpyTool():
             fs_pct = (fs['used'] / fs['total'] * 100) if fs['total'] > 0 else 0
             print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs_pct:.2f}%)")
 
-    def cmd_mreset(self, reconnect=True, timeout=None):
-        """MCU reset using machine.reset() with optional auto-reconnect"""
-        self.verbose("MRESET", 1)
-        if reconnect:
-            try:
-                self.verbose("  reconnecting...", 1, color='yellow')
-                self._mpy.machine_reset(reconnect=True, timeout=timeout)
-                self.verbose("  connected", 1, color='green')
-            except (_mpytool.ConnError, OSError) as err:
-                self.verbose(f"  reconnect failed: {err}", 1, color='red')
-                raise _mpytool.ConnError(f"Reconnect failed: {err}")
-        else:
-            self._mpy.machine_reset(reconnect=False)
+    def cmd_reset(self, mode='soft', reconnect=True, timeout=None):
+        """Reset device in specified mode
 
-    def cmd_sreset(self):
-        """Soft reset in raw REPL - clears RAM but doesn't run boot.py/main.py"""
-        self.verbose("SRESET", 1)
-        self._mpy.soft_reset_raw()
-
-    def cmd_rtsreset(self, reconnect=True):
-        """Hardware reset device using RTS signal with optional auto-reconnect"""
-        self.verbose("RTSRESET", 1)
-        try:
-            self._mpy.hard_reset()
-            if reconnect:
-                self.verbose("  reconnecting...", 1, color='yellow')
-                _time.sleep(1.0)  # Wait for device to boot
-                self._mpy._conn.reconnect()
-                self.verbose("  connected", 1, color='green')
-        except NotImplementedError:
-            raise _mpytool.MpyError("Hardware reset not available (serial only)")
-        except (_mpytool.ConnError, OSError) as err:
-            self.verbose(f"  reconnect failed: {err}", 1, color='red')
-            raise _mpytool.ConnError(f"Reconnect failed: {err}")
-
-    def cmd_bootloader(self):
-        """Enter bootloader using machine.bootloader()"""
-        self.verbose("BOOTLOADER", 1)
-        self._mpy.machine_bootloader()
-
-    def cmd_dtrboot(self):
-        """Enter bootloader using DTR/RTS signals (ESP32 only)
-
-        Auto-detects port type:
-        - USB-UART: classic DTR/RTS sequence (GPIO0 directly connected)
-        - USB-CDC: USB-JTAG-Serial sequence (ESP32-S/C native USB)
+        Modes:
+            soft     - Ctrl-D soft reset, runs boot.py/main.py (default)
+            raw      - soft reset in raw REPL, clears RAM only
+            machine  - machine.reset() with optional reconnect
+            rts      - hardware reset via DTR/RTS with optional reconnect
+            boot     - enter bootloader via machine.bootloader()
+            dtr-boot - enter bootloader via DTR/RTS signals (ESP32)
         """
-        self.verbose("DTRBOOT", 1)
-        try:
-            self._mpy.reset_to_bootloader()
-        except NotImplementedError:
-            raise _mpytool.MpyError("DTR boot not available (serial only)")
+        self.verbose(f"RESET {mode}", 1)
+        if mode == 'soft':
+            self._mpy.soft_reset()
+        elif mode == 'raw':
+            self._mpy.soft_reset_raw()
+        elif mode == 'machine':
+            if reconnect:
+                try:
+                    self.verbose("  reconnecting...", 1, color='yellow')
+                    self._mpy.machine_reset(
+                        reconnect=True, timeout=timeout)
+                    self.verbose("  connected", 1, color='green')
+                except (_mpytool.ConnError, OSError) as err:
+                    self.verbose(
+                        f"  reconnect failed: {err}", 1, color='red')
+                    raise _mpytool.ConnError(
+                        f"Reconnect failed: {err}")
+            else:
+                self._mpy.machine_reset(reconnect=False)
+        elif mode == 'rts':
+            try:
+                self._mpy.hard_reset()
+                if reconnect:
+                    self.verbose(
+                        "  reconnecting...", 1, color='yellow')
+                    _time.sleep(1.0)  # Wait for device to boot
+                    self._mpy._conn.reconnect()
+                    self.verbose("  connected", 1, color='green')
+            except NotImplementedError:
+                raise _mpytool.MpyError(
+                    "Hardware reset not available (serial only)")
+            except (_mpytool.ConnError, OSError) as err:
+                self.verbose(
+                    f"  reconnect failed: {err}", 1, color='red')
+                raise _mpytool.ConnError(
+                    f"Reconnect failed: {err}")
+        elif mode == 'boot':
+            self._mpy.machine_bootloader()
+        elif mode == 'dtr-boot':
+            try:
+                self._mpy.reset_to_bootloader()
+            except NotImplementedError:
+                raise _mpytool.MpyError(
+                    "DTR boot not available (serial only)")
 
     def cmd_sleep(self, seconds):
         """Sleep for specified number of seconds"""
@@ -1262,21 +1265,34 @@ class MpyTool():
                     else:
                         raise ParamsError('missing directory for cd command')
                 elif command == 'reset':
-                    self.verbose("RESET", 1)
-                    self._mpy.soft_reset()
-                elif command == 'mreset':
-                    # Reconnect only if there are more commands (in this or next group)
-                    has_more = bool(commands) or not is_last_group
+                    mode = 'soft'
                     timeout = None
-                    if commands and commands[0] in ('--timeout', '-t'):
-                        commands.pop(0)
-                        if commands:
-                            timeout = int(commands.pop(0))
+                    _reset_modes = (
+                        '--machine', '--rts', '--raw',
+                        '--boot', '--dtr-boot')
+                    while commands and commands[0].startswith('-'):
+                        flag = commands[0]
+                        if flag in _reset_modes:
+                            mode = commands.pop(0)[2:]  # strip --
+                        elif flag in ('-t', '--timeout'):
+                            commands.pop(0)
+                            if commands:
+                                timeout = int(commands.pop(0))
+                            else:
+                                raise ParamsError(
+                                    'missing value for --timeout')
                         else:
-                            raise ParamsError('missing value for --timeout')
-                    self.cmd_mreset(reconnect=has_more, timeout=timeout)
-                elif command == 'sreset':
-                    self.cmd_sreset()
+                            raise ParamsError(
+                                f"unknown reset flag: '{flag}'")
+                    if timeout and mode not in ('machine', 'rts'):
+                        raise ParamsError(
+                            '--timeout only with --machine or --rts')
+                    has_more = bool(commands) or not is_last_group
+                    reconnect = has_more if mode in (
+                        'machine', 'rts') else True
+                    self.cmd_reset(
+                        mode=mode, reconnect=reconnect,
+                        timeout=timeout)
                 elif command == 'monitor':
                     self.cmd_monitor()
                     break
@@ -1340,14 +1356,6 @@ class MpyTool():
                         self.cmd_ota(firmware_path)
                     else:
                         raise ParamsError('ota requires firmware file path')
-                elif command == 'rtsreset':
-                    # Reconnect only if there are more commands (in this or next group)
-                    has_more = bool(commands) or not is_last_group
-                    self.cmd_rtsreset(reconnect=has_more)
-                elif command == 'bootloader':
-                    self.cmd_bootloader()
-                elif command == 'dtrboot':
-                    self.cmd_dtrboot()
                 elif command == 'sleep':
                     if commands:
                         try:
@@ -1398,12 +1406,12 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   rm {:path} [...]              delete file/dir (:path/ = contents only)
   pwd                           print current working directory
   cd {:path}                    change current working directory
-  reset                         soft reset (Ctrl-D)
-  sreset                        soft reset in raw REPL
-  mreset [-t {secs}]            MCU reset (machine.reset, reconnect)
-  rtsreset                      hardware reset via RTS signal
-  bootloader                    enter bootloader (machine.bootloader)
-  dtrboot                       bootloader via DTR/RTS (ESP32)
+  reset [flags]                  soft reset (Ctrl-D) by default
+    --machine [-t {s}]            machine.reset() with reconnect
+    --rts [-t {s}]                hardware reset via DTR/RTS signal
+    --raw                         soft reset in raw REPL
+    --boot                        enter bootloader (machine.bootloader)
+    --dtr-boot                    bootloader via DTR/RTS (ESP32)
   monitor                       print device output (Ctrl+C to stop)
   repl                          interactive REPL [Unix only]
   exec {code}                   execute Python code

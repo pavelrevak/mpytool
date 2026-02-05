@@ -7,7 +7,7 @@ _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 _MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd monitor repl exec reset sreset mreset rtsreset bootloader dtrboot info flash ota sleep"
+_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd monitor repl exec reset info flash ota sleep"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -235,7 +235,21 @@ _mpytool() {
             # No arguments, -- immediately
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             ;;
-        reset|sreset|mreset|rtsreset|bootloader|dtrboot|info)
+        reset)
+            # Reset flags or --
+            local has_mode=0
+            for w in "${COMP_WORDS[@]:cmd_start+1}"; do
+                case "$w" in
+                    --machine|--rts|--raw|--boot|--dtr-boot) has_mode=1 ;;
+                esac
+            done
+            if [[ $has_mode -eq 0 ]]; then
+                COMPREPLY=($(compgen -W "--machine --rts --raw --boot --dtr-boot -t --" -- "$cur"))
+            else
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            fi
+            ;;
+        info)
             # No arguments, -- immediately
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             ;;
