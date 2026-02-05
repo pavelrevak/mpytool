@@ -250,6 +250,7 @@ class TestCwdOperations(unittest.TestCase):
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn)
+        cls.tool._mpy = cls.mpy  # share Mpy instance
         # Setup test directory
         try:
             cls.mpy.delete(cls.TEST_DIR)
@@ -324,7 +325,7 @@ class TestCwdOperations(unittest.TestCase):
         self.mpy.delete(test_file)
 
     def test_08_cmd_pwd(self):
-        """Test pwd command via MpyTool"""
+        """Test pwd command via process_commands"""
         import io
         import sys
         self.mpy.chdir(self.TEST_DIR)
@@ -333,29 +334,29 @@ class TestCwdOperations(unittest.TestCase):
         old_stdout = sys.stdout
         sys.stdout = captured
         try:
-            self.tool.cmd_pwd()
+            self.tool.process_commands(['pwd'])
         finally:
             sys.stdout = old_stdout
         output = captured.getvalue().strip()
         self.assertEqual(output, self.TEST_DIR)
 
     def test_09_cmd_cd(self):
-        """Test cd command via MpyTool"""
-        self.tool.cmd_cd(':' + self.TEST_DIR)
+        """Test cd command via process_commands"""
+        self.tool.process_commands(['cd', ':' + self.TEST_DIR])
         cwd = self.mpy.getcwd()
         self.assertEqual(cwd, self.TEST_DIR)
 
     def test_10_cmd_cd_relative(self):
         """Test cd command with relative path"""
-        self.tool.cmd_cd(':' + self.TEST_DIR)
-        self.tool.cmd_cd(':subdir')
+        self.tool.process_commands(['cd', ':' + self.TEST_DIR])
+        self.tool.process_commands(['cd', ':subdir'])
         cwd = self.mpy.getcwd()
         self.assertEqual(cwd, self.TEST_DIR + '/subdir')
 
     def test_11_cmd_cd_parent(self):
         """Test cd command to parent"""
-        self.tool.cmd_cd(':' + self.TEST_DIR + '/subdir')
-        self.tool.cmd_cd(':..')
+        self.tool.process_commands(['cd', ':' + self.TEST_DIR + '/subdir'])
+        self.tool.process_commands(['cd', ':..'])
         cwd = self.mpy.getcwd()
         self.assertEqual(cwd, self.TEST_DIR)
 
@@ -839,6 +840,7 @@ class TestSleepCommand(unittest.TestCase):
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn)
+        cls.tool._mpy = cls.mpy  # share Mpy instance
 
     @classmethod
     def tearDownClass(cls):
@@ -848,7 +850,7 @@ class TestSleepCommand(unittest.TestCase):
         """Test that sleep actually delays execution"""
         import time
         start = time.time()
-        self.tool.cmd_sleep(0.5)
+        self.tool.process_commands(['sleep', '0.5'])
         elapsed = time.time() - start
         self.assertGreaterEqual(elapsed, 0.4)
         self.assertLess(elapsed, 1.0)

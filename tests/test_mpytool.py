@@ -869,28 +869,28 @@ class TestCatCommand(unittest.TestCase):
         self.tool = MpyTool(self.mock_conn, verbose=None, force=True)
         self.tool._mpy = Mock()
         self.tool._mpy.get.return_value = b"file content"
+        self.tool._log = Mock()
 
     def test_cat_with_prefix(self, mock_stdout):
         """'cat :file.py' -> reads file.py"""
-        self.tool.cmd_cat(':file.py')
+        self.tool.process_commands(['cat', ':file.py'])
         self.tool._mpy.get.assert_called_with('file.py')
 
     def test_cat_with_root_prefix(self, mock_stdout):
         """'cat :/file.py' -> reads /file.py"""
-        self.tool.cmd_cat(':/file.py')
+        self.tool.process_commands(['cat', ':/file.py'])
         self.tool._mpy.get.assert_called_with('/file.py')
 
     def test_cat_multiple_files(self, mock_stdout):
         """'cat :a.py :b.py' -> reads both files"""
-        self.tool.cmd_cat(':a.py', ':b.py')
+        self.tool.process_commands(['cat', ':a.py', ':b.py'])
         self.assertEqual(self.tool._mpy.get.call_count, 2)
 
     def test_cat_without_prefix_invalid(self, mock_stdout):
         """'cat file.py' -> INVALID (missing : prefix)"""
-        from mpytool.mpytool import ParamsError
-        with self.assertRaises(ParamsError) as ctx:
-            self.tool.cmd_cat('file.py')
-        self.assertIn(':', str(ctx.exception))
+        self.tool.process_commands(['cat', 'file.py'])
+        self.tool._log.error.assert_called_once()
+        self.assertIn(':', str(self.tool._log.error.call_args))
 
 
 class TestRmCommand(unittest.TestCase):
@@ -952,33 +952,33 @@ class TestMkdirCommand(unittest.TestCase):
         self.tool = MpyTool(self.mock_conn, verbose=None, force=True)
         self.tool._mpy = Mock()
         self.tool._mpy.mkdir.return_value = None
+        self.tool._log = Mock()
 
     def test_mkdir_with_prefix(self):
         """'mkdir :dir' -> creates dir in CWD"""
-        self.tool.cmd_mkdir(':dir')
+        self.tool.process_commands(['mkdir', ':dir'])
         self.tool._mpy.mkdir.assert_called_with('dir')
 
     def test_mkdir_with_root_prefix(self):
         """'mkdir :/dir' -> creates /dir"""
-        self.tool.cmd_mkdir(':/dir')
+        self.tool.process_commands(['mkdir', ':/dir'])
         self.tool._mpy.mkdir.assert_called_with('/dir')
 
     def test_mkdir_nested(self):
         """'mkdir :/a/b/c' -> creates nested directories"""
-        self.tool.cmd_mkdir(':/a/b/c')
+        self.tool.process_commands(['mkdir', ':/a/b/c'])
         self.tool._mpy.mkdir.assert_called_with('/a/b/c')
 
     def test_mkdir_multiple(self):
         """'mkdir :a :b' -> creates both directories"""
-        self.tool.cmd_mkdir(':a', ':b')
+        self.tool.process_commands(['mkdir', ':a', ':b'])
         self.assertEqual(self.tool._mpy.mkdir.call_count, 2)
 
     def test_mkdir_without_prefix_invalid(self):
         """'mkdir dir' -> INVALID (missing : prefix)"""
-        from mpytool.mpytool import ParamsError
-        with self.assertRaises(ParamsError) as ctx:
-            self.tool.cmd_mkdir('dir')
-        self.assertIn(':', str(ctx.exception))
+        self.tool.process_commands(['mkdir', 'dir'])
+        self.tool._log.error.assert_called_once()
+        self.assertIn(':', str(self.tool._log.error.call_args))
 
 
 @patch('sys.stdout', new_callable=io.StringIO)
@@ -990,33 +990,33 @@ class TestLsCommand(unittest.TestCase):
         self.tool = MpyTool(self.mock_conn, verbose=None, force=True)
         self.tool._mpy = Mock()
         self.tool._mpy.ls.return_value = [('file.py', 100), ('dir', None)]
+        self.tool._log = Mock()
 
     def test_ls_cwd(self, mock_stdout):
         """'ls :' -> list CWD"""
-        self.tool.cmd_ls(':')
+        self.tool.process_commands(['ls', ':'])
         self.tool._mpy.ls.assert_called_with('')
 
     def test_ls_root(self, mock_stdout):
         """'ls :/' -> list root"""
-        self.tool.cmd_ls(':/')
+        self.tool.process_commands(['ls', ':/'])
         self.tool._mpy.ls.assert_called_with('/')
 
     def test_ls_path(self, mock_stdout):
         """'ls :/lib' -> list /lib"""
-        self.tool.cmd_ls(':/lib')
+        self.tool.process_commands(['ls', ':/lib'])
         self.tool._mpy.ls.assert_called_with('/lib')
 
     def test_ls_relative(self, mock_stdout):
         """'ls :lib' -> list lib (relative to CWD)"""
-        self.tool.cmd_ls(':lib')
+        self.tool.process_commands(['ls', ':lib'])
         self.tool._mpy.ls.assert_called_with('lib')
 
     def test_ls_without_prefix_invalid(self, mock_stdout):
         """'ls /lib' -> INVALID (missing : prefix)"""
-        from mpytool.mpytool import ParamsError
-        with self.assertRaises(ParamsError) as ctx:
-            self.tool.cmd_ls('/lib')
-        self.assertIn(':', str(ctx.exception))
+        self.tool.process_commands(['ls', '/lib'])
+        self.tool._log.error.assert_called_once()
+        self.assertIn(':', str(self.tool._log.error.call_args))
 
 
 @patch('sys.stdout', new_callable=io.StringIO)
@@ -1029,28 +1029,28 @@ class TestTreeCommand(unittest.TestCase):
         self.tool._mpy = Mock()
         # tree returns (name, size, sub_tree) where sub_tree is list of same structure or None
         self.tool._mpy.tree.return_value = ('./', 100, [('file.py', 50, None)])
+        self.tool._log = Mock()
 
     def test_tree_cwd(self, mock_stdout):
         """'tree :' -> tree of CWD"""
-        self.tool.cmd_tree(':')
+        self.tool.process_commands(['tree', ':'])
         self.tool._mpy.tree.assert_called_with('')
 
     def test_tree_root(self, mock_stdout):
         """'tree :/' -> tree of root"""
-        self.tool.cmd_tree(':/')
+        self.tool.process_commands(['tree', ':/'])
         self.tool._mpy.tree.assert_called_with('/')
 
     def test_tree_path(self, mock_stdout):
         """'tree :/lib' -> tree of /lib"""
-        self.tool.cmd_tree(':/lib')
+        self.tool.process_commands(['tree', ':/lib'])
         self.tool._mpy.tree.assert_called_with('/lib')
 
     def test_tree_without_prefix_invalid(self, mock_stdout):
         """'tree /lib' -> INVALID (missing : prefix)"""
-        from mpytool.mpytool import ParamsError
-        with self.assertRaises(ParamsError) as ctx:
-            self.tool.cmd_tree('/lib')
-        self.assertIn(':', str(ctx.exception))
+        self.tool.process_commands(['tree', '/lib'])
+        self.tool._log.error.assert_called_once()
+        self.assertIn(':', str(self.tool._log.error.call_args))
 
 
 if __name__ == "__main__":

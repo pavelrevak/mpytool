@@ -471,16 +471,6 @@ class MpyTool():
             file_info = f"{total_files} files"
         self.verbose(f"  {summary}  ({file_info})", color='green')
 
-    def cmd_ls(self, dir_name):
-        """List files on device"""
-        path = _parse_device_path(dir_name, 'ls')
-        result = self._mpy.ls(path)
-        for name, size in result:
-            if size is not None:
-                print(f'{self.format_size(size):>9} {name}')
-            else:
-                print(f'{"":9} {name}/')
-
     @classmethod
     def print_tree(cls, tree, prefix='', print_size=True, first=True, last=True):
         """Print tree of files
@@ -523,31 +513,6 @@ class MpyTool():
             print_size=print_size,
             first=False,
             last=True)
-
-    def cmd_tree(self, dir_name):
-        """Show directory tree on device"""
-        path = _parse_device_path(dir_name, 'tree')
-        tree = self._mpy.tree(path)
-        self.print_tree(tree)
-
-    def cmd_pwd(self):
-        """Print current working directory on device"""
-        cwd = self._mpy.getcwd()
-        print(cwd)
-
-    def cmd_cd(self, dir_name):
-        """Change current working directory on device"""
-        path = _parse_device_path(dir_name, 'cd')
-        self.verbose(f"CD: {path}", 2)
-        self._mpy.chdir(path)
-
-    def cmd_cat(self, *file_names):
-        """Print file contents to stdout"""
-        for file_name in file_names:
-            path = _parse_device_path(file_name, 'cat')
-            self.verbose(f"CAT: {path}", 2)
-            data = self._mpy.get(path)
-            print(data.decode('utf-8'))
 
     def _upload_file(self, data, src_path, dst_path, show_progress):
         """Upload file data to device with stats tracking and progress display"""
@@ -885,13 +850,6 @@ class MpyTool():
             self.verbose(f"MV: {src_path} -> {final_dest}", 1)
             self._mpy.rename(src_path, final_dest)
 
-    def cmd_mkdir(self, *dir_names):
-        """Create directories on device"""
-        for dir_name in dir_names:
-            path = _parse_device_path(dir_name, 'mkdir')
-            self.verbose(f"MKDIR: {path}", 1)
-            self._mpy.mkdir(path)
-
     def cmd_rm(self, *file_names):
         """Delete files/directories on device"""
         for file_name in file_names:
@@ -938,12 +896,6 @@ class MpyTool():
         terminal.run()
         self._log.info('Exiting..')
 
-    def cmd_exec(self, code):
-        self.verbose(f"EXEC: {code}", 1)
-        result = self._mpy.comm.exec(code)
-        if result:
-            print(result.decode('utf-8', 'backslashreplace'), end='')
-
     @staticmethod
     def format_size(size):
         """Format size in bytes to human readable format (like ls -h)"""
@@ -958,16 +910,6 @@ class MpyTool():
             if size < 1024 or unit == 'T':
                 return f"{size:.0f}{unit}"
         return f"{size:.0f}T"
-
-    def cmd_paths(self, dir_name=':'):
-        """Print all paths (for shell completion) - undocumented"""
-        path = _parse_device_path(dir_name, '_paths')
-        try:
-            entries = self._mpy.ls(path)
-        except (_mpytool.DirNotFound, _mpytool.MpyError):
-            return
-        for name, size in entries:
-            print(name + '/' if size is None else name)
 
     def cmd_ota(self, firmware_path):
         """OTA firmware update from local .app-bin file"""
@@ -1216,173 +1158,217 @@ class MpyTool():
                 raise _mpytool.MpyError(
                     "DTR boot not available (serial only)")
 
-    def cmd_sleep(self, seconds):
-        """Sleep for specified number of seconds"""
+    # -- dispatch methods for process_commands() --
+
+    def _dispatch_ls(self, commands, is_last_group):
+        dir_name = ':'
+        if commands:
+            dir_name = commands.pop(0)
+            # Strip trailing / except for root
+            if dir_name not in (':', ':/'):
+                dir_name = dir_name.rstrip('/')
+        path = _parse_device_path(dir_name, 'ls')
+        result = self._mpy.ls(path)
+        for name, size in result:
+            if size is not None:
+                print(f'{self.format_size(size):>9} {name}')
+            else:
+                print(f'{"":9} {name}/')
+
+    def _dispatch_tree(self, commands, is_last_group):
+        dir_name = ':'
+        if commands:
+            dir_name = commands.pop(0)
+            if dir_name not in (':', ':/'):
+                dir_name = dir_name.rstrip('/')
+        path = _parse_device_path(dir_name, 'tree')
+        tree = self._mpy.tree(path)
+        self.print_tree(tree)
+
+    def _dispatch_cat(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('missing file name for cat command')
+        for file_name in commands:
+            path = _parse_device_path(file_name, 'cat')
+            self.verbose(f"CAT: {path}", 2)
+            data = self._mpy.get(path)
+            print(data.decode('utf-8'))
+        commands.clear()
+
+    def _dispatch_mkdir(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('missing directory name for mkdir command')
+        for dir_name in commands:
+            path = _parse_device_path(dir_name, 'mkdir')
+            self.verbose(f"MKDIR: {path}", 1)
+            self._mpy.mkdir(path)
+        commands.clear()
+
+    def _dispatch_rm(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('missing file name for rm command')
+        self.cmd_rm(*commands)
+        commands.clear()
+
+    def _dispatch_pwd(self, commands, is_last_group):
+        cwd = self._mpy.getcwd()
+        print(cwd)
+
+    def _dispatch_cd(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('missing directory for cd command')
+        dir_name = commands.pop(0)
+        path = _parse_device_path(dir_name, 'cd')
+        self.verbose(f"CD: {path}", 2)
+        self._mpy.chdir(path)
+
+    def _dispatch_reset(self, commands, is_last_group):
+        mode = 'soft'
+        timeout = None
+        _reset_modes = (
+            '--machine', '--rts', '--raw',
+            '--boot', '--dtr-boot')
+        while commands and commands[0].startswith('-'):
+            flag = commands[0]
+            if flag in _reset_modes:
+                mode = commands.pop(0)[2:]  # strip --
+            elif flag in ('-t', '--timeout'):
+                commands.pop(0)
+                if commands:
+                    timeout = int(commands.pop(0))
+                else:
+                    raise ParamsError(
+                        'missing value for --timeout')
+            else:
+                raise ParamsError(
+                    f"unknown reset flag: '{flag}'")
+        if timeout and mode not in ('machine', 'rts'):
+            raise ParamsError(
+                '--timeout only with --machine or --rts')
+        has_more = bool(commands) or not is_last_group
+        reconnect = has_more if mode in (
+            'machine', 'rts') else True
+        self.cmd_reset(
+            mode=mode, reconnect=reconnect,
+            timeout=timeout)
+
+    def _dispatch_monitor(self, commands, is_last_group):
+        self.cmd_monitor()
+        commands.clear()
+
+    def _dispatch_repl(self, commands, is_last_group):
+        self.cmd_repl()
+        commands.clear()
+
+    def _dispatch_exec(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('missing code for exec command')
+        code = commands.pop(0)
+        self.verbose(f"EXEC: {code}", 1)
+        result = self._mpy.comm.exec(code)
+        if result:
+            print(result.decode('utf-8', 'backslashreplace'), end='')
+
+    def _dispatch_info(self, commands, is_last_group):
+        self.cmd_info()
+
+    def _dispatch_flash(self, commands, is_last_group):
+        if commands and commands[0] == 'read':
+            commands.pop(0)
+            if len(commands) >= 2:
+                # ESP32: flash read <label> <file>
+                label = commands.pop(0)
+                dest_path = commands.pop(0)
+                self.cmd_flash_read(dest_path, label=label)
+            elif len(commands) == 1:
+                # RP2: flash read <file>
+                dest_path = commands.pop(0)
+                self.cmd_flash_read(dest_path)
+            else:
+                raise ParamsError('flash read requires destination file')
+        elif commands and commands[0] == 'write':
+            commands.pop(0)
+            if len(commands) >= 2:
+                # ESP32: flash write <label> <file>
+                label = commands.pop(0)
+                src_path = commands.pop(0)
+                self.cmd_flash_write(src_path, label=label)
+            elif len(commands) == 1:
+                # RP2: flash write <file>
+                src_path = commands.pop(0)
+                self.cmd_flash_write(src_path)
+            else:
+                raise ParamsError('flash write requires source file')
+        elif commands and commands[0] == 'erase':
+            commands.pop(0)
+            full = False
+            label = None
+            while commands and (commands[0] == '--full' or not commands[0].startswith('-')):
+                if commands[0] == '--full':
+                    full = True
+                    commands.pop(0)
+                elif label is None:
+                    label = commands.pop(0)
+                else:
+                    break
+            self.cmd_flash_erase(label=label, full=full)
+        else:
+            self.cmd_flash()
+
+    def _dispatch_ota(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('ota requires firmware file path')
+        self.cmd_ota(commands.pop(0))
+
+    def _dispatch_sleep(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('sleep requires a number (seconds)')
+        try:
+            seconds = float(commands.pop(0))
+        except ValueError:
+            raise ParamsError('sleep requires a number (seconds)')
         self.verbose(f"SLEEP {seconds}s", 1)
         _time.sleep(seconds)
+
+    def _dispatch_cp(self, commands, is_last_group):
+        if len(commands) < 2:
+            raise ParamsError('cp requires source and destination')
+        self.cmd_cp(*commands)
+        commands.clear()
+
+    def _dispatch_mv(self, commands, is_last_group):
+        if len(commands) < 2:
+            raise ParamsError('mv requires source and destination')
+        self.cmd_mv(*commands)
+        commands.clear()
+
+    def _dispatch_paths(self, commands, is_last_group):
+        # For shell completion
+        dir_name = commands.pop(0) if commands else ':'
+        path = _parse_device_path(dir_name, '_paths')
+        try:
+            entries = self._mpy.ls(path)
+        except (_mpytool.DirNotFound, _mpytool.MpyError):
+            return
+        for name, size in entries:
+            print(name + '/' if size is None else name)
+
+    # -- command dispatching --
+
+    _COMMANDS = frozenset({
+        'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
+        'reset', 'monitor', 'repl', 'exec', 'info', 'flash',
+        'ota', 'sleep', 'cp', 'mv', '_paths',
+    })
 
     def process_commands(self, commands, is_last_group=False):
         try:
             while commands:
                 command = commands.pop(0)
-                if command == 'ls':
-                    if commands:
-                        dir_name = commands.pop(0)
-                        # Strip trailing / except for root
-                        if dir_name not in (':', ':/'):
-                            dir_name = dir_name.rstrip('/')
-                        self.cmd_ls(dir_name)
-                        continue
-                    self.cmd_ls(':')  # default: CWD
-                elif command == 'tree':
-                    if commands:
-                        dir_name = commands.pop(0)
-                        if dir_name not in (':', ':/'):
-                            dir_name = dir_name.rstrip('/')
-                        self.cmd_tree(dir_name)
-                        continue
-                    self.cmd_tree(':')  # default: CWD
-                elif command == 'cat':
-                    if commands:
-                        self.cmd_cat(*commands)
-                        break
-                    raise ParamsError('missing file name for cat command')
-                elif command == 'mkdir':
-                    if commands:
-                        self.cmd_mkdir(*commands)
-                        break
-                    raise ParamsError('missing directory name for mkdir command')
-                elif command == 'rm':
-                    if commands:
-                        self.cmd_rm(*commands)
-                        break
-                    raise ParamsError('missing file name for rm command')
-                elif command == 'pwd':
-                    self.cmd_pwd()
-                elif command == 'cd':
-                    if commands:
-                        self.cmd_cd(commands.pop(0))
-                    else:
-                        raise ParamsError('missing directory for cd command')
-                elif command == 'reset':
-                    mode = 'soft'
-                    timeout = None
-                    _reset_modes = (
-                        '--machine', '--rts', '--raw',
-                        '--boot', '--dtr-boot')
-                    while commands and commands[0].startswith('-'):
-                        flag = commands[0]
-                        if flag in _reset_modes:
-                            mode = commands.pop(0)[2:]  # strip --
-                        elif flag in ('-t', '--timeout'):
-                            commands.pop(0)
-                            if commands:
-                                timeout = int(commands.pop(0))
-                            else:
-                                raise ParamsError(
-                                    'missing value for --timeout')
-                        else:
-                            raise ParamsError(
-                                f"unknown reset flag: '{flag}'")
-                    if timeout and mode not in ('machine', 'rts'):
-                        raise ParamsError(
-                            '--timeout only with --machine or --rts')
-                    has_more = bool(commands) or not is_last_group
-                    reconnect = has_more if mode in (
-                        'machine', 'rts') else True
-                    self.cmd_reset(
-                        mode=mode, reconnect=reconnect,
-                        timeout=timeout)
-                elif command == 'monitor':
-                    self.cmd_monitor()
-                    break
-                elif command == 'repl':
-                    self.cmd_repl()
-                    break
-                elif command == 'exec':
-                    if commands:
-                        code = commands.pop(0)
-                        self.cmd_exec(code)
-                    else:
-                        raise ParamsError('missing code for exec command')
-                elif command == 'info':
-                    self.cmd_info()
-                elif command == 'flash':
-                    if commands and commands[0] == 'read':
-                        commands.pop(0)
-                        if len(commands) >= 2:
-                            # ESP32: flash read <label> <file>
-                            label = commands.pop(0)
-                            dest_path = commands.pop(0)
-                            self.cmd_flash_read(dest_path, label=label)
-                        elif len(commands) == 1:
-                            # RP2: flash read <file>
-                            dest_path = commands.pop(0)
-                            self.cmd_flash_read(dest_path)
-                        else:
-                            raise ParamsError('flash read requires destination file')
-                    elif commands and commands[0] == 'write':
-                        commands.pop(0)
-                        if len(commands) >= 2:
-                            # ESP32: flash write <label> <file>
-                            label = commands.pop(0)
-                            src_path = commands.pop(0)
-                            self.cmd_flash_write(src_path, label=label)
-                        elif len(commands) == 1:
-                            # RP2: flash write <file>
-                            src_path = commands.pop(0)
-                            self.cmd_flash_write(src_path)
-                        else:
-                            raise ParamsError('flash write requires source file')
-                    elif commands and commands[0] == 'erase':
-                        commands.pop(0)
-                        # Check for --full flag and optional label
-                        full = False
-                        label = None
-                        while commands and (commands[0] == '--full' or not commands[0].startswith('-')):
-                            if commands[0] == '--full':
-                                full = True
-                                commands.pop(0)
-                            elif label is None:
-                                label = commands.pop(0)
-                            else:
-                                break
-                        self.cmd_flash_erase(label=label, full=full)
-                    else:
-                        self.cmd_flash()
-                elif command == 'ota':
-                    if commands:
-                        firmware_path = commands.pop(0)
-                        self.cmd_ota(firmware_path)
-                    else:
-                        raise ParamsError('ota requires firmware file path')
-                elif command == 'sleep':
-                    if commands:
-                        try:
-                            seconds = float(commands.pop(0))
-                        except ValueError:
-                            raise ParamsError('sleep requires a number (seconds)')
-                        self.cmd_sleep(seconds)
-                    else:
-                        raise ParamsError('sleep requires a number (seconds)')
-                elif command == 'cp':
-                    if len(commands) >= 2:
-                        self.cmd_cp(*commands)
-                        break
-                    raise ParamsError('cp requires source and destination')
-                elif command == 'mv':
-                    if len(commands) >= 2:
-                        self.cmd_mv(*commands)
-                        break
-                    raise ParamsError('mv requires source and destination')
-                elif command == '_paths':
-                    # Undocumented: for shell completion
-                    if commands:
-                        self.cmd_paths(commands.pop(0))
-                    else:
-                        self.cmd_paths(':')  # default: CWD
-                else:
+                if command not in self._COMMANDS:
                     raise ParamsError(f"unknown command: '{command}'")
+                dispatch = getattr(self, f'_dispatch_{command.lstrip("_")}')
+                dispatch(commands, is_last_group)
         except (_mpytool.MpyError, _mpytool.ConnError) as err:
             self._log.error(err)
         try:
