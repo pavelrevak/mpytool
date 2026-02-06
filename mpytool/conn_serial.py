@@ -21,9 +21,13 @@ class ConnSerial(_conn.Conn):
         if not hasattr(self._serial, 'fd'):
             self._has_data = self._has_data_polling
 
-    def __del__(self):
+    def close(self):
         if self._serial:
             self._serial.close()
+            self._serial = None
+
+    def __del__(self):
+        self.close()
 
     @property
     def fd(self):

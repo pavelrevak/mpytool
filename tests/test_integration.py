@@ -31,6 +31,7 @@ class TestDeviceConnection(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_connection_established(self):
         """Test that connection is established"""
@@ -64,6 +65,7 @@ class TestFileOperations(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_mkdir(self):
         """Test creating directory"""
@@ -143,6 +145,7 @@ class TestExec(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_exec_simple(self):
         """Test simple code execution"""
@@ -188,7 +191,7 @@ class TestReplRecovery(unittest.TestCase):
         # Close connection WITHOUT exiting raw REPL
         # This simulates a crash or unexpected disconnect
         del mpy1
-        del conn1
+        conn1.close()
 
         # Second connection - device is still in raw REPL mode
         conn2 = ConnSerial(port=DEVICE_PORT, baudrate=115200)
@@ -201,6 +204,7 @@ class TestReplRecovery(unittest.TestCase):
             self.assertEqual(result, 2)
         finally:
             mpy2.comm.exit_raw_repl()
+            conn2.close()
 
 
 @requires_device
@@ -216,6 +220,7 @@ class TestDeviceInfo(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_get_platform(self):
         """Test getting platform info"""
@@ -271,6 +276,7 @@ class TestCwdOperations(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def setUp(self):
         # Always start from root
@@ -420,6 +426,7 @@ class TestCpCommand(unittest.TestCase):
         if os.path.exists(cls.LOCAL_DIR):
             shutil.rmtree(cls.LOCAL_DIR)
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_upload_file(self):
         """Test cp local file to remote"""
@@ -524,6 +531,7 @@ class TestMvCommand(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_rename_file(self):
         """Test mv rename file"""
@@ -578,6 +586,7 @@ class TestDeleteCommand(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_delete_file(self):
         """Test rm single file"""
@@ -649,6 +658,7 @@ class TestSkipUnchangedFiles(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_hashfile(self):
         """Test hashfile method returns correct SHA256"""
@@ -712,6 +722,7 @@ class TestEncodingAndCompression(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_text_upload_uses_raw(self):
         """Test that text files use raw encoding"""
@@ -792,6 +803,7 @@ class TestCpWithFlags(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_cp_with_combined_flags(self):
         """Test cp -fz with combined flags"""
@@ -845,6 +857,7 @@ class TestSleepCommand(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_sleep_delays_execution(self):
         """Test that sleep actually delays execution"""
@@ -886,6 +899,7 @@ class TestSpecialCharacterFilenames(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_filename_with_equals_sign(self):
         """Test file with equals sign in name (mpremote #18658)"""
@@ -979,6 +993,7 @@ class TestUnicodeFilenames(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_czech_filename(self):
         """Test file with Czech characters in name"""
@@ -1081,6 +1096,7 @@ class TestCpSpecialFilenames(unittest.TestCase):
         if os.path.exists(cls.LOCAL_DIR):
             shutil.rmtree(cls.LOCAL_DIR)
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_upload_file_with_equals(self):
         """Test cp upload file with equals sign (mpremote #18658)"""
@@ -1182,6 +1198,7 @@ class TestErrorMessages(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_get_nonexistent_file(self):
         """Test get on nonexistent file raises FileNotFound"""
@@ -1236,6 +1253,7 @@ class TestLargeFileTransfer(unittest.TestCase):
         except Exception:
             pass
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_upload_10kb_file(self):
         """Test upload of 10KB file"""
@@ -1285,6 +1303,7 @@ class TestPartitions(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_partitions_list(self):
         """Test listing partitions on ESP32"""
@@ -1338,6 +1357,7 @@ class TestFlashRP2(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_flash_info(self):
         """Test getting flash info on RP2"""
@@ -1392,6 +1412,7 @@ class TestRawPasteMode(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.comm.exit_raw_repl()
+        cls.conn.close()
 
     def test_01_raw_paste_simple(self):
         """Test simple code execution via raw-paste"""

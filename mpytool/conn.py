@@ -116,6 +116,9 @@ class Conn():
         line = self.read_until(b'\n', timeout)
         return line.strip(b'\r')
 
+    def close(self):
+        """Close connection"""
+
     def hard_reset(self):
         """Hardware reset (only available on serial connections)"""
         raise NotImplementedError("Hardware reset not available on this connection")

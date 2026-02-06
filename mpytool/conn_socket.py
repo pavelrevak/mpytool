@@ -30,9 +30,13 @@ class ConnSocket(_conn.Conn):
         if log:
             log.info("connected")
 
-    def __del__(self):
+    def close(self):
         if self._socket:
             self._socket.close()
+            self._socket = None
+
+    def __del__(self):
+        self.close()
 
     @property
     def fd(self):
