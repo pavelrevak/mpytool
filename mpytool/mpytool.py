@@ -1397,7 +1397,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
     --boot                        enter bootloader (machine.bootloader)
     --dtr-boot                    bootloader via DTR/RTS (ESP32)
   monitor                       print device output (Ctrl+C to stop)
-  repl                          interactive REPL [Unix only]
+  repl                          interactive REPL
   exec {code}                   execute Python code
   info                          show device information
   flash                         show flash/partitions info

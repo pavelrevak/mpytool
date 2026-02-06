@@ -432,13 +432,11 @@ Working only with MicroPython boards, not with CircuitPython
 
 - Linux
 - MacOS
-- Windows (most commands work; `repl` is not available)
+- Windows
 
 ### Windows notes
 
-Most commands work on Windows: `ls`, `tree`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `exec`, `info`, `reset`, `flash`, `ota`, `sleep`, `cd`, `pwd`, `monitor`.
-
-Not available on Windows: `repl` (requires Unix terminal handling).
+All commands work on Windows including `repl`.
 
 **CMD.EXE**: ANSI colors are disabled, progress indicator works. Log messages use text prefixes (`E:`, `W:`, `I:`, `D:`).
 
