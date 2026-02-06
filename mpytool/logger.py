@@ -28,11 +28,13 @@ class SimpleColorLogger():
     def __init__(self, loglevel=1, verbose_level=0):
         self._loglevel = loglevel
         self._verbose_level = verbose_level
-        self._is_tty = (
-            _sys.stderr.isatty()
+        self._is_tty = _sys.stderr.isatty()
+        self._color = (
+            self._is_tty
             and _os.environ.get('NO_COLOR') is None
             and _os.environ.get('TERM') != 'dumb'
             and _os.environ.get('CI') is None
+            and (_sys.platform != 'win32' or _os.environ.get('TERM'))
         )
 
     def log(self, msg):
@@ -42,7 +44,7 @@ class SimpleColorLogger():
         if args:
             msg = msg % args
         if self._loglevel >= 1:
-            if self._is_tty:
+            if self._color:
                 self.log(f"{self._BOLD_RED}{msg}{self._RESET}")
             else:
                 self.log(f"E: {msg}")
@@ -51,7 +53,7 @@ class SimpleColorLogger():
         if args:
             msg = msg % args
         if self._loglevel >= 2:
-            if self._is_tty:
+            if self._color:
                 self.log(f"{self._BOLD_YELLOW}{msg}{self._RESET}")
             else:
                 self.log(f"W: {msg}")
@@ -60,7 +62,7 @@ class SimpleColorLogger():
         if args:
             msg = msg % args
         if self._loglevel >= 3:
-            if self._is_tty:
+            if self._color:
                 self.log(f"{self._BOLD_MAGENTA}{msg}{self._RESET}")
             else:
                 self.log(f"I: {msg}")
@@ -69,7 +71,7 @@ class SimpleColorLogger():
         if args:
             msg = msg % args
         if self._loglevel >= 4:
-            if self._is_tty:
+            if self._color:
                 self.log(f"{self._BOLD_BLUE}{msg}{self._RESET}")
             else:
                 self.log(f"D: {msg}")
@@ -81,7 +83,7 @@ class SimpleColorLogger():
         # Skip progress updates (overwrite without newline) in non-TTY mode
         if overwrite and not self._is_tty and end != '\n':
             return
-        color_code = self.COLORS.get(color, self._BOLD_GREEN) if self._is_tty else ''
-        reset_code = self._RESET if self._is_tty else ''
-        clear = f'\r{self._CLEAR_LINE}' if self._is_tty and overwrite else ''
+        color_code = self.COLORS.get(color, self._BOLD_GREEN) if self._color else ''
+        reset_code = self._RESET if self._color else ''
+        clear = f'\r{self._CLEAR_LINE}' if self._color and overwrite else ('\r' if self._is_tty and overwrite else '')
         print(f"{clear}{color_code}{msg}{reset_code}", end=end, file=_sys.stderr, flush=True)
