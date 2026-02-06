@@ -17,6 +17,9 @@ class ConnSerial(_conn.Conn):
             self._serial = None
             raise _conn.ConnError(
                 f"Error opening serial port {serial_config['port']}") from err
+        # Windows: pyserial has no fd, select() works only with sockets
+        if not hasattr(self._serial, 'fd'):
+            self._has_data = self._has_data_polling
 
     def __del__(self):
         if self._serial:
@@ -25,6 +28,21 @@ class ConnSerial(_conn.Conn):
     @property
     def fd(self):
         return self._serial.fd if self._serial else None
+
+    def _has_data_polling(self, timeout=0):
+        """Check if data is available using in_waiting (Windows)"""
+        try:
+            if self._serial.in_waiting > 0:
+                return True
+            if timeout > 0:
+                deadline = _time.time() + timeout
+                while _time.time() < deadline:
+                    if self._serial.in_waiting > 0:
+                        return True
+                    _time.sleep(0.001)
+            return False
+        except OSError:
+            return False
 
     def _read_available(self):
         """Read available data from serial port"""

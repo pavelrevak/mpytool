@@ -2,6 +2,8 @@
 
 import sys
 
+from serial.tools.list_ports import comports as _comports
+
 
 def is_remote_path(path: str) -> bool:
     """Check if path is remote (starts with :)"""
@@ -74,7 +76,9 @@ def detect_serial_ports() -> list[str]:
             "/dev/ttyACM*",
             "/dev/ttyUSB*",
         ]
-    # Windows not yet supported
+    elif sys.platform == "win32":
+        return sorted(
+            p.device for p in _comports() if p.vid is not None)
 
     ports = []
     for pattern in patterns:

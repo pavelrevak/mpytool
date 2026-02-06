@@ -149,11 +149,13 @@ class TestDetectSerialPorts(unittest.TestCase):
         self.assertIn("/dev/ttyUSB0", ports)
 
     @patch("sys.platform", "win32")
-    @patch("glob.glob")
-    def test_windows_not_supported(self, mock_glob):
+    @patch("mpytool.utils._comports")
+    def test_windows_comports(self, mock_comports):
+        mock_port1 = type('PortInfo', (), {'device': 'COM3', 'vid': 0x2E8A})()
+        mock_port2 = type('PortInfo', (), {'device': 'COM1', 'vid': None})()
+        mock_comports.return_value = [mock_port1, mock_port2]
         ports = detect_serial_ports()
-        self.assertEqual(ports, [])
-        mock_glob.assert_not_called()
+        self.assertEqual(ports, ['COM3'])
 
     @patch("sys.platform", "linux")
     @patch("glob.glob")
