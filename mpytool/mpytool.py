@@ -30,7 +30,7 @@ def _join_remote_path(base, name):
     if base == '/':
         return '/' + name
     elif base:
-        return base + '/' + name
+        return base.rstrip('/') + '/' + name
     else:
         return name
 
@@ -258,23 +258,24 @@ class MpyTool():
             # For files, add basename if dst_path ends with /
             basename = _os.path.basename(src_path)
             if basename and not _os.path.basename(dst_path):
-                dst_path = _os.path.join(dst_path, basename)
+                dst_path = _join_remote_path(dst_path, basename)
             files[dst_path] = _os.path.getsize(src_path)
         elif _os.path.isdir(src_path):
             # For directories, mimic _put_dir behavior
             if add_src_basename:
                 basename = _os.path.basename(_os.path.abspath(src_path))
                 if basename:
-                    dst_path = _os.path.join(dst_path, basename)
+                    dst_path = _join_remote_path(dst_path, basename)
             for root, dirs, filenames in _os.walk(src_path, topdown=True):
                 dirs[:] = [d for d in dirs if not self._is_excluded(d)]
                 filenames = [f for f in filenames if not self._is_excluded(f)]
-                rel_path = _os.path.relpath(root, src_path)
+                rel_path = _os.path.relpath(root, src_path).replace(_os.sep, '/')
                 if rel_path == '.':
                     rel_path = ''
                 for file_name in filenames:
                     spath = _os.path.join(root, file_name)
-                    dpath = _os.path.join(dst_path, rel_path, file_name) if rel_path else _os.path.join(dst_path, file_name)
+                    dpath = _join_remote_path(
+                        _join_remote_path(dst_path, rel_path), file_name)
                     files[dpath] = _os.path.getsize(spath)
         return files
 
@@ -560,21 +561,21 @@ class MpyTool():
             files = [f for f in files if not self._is_excluded(f)]
             if not files:
                 continue
-            rel_path = _os.path.relpath(path, src_path)
-            rel_path = _os.path.join(dst_path, '' if rel_path == '.' else rel_path)
-            if rel_path and rel_path not in created_dirs:
-                self.verbose(f'MKDIR: {rel_path}', 2)
-                self._mpy.mkdir(rel_path)
-                created_dirs.add(rel_path)
+            rel_path = _os.path.relpath(path, src_path).replace(_os.sep, '/')
+            remote_dir = _join_remote_path(dst_path, '' if rel_path == '.' else rel_path)
+            if remote_dir and remote_dir not in created_dirs:
+                self.verbose(f'MKDIR: {remote_dir}', 2)
+                self._mpy.mkdir(remote_dir)
+                created_dirs.add(remote_dir)
             for file_name in files:
                 spath = _os.path.join(path, file_name)
                 with open(spath, 'rb') as f:
-                    self._upload_file(f.read(), spath, _os.path.join(rel_path, file_name), show_progress)
+                    self._upload_file(f.read(), spath, _join_remote_path(remote_dir, file_name), show_progress)
 
     def _put_file(self, src_path, dst_path, show_progress=True):
         basename = _os.path.basename(src_path)
         if basename and not _os.path.basename(dst_path):
-            dst_path = _os.path.join(dst_path, basename)
+            dst_path = _join_remote_path(dst_path, basename)
         self.verbose(f"PUT FILE: {src_path} -> {dst_path}", 2)
         with open(src_path, 'rb') as f:
             data = f.read()
