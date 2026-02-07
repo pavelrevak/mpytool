@@ -37,6 +37,37 @@ class TestCmdError(unittest.TestCase):
     def test_is_mpy_error(self):
         self.assertTrue(issubclass(CmdError, MpyError))
 
+    def test_friendly_oserror_no_space(self):
+        err = CmdError("f.write(b'data')", b"", b"Traceback (most recent call last):\n  File \"<stdin>\", line 1, in <module>\nOSError: 28")
+        msg = str(err)
+        self.assertIn("No space left on device", msg)
+        self.assertIn("errno 28", msg)
+        self.assertNotIn("Traceback", msg)
+
+    def test_friendly_oserror_enoent(self):
+        err = CmdError("open('x')", b"", b"OSError: 2")
+        msg = str(err)
+        self.assertIn("No such file or directory", msg)
+        self.assertIn("errno 2", msg)
+
+    def test_friendly_oserror_read_only(self):
+        err = CmdError("f.write(b'')", b"", b"OSError: 30")
+        msg = str(err)
+        self.assertIn("Read-only filesystem", msg)
+
+    def test_unknown_oserror_shows_full(self):
+        err = CmdError("cmd", b"", b"OSError: 999")
+        msg = str(err)
+        self.assertIn("cmd", msg)
+        self.assertIn("OSError: 999", msg)
+
+    def test_non_oserror_shows_full(self):
+        err = CmdError("cmd", b"result", b"ValueError: bad")
+        msg = str(err)
+        self.assertIn("cmd", msg)
+        self.assertIn("result", msg)
+        self.assertIn("ValueError: bad", msg)
+
 
 class TestPathErrors(unittest.TestCase):
     def test_path_not_found(self):

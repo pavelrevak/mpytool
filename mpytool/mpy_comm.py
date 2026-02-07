@@ -20,13 +20,42 @@ class MpyError(Exception):
 
 class CmdError(MpyError):
     """Command execution error on device"""
+
+    # Known MicroPython OSError codes
+    _OSERROR_MESSAGES = {
+        '2': 'No such file or directory',
+        '13': 'Permission denied',
+        '17': 'File exists',
+        '19': 'No such device',
+        '21': 'Is a directory',
+        '22': 'Invalid argument',
+        '28': 'No space left on device',
+        '30': 'Read-only filesystem',
+        '110': 'Connection timed out',
+        '113': 'No route to host',
+    }
+
     def __init__(self, cmd, result, error):
         self._cmd = cmd
         self._result = result
         self._error = error.decode('utf-8')
         super().__init__(self.__str__())
 
+    def _friendly_error(self):
+        """Translate known OSError codes to human-readable messages"""
+        import re
+        match = re.search(r'OSError: (\d+)', self._error)
+        if match:
+            code = match.group(1)
+            msg = self._OSERROR_MESSAGES.get(code)
+            if msg:
+                return f'OSError: {msg} (errno {code})'
+        return None
+
     def __str__(self):
+        friendly = self._friendly_error()
+        if friendly:
+            return friendly
         res = f'Command:\n  {self._cmd}\n'
         if self._result:
             res += f'Result:\n  {self._result}\n'

@@ -36,8 +36,16 @@ class SimpleColorLogger():
             and _os.environ.get('CI') is None
             and (_sys.platform != 'win32' or _os.environ.get('TERM'))
         )
+        self._pending_line = False  # True when last output had no trailing newline
+
+    def _clear_pending(self):
+        """End pending progress line before printing a new message"""
+        if self._pending_line:
+            print(file=_sys.stderr)
+            self._pending_line = False
 
     def log(self, msg):
+        self._clear_pending()
         print(msg, file=_sys.stderr)
 
     def error(self, msg, *args):
@@ -83,7 +91,10 @@ class SimpleColorLogger():
         # Skip progress updates (overwrite without newline) in non-TTY mode
         if overwrite and not self._is_tty and end != '\n':
             return
+        if not overwrite:
+            self._clear_pending()
         color_code = self.COLORS.get(color, self._BOLD_GREEN) if self._color else ''
         reset_code = self._RESET if self._color else ''
         clear = f'\r{self._CLEAR_LINE}' if self._color and overwrite else ('\r' if self._is_tty and overwrite else '')
         print(f"{clear}{color_code}{msg}{reset_code}", end=end, file=_sys.stderr, flush=True)
+        self._pending_line = (end != '\n')

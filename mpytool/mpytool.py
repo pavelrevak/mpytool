@@ -119,7 +119,10 @@ class MpyTool():
         chunk_str = f"{chunk // 1024}K" if chunk >= 1024 else str(chunk)
         compress = self._mpy._detect_deflate() if self._compress is None else self._compress
         compress_str = "on" if compress else "off"
-        self.verbose(f"COPY (chunk: {chunk_str}, compress: {compress_str})", 1)
+        if self._verbose >= 2:
+            self.verbose(f"COPY (chunk: {chunk_str}, compress: {compress_str})")
+        else:
+            self.verbose("COPY")
 
     @staticmethod
     def _format_local_path(path):
@@ -157,7 +160,7 @@ class MpyTool():
         return info
 
     def _format_line(self, status, total, encodings=None):
-        """Format progress/skip line: [2/5] 100% 24.1K source -> dest (base64)"""
+        """Format verbose line: [2/5] 100% 24.1K source -> dest (base64)"""
         size_str = self.format_size(total)
         multi = self._progress_total_files > 1
         if multi:
@@ -170,6 +173,22 @@ class MpyTool():
         enc = self._format_encoding_info(encodings, pad=multi) if encodings else (" " * self._ENC_WIDTH if multi else "")
         return f"{prefix:>7} {status} {size_str:>5} {self._progress_src:<{src_w}} -> {self._progress_dst:<{dst_w}}{enc}"
 
+    def _format_compact_progress(self, status, total):
+        """Format compact progress line: [2/5]  45% 24.1K source"""
+        size_str = self.format_size(total)
+        multi = self._progress_total_files > 1
+        if multi:
+            width = len(str(self._progress_total_files))
+            prefix = f"[{self._progress_current_file:>{width}}/{self._progress_total_files}]"
+        else:
+            prefix = ""
+        return f"{prefix:>7} {status} {size_str:>5} {self._progress_src}"
+
+    def _format_compact_complete(self, total):
+        """Format compact complete line: 24.1K source -> dest"""
+        size_str = self.format_size(total)
+        return f" {size_str:>5} {self._progress_src} -> {self._progress_dst}"
+
     def _format_progress_line(self, percent, total, encodings=None):
         return self._format_line(f"{percent:3d}%", total, encodings)
 
@@ -179,19 +198,22 @@ class MpyTool():
     def _progress_callback(self, transferred, total):
         """Callback for file transfer progress"""
         percent = (transferred * 100 // total) if total > 0 else 100
-        line = self._format_progress_line(percent, total)
+        if self._verbose >= 2:
+            line = self._format_progress_line(percent, total)
+        else:
+            line = self._format_compact_progress(f"{percent:3d}%", total)
         if self._is_debug:
-            # Debug mode: always newlines
             self.verbose(line, color='cyan')
         else:
-            # Normal mode: overwrite line
             self.verbose(line, color='cyan', end='', overwrite=True)
 
     def _progress_complete(self, total, encodings=None):
         """Mark current file as complete"""
-        line = self._format_progress_line(100, total, encodings)
+        if self._verbose >= 2:
+            line = self._format_progress_line(100, total, encodings)
+        else:
+            line = self._format_compact_complete(total)
         if self._is_debug:
-            # Already printed with newline in callback
             pass
         else:
             self.verbose(line, color='cyan', overwrite=True)
@@ -267,8 +289,8 @@ class MpyTool():
                 if basename:
                     dst_path = _join_remote_path(dst_path, basename)
             for root, dirs, filenames in _os.walk(src_path, topdown=True):
-                dirs[:] = [d for d in dirs if not self._is_excluded(d)]
-                filenames = [f for f in filenames if not self._is_excluded(f)]
+                dirs[:] = sorted(d for d in dirs if not self._is_excluded(d))
+                filenames = sorted(f for f in filenames if not self._is_excluded(f))
                 rel_path = _os.path.relpath(root, src_path).replace(_os.sep, '/')
                 if rel_path == '.':
                     rel_path = ''
@@ -467,10 +489,10 @@ class MpyTool():
             parts.append(f"speedup {speedup:.1f}x")
         summary = "  ".join(parts)
         if self._skipped_files > 0:
-            file_info = f"{self._stats_transferred_files} transferred, {self._skipped_files} skipped"
+            file_info = f"{self._stats_transferred_files} transferred, {self._skipped_files} unchanged"
         else:
             file_info = f"{total_files} files"
-        self.verbose(f"  {summary}  ({file_info})", color='green')
+        self.verbose(f" {summary}  ({file_info})", color='green')
 
     @classmethod
     def print_tree(cls, tree, prefix='', print_size=True, first=True, last=True):
@@ -519,18 +541,26 @@ class MpyTool():
         """Upload file data to device with stats tracking and progress display"""
         file_size = len(data)
         self._stats_total_bytes += file_size
+        if show_progress and self._verbose >= 1:
+            self._progress_current_file += 1
+            self._set_progress_info(src_path, dst_path, False, True)
+            # Show CHCK status during checksum verification
+            if self._verbose >= 2:
+                line = self._format_line("CHCK", file_size)
+            else:
+                line = self._format_compact_progress("CHCK", file_size)
+            self.verbose(line, color='cyan', end='', overwrite=True)
         if not self._file_needs_update(data, dst_path):
             self._skipped_files += 1
-            if show_progress and self._verbose >= 1:
-                self._progress_current_file += 1
-                self._set_progress_info(src_path, dst_path, False, True)
-                self.verbose(self._format_skip_line(file_size), color='yellow')
+            if show_progress and self._verbose >= 2:
+                self.verbose(self._format_skip_line(file_size), color='yellow', overwrite=True)
+            elif show_progress and self._verbose >= 1:
+                # Erase CHCK line (next file's progress will overwrite)
+                self.verbose("", end='', overwrite=True)
             return False  # skipped
         self._stats_transferred_bytes += file_size
         self._stats_transferred_files += 1
         if show_progress and self._verbose >= 1:
-            self._progress_current_file += 1
-            self._set_progress_info(src_path, dst_path, False, True)
             encodings, wire = self._mpy.put(data, dst_path, self._progress_callback, self._compress)
             self._stats_wire_bytes += wire
             self._progress_complete(file_size, encodings)
@@ -557,8 +587,8 @@ class MpyTool():
         self.verbose(f"PUT DIR: {src_path} -> {dst_path}", 2)
         created_dirs = set()
         for path, dirs, files in _os.walk(src_path, topdown=True):
-            dirs[:] = [d for d in dirs if not self._is_excluded(d)]
-            files = [f for f in files if not self._is_excluded(f)]
+            dirs[:] = sorted(d for d in dirs if not self._is_excluded(d))
+            files = sorted(f for f in files if not self._is_excluded(f))
             if not files:
                 continue
             rel_path = _os.path.relpath(path, src_path).replace(_os.sep, '/')
@@ -598,7 +628,7 @@ class MpyTool():
             self._progress_current_file += 1
             self._set_progress_info(src_path, dst_path, True, False)
             data = self._mpy.get(src_path, self._progress_callback)
-            self._progress_complete(len(data))
+            self._progress_complete(len(data), None)
         else:
             data = self._mpy.get(src_path)
         file_size = len(data)
