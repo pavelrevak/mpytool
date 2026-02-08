@@ -540,15 +540,20 @@ def _mt_pfind(label):
             dict with keys:
                 'platform': platform name (e.g. 'esp32')
                 'version': MicroPython version string
-                'impl': implementation name (e.g. 'micropython')
+                'impl_name': implementation name (e.g. 'micropython')
+                'impl_version': implementation version tuple (e.g. (1, 24, 0))
                 'machine': machine description (or None)
+                'mpy_ver': mpy bytecode major version (e.g. 6) or None
+                'mpy_sub': mpy bytecode sub-version (e.g. 3) or None
         """
         self.import_module('sys')
         self.import_module('os')
 
         platform = self._mpy_comm.exec_eval("repr(sys.platform)")
         version = self._mpy_comm.exec_eval("repr(sys.version)")
-        impl = self._mpy_comm.exec_eval("repr(sys.implementation.name)")
+        impl_name = self._mpy_comm.exec_eval("repr(sys.implementation.name)")
+        impl_version = self._mpy_comm.exec_eval(
+            "tuple(sys.implementation.version)")
 
         try:
             uname = self._mpy_comm.exec_eval("tuple(os.uname())")
@@ -556,11 +561,22 @@ def _mt_pfind(label):
         except _mpy_comm.CmdError:
             machine = None
 
+        try:
+            mpy_int = self._mpy_comm.exec_eval("sys.implementation._mpy")
+            mpy_ver = mpy_int & 0xFF
+            mpy_sub = (mpy_int >> 8) & 3
+        except (_mpy_comm.CmdError, AttributeError):
+            mpy_ver = None
+            mpy_sub = None
+
         return {
             'platform': platform,
             'version': version,
-            'impl': impl,
+            'impl_name': impl_name,
+            'impl_version': impl_version,
             'machine': machine,
+            'mpy_ver': mpy_ver,
+            'mpy_sub': mpy_sub,
         }
 
     def memory(self):

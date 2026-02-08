@@ -1117,7 +1117,12 @@ class MpyTool():
         plat = self._mpy.platform()
         print(f"Platform:    {plat['platform']}")
         print(f"Version:     {plat['version']}")
-        print(f"Impl:        {plat['impl']}")
+        ver = list(plat['impl_version'])
+        while ver and not ver[-1] and ver[-1] != 0:
+            ver.pop()
+        impl_ver = '.'.join(str(v) for v in ver)
+        mpy_info = f", mpy v{plat['mpy_ver']}.{plat['mpy_sub']}" if plat['mpy_ver'] is not None else ""
+        print(f"Impl:        {plat['impl_name']} {impl_ver}{mpy_info}")
         if plat['machine']:
             print(f"Machine:     {plat['machine']}")
         uid = self._mpy.unique_id()
