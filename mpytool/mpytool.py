@@ -161,7 +161,7 @@ class MpyTool():
 
     def _format_line(self, status, total, encodings=None):
         """Format verbose line: [2/5] 100% 24.1K source -> dest (base64)"""
-        size_str = self.format_size(total)
+        size_str = _utils.format_size(total)
         multi = self._progress_total_files > 1
         if multi:
             width = len(str(self._progress_total_files))
@@ -175,7 +175,7 @@ class MpyTool():
 
     def _format_compact_progress(self, status, total):
         """Format compact progress line: [2/5]  45% 24.1K source"""
-        size_str = self.format_size(total)
+        size_str = _utils.format_size(total)
         multi = self._progress_total_files > 1
         if multi:
             width = len(str(self._progress_total_files))
@@ -186,7 +186,7 @@ class MpyTool():
 
     def _format_compact_complete(self, total):
         """Format compact complete line: 24.1K source -> dest"""
-        size_str = self.format_size(total)
+        size_str = _utils.format_size(total)
         return f" {size_str:>5} {self._progress_src} -> {self._progress_dst}"
 
     def _format_progress_line(self, percent, total, encodings=None):
@@ -477,10 +477,10 @@ class MpyTool():
         wire = self._stats_wire_bytes
         total_files = self._stats_transferred_files + self._skipped_files
         parts = []
-        parts.append(f"{self.format_size(transferred).strip()}")
+        parts.append(f"{_utils.format_size(transferred).strip()}")
         if elapsed > 0:
             speed = transferred / elapsed
-            parts.append(f"{self.format_size(speed).strip()}/s")
+            parts.append(f"{_utils.format_size(speed).strip()}/s")
         parts.append(f"{elapsed:.1f}s")
         # Combined speedup: total file size vs actual wire bytes
         # Includes savings from: skipped files, base64 encoding, compression
@@ -512,7 +512,7 @@ class MpyTool():
         display_name = '.' if first and name in ('', '.') else name
         line = ''
         if print_size:
-            line += f'{cls.format_size(size):>9} '
+            line += f'{_utils.format_size(size):>9} '
         line += prefix + this_prefix + display_name + sufix
         print(line)
         if not sub_tree:
@@ -927,20 +927,6 @@ class MpyTool():
         terminal.run()
         self._log.info('Exiting..')
 
-    @staticmethod
-    def format_size(size):
-        """Format size in bytes to human readable format (like ls -h)"""
-        if size < 1024:
-            return f"{int(size)}B"
-        for unit in ('K', 'M', 'G', 'T'):
-            size /= 1024
-            if size < 10:
-                return f"{size:.2f}{unit}"
-            if size < 100:
-                return f"{size:.1f}{unit}"
-            if size < 1024 or unit == 'T':
-                return f"{size:.0f}{unit}"
-        return f"{size:.0f}T"
 
     def cmd_ota(self, firmware_path):
         """OTA firmware update from local .app-bin file"""
@@ -952,12 +938,12 @@ class MpyTool():
             firmware = f.read()
 
         fw_size = len(firmware)
-        self.verbose(f"  Firmware: {self.format_size(fw_size)}", 1)
+        self.verbose(f"  Firmware: {_utils.format_size(fw_size)}", 1)
         info = self._mpy.partitions()
         if not info['next_ota']:
             raise _mpytool.MpyError("OTA not available (no OTA partitions)")
 
-        self.verbose(f"  Target: {info['next_ota']} ({self.format_size(info['next_ota_size'])})", 1)
+        self.verbose(f"  Target: {info['next_ota']} ({_utils.format_size(info['next_ota_size'])})", 1)
         use_compress = self._mpy._detect_deflate()
         chunk_size = self._mpy._detect_chunk_size()
         chunk_str = f"{chunk_size // 1024}K" if chunk_size >= 1024 else str(chunk_size)
@@ -969,7 +955,7 @@ class MpyTool():
                 pct = transferred * 100 // total
                 elapsed = _time.time() - start_time
                 speed = transferred / elapsed / 1024 if elapsed > 0 else 0
-                line = f"  Writing: {pct:3d}% {self.format_size(transferred):>6} / {self.format_size(total)}  {speed:.1f} KB/s"
+                line = f"  Writing: {pct:3d}% {_utils.format_size(transferred):>6} / {_utils.format_size(total)}  {speed:.1f} KB/s"
                 self.verbose(line, color='cyan', end='', overwrite=True)
 
         result = self._mpy.ota_write(firmware, progress_callback, self._compress)
@@ -977,7 +963,7 @@ class MpyTool():
         speed = fw_size / elapsed / 1024 if elapsed > 0 else 0
         ratio = fw_size / result['wire_bytes'] if result['wire_bytes'] > 0 else 1
         self.verbose(
-            f"  Writing: 100% {self.format_size(fw_size):>6}  {elapsed:.1f}s  {speed:.1f} KB/s  ratio {ratio:.2f}x",
+            f"  Writing: 100% {_utils.format_size(fw_size):>6}  {elapsed:.1f}s  {speed:.1f} KB/s  ratio {ratio:.2f}x",
             color='cyan', overwrite=True
         )
 
@@ -999,13 +985,13 @@ class MpyTool():
         """Show RP2 flash information"""
         info = self._mpy.flash_info()
         print(f"Platform:    RP2")
-        print(f"Flash size:  {self.format_size(info['size'])}")
+        print(f"Flash size:  {_utils.format_size(info['size'])}")
         print(f"Block size:  {info['block_size']} bytes")
         print(f"Block count: {info['block_count']}")
         fs_line = f"Filesystem:  {info['filesystem']}"
         # For FAT, show cluster size if detected from magic
         if info.get('fs_block_size'):
-            fs_line += f" (cluster: {self.format_size(info['fs_block_size'])})"
+            fs_line += f" (cluster: {_utils.format_size(info['fs_block_size'])})"
         if info['filesystem'] == 'unknown' and info.get('magic'):
             magic_hex = ' '.join(f'{b:02x}' for b in info['magic'])
             fs_line += f"  (magic: {magic_hex})"
@@ -1018,7 +1004,7 @@ class MpyTool():
                 pct = (transferred / total * 100) if total > 0 else 0
                 prefix = f"{action} {label}" if label else action
                 self.verbose(
-                    f"  {prefix}: {pct:.0f}% {self.format_size(transferred)} / {self.format_size(total)}",
+                    f"  {prefix}: {pct:.0f}% {_utils.format_size(transferred)} / {_utils.format_size(total)}",
                     color='cyan', end='', overwrite=True)
         return progress
 
@@ -1037,7 +1023,7 @@ class MpyTool():
         with open(dest_path, 'wb') as f:
             f.write(data)
 
-        self.verbose(f"  saved {self.format_size(len(data))} to {dest_path}", 1, color='green')
+        self.verbose(f"  saved {_utils.format_size(len(data))} to {dest_path}", 1, color='green')
 
     def cmd_flash_write(self, src_path, label=None):
         """Write file content to flash/partition"""
@@ -1059,7 +1045,7 @@ class MpyTool():
 
         target = label or "flash"
         comp_info = " (compressed)" if result.get('compressed') else ""
-        self.verbose(f"  wrote {self.format_size(result['written'])} to {target}{comp_info}", 1, color='green')
+        self.verbose(f"  wrote {_utils.format_size(result['written'])} to {target}{comp_info}", 1, color='green')
 
     def cmd_flash_erase(self, label=None, full=False):
         """Erase flash/partition (filesystem reset)"""
@@ -1075,7 +1061,7 @@ class MpyTool():
             print()  # newline after progress
 
         target = label or "flash"
-        self.verbose(f"  erased {self.format_size(result['erased'])} from {target}", 1, color='green')
+        self.verbose(f"  erased {_utils.format_size(result['erased'])} from {target}", 1, color='green')
         if not label:
             self.verbose("  filesystem will be recreated on next boot", 1, color='yellow')
 
@@ -1095,16 +1081,16 @@ class MpyTool():
             # Block size column
             block_str = ''
             if p.get('fs_block_size'):
-                block_str = self.format_size(p['fs_block_size'])
+                block_str = _utils.format_size(p['fs_block_size'])
             # Filesystem column
             fs_info = ''
             if p.get('filesystem'):
                 fs_info = p['filesystem']
                 # For FAT, append cluster size
                 if p.get('fs_cluster_size'):
-                    fs_info += f" ({self.format_size(p['fs_cluster_size'])})"
+                    fs_info += f" ({_utils.format_size(p['fs_cluster_size'])})"
             print(f"{p['label']:<12} {p['type_name']:<8} {p['subtype_name']:<10} "
-                  f"{p['offset']:>#10x} {self.format_size(p['size']):>10} "
+                  f"{p['offset']:>#10x} {_utils.format_size(p['size']):>10} "
                   f"{block_str:>8} {fs_info:<12} {', '.join(flags)}")
 
         if info['boot']:
@@ -1132,11 +1118,11 @@ class MpyTool():
             print(f"MAC {iface + ':':<8} {mac}")
         mem = self._mpy.memory()
         mem_pct = (mem['alloc'] / mem['total'] * 100) if mem['total'] > 0 else 0
-        print(f"Memory:      {self.format_size(mem['alloc'])} / {self.format_size(mem['total'])} ({mem_pct:.2f}%)")
+        print(f"Memory:      {_utils.format_size(mem['alloc'])} / {_utils.format_size(mem['total'])} ({mem_pct:.2f}%)")
         for fs in self._mpy.filesystems():
             label = "Flash:" if fs['mount'] == '/' else fs['mount'] + ':'
             fs_pct = (fs['used'] / fs['total'] * 100) if fs['total'] > 0 else 0
-            print(f"{label:12} {self.format_size(fs['used'])} / {self.format_size(fs['total'])} ({fs_pct:.2f}%)")
+            print(f"{label:12} {_utils.format_size(fs['used'])} / {_utils.format_size(fs['total'])} ({fs_pct:.2f}%)")
 
     def cmd_reset(self, mode='soft', reconnect=True, timeout=None):
         """Reset device in specified mode
@@ -1207,7 +1193,7 @@ class MpyTool():
         result = self._mpy.ls(path)
         for name, size in result:
             if size is not None:
-                print(f'{self.format_size(size):>9} {name}')
+                print(f'{_utils.format_size(size):>9} {name}')
             else:
                 print(f'{"":9} {name}/')
 
@@ -1378,6 +1364,11 @@ class MpyTool():
         self.cmd_mv(*commands)
         commands.clear()
 
+    def _dispatch_speedtest(self, commands, is_last_group):
+        from mpytool.speedtest import speedtest
+        self.verbose("SPEEDTEST", 1)
+        speedtest(self._mpy.comm, self._log)
+
     def _dispatch_paths(self, commands, is_last_group):
         # For shell completion
         dir_name = commands.pop(0) if commands else ':'
@@ -1394,7 +1385,7 @@ class MpyTool():
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
         'reset', 'monitor', 'repl', 'exec', 'info', 'flash',
-        'ota', 'sleep', 'cp', 'mv', '_paths',
+        'ota', 'sleep', 'cp', 'mv', 'speedtest', '_paths',
     })
 
     def process_commands(self, commands, is_last_group=False):
@@ -1440,6 +1431,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   flash write [{label}] {file}  write file to flash/partition
   flash erase [{label}] [--full]  erase flash/partition
   ota {firmware.app-bin}        OTA update (ESP32)
+  speedtest                     serial link speed test
   sleep {seconds}               pause between commands
 Use -- to chain commands:
   mpytool cp main.py : -- reset -- monitor

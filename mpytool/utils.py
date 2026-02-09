@@ -55,6 +55,21 @@ def split_commands(args: list[str], separator: str = "--") -> list[list[str]]:
     return groups
 
 
+def format_size(size):
+    """Format size in bytes to human readable format (like ls -h)"""
+    if size < 1024:
+        return f"{int(size)}B"
+    for unit in ('K', 'M', 'G', 'T'):
+        size /= 1024
+        if size < 10:
+            return f"{size:.2f}{unit}"
+        if size < 100:
+            return f"{size:.1f}{unit}"
+        if size < 1024 or unit == 'T':
+            return f"{size:.0f}{unit}"
+    return f"{size:.0f}T"
+
+
 def detect_serial_ports() -> list[str]:
     """Detect available serial ports for MicroPython devices
 
