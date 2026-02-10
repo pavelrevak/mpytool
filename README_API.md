@@ -663,10 +663,10 @@ mpy.comm.exec(command, timeout=5)
 
 **Parameters:**
 - `command` (str): Python code to execute
-- `timeout` (int): Maximum wait time in seconds
+- `timeout` (int): Maximum wait time in seconds. `0` = submit only (send code, don't wait for output)
 
 **Returns:**
-- `bytes`: Command stdout output
+- `bytes`: Command stdout output (`b''` when timeout=0)
 
 **Example:**
 ```python
@@ -674,6 +674,10 @@ mpy.comm.exec(command, timeout=5)
 b'Hello\r\n'
 
 >>> mpy.comm.exec("import sys")
+b''
+
+# Submit code without waiting for output (fire-and-forget)
+>>> mpy.comm.exec("while True: print('tick')", timeout=0)
 b''
 ```
 
@@ -749,10 +753,10 @@ mpy.comm.exec_raw_paste(command, timeout=5)
 
 **Parameters:**
 - `command` (str or bytes): Python code to execute
-- `timeout` (int): Maximum wait time in seconds
+- `timeout` (int): Maximum wait time in seconds. `0` = submit only (send code, don't wait for output)
 
 **Returns:**
-- `bytes`: Command stdout output
+- `bytes`: Command stdout output (`b''` when timeout=0)
 
 **Example:**
 ```python
@@ -778,11 +782,11 @@ mpy.comm.try_raw_paste(command, timeout=5)
 ```
 
 **Parameters:**
-- `command` (str): Python code to execute
-- `timeout` (int): Maximum wait time in seconds
+- `command` (str or bytes): Python code to execute
+- `timeout` (int): Maximum wait time in seconds. `0` = submit only (send code, don't wait for output)
 
 **Returns:**
-- `bytes`: Command stdout output
+- `bytes`: Command stdout output (`b''` when timeout=0)
 
 **Example:**
 ```python

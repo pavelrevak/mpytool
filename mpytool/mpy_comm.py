@@ -174,7 +174,8 @@ class MpyComm():
 
         Arguments:
             command: command to execute
-            timeout: maximum waiting time for result
+            timeout: maximum waiting time for result,
+                0 = submit only (send code, don't wait for output)
 
         Returns:
             command STDOUT result
@@ -182,12 +183,16 @@ class MpyComm():
         Raises:
             CmdError when command return error
         """
+        send_timeout = 5 if timeout == 0 else timeout
         self.enter_raw_repl()
         if self._log:
             self._log.info("CMD: %s", command)
         self._conn.write(bytes(command, 'utf-8'))
         self._conn.write(CTRL_D)
-        self._conn.read_until(b'OK', timeout)
+        self._conn.read_until(b'OK', send_timeout)
+        if timeout == 0:
+            self._repl_mode = False
+            return b''
         result = self._conn.read_until(CTRL_D, timeout)
         if result:
             if self._log:
@@ -209,7 +214,8 @@ class MpyComm():
 
         Arguments:
             command: command to execute (str or bytes)
-            timeout: maximum waiting time for result
+            timeout: maximum waiting time for result,
+                0 = submit only (send code, don't wait for output)
 
         Returns:
             command STDOUT result
@@ -218,6 +224,7 @@ class MpyComm():
             CmdError when command returns error
             MpyError when raw-paste mode is not supported
         """
+        send_timeout = 5 if timeout == 0 else timeout
         self.enter_raw_repl()
 
         if isinstance(command, str):
@@ -229,7 +236,7 @@ class MpyComm():
         self._conn.write(RAW_PASTE_ENTER)
 
         # Read response: 'R' + status (0=not supported, 1=supported)
-        header, status = self._conn.read_bytes(2, timeout)
+        header, status = self._conn.read_bytes(2, send_timeout)
         if header != ord('R'):
             raise MpyError(f"Unexpected raw-paste header: {header!r}")
 
@@ -243,7 +250,7 @@ class MpyComm():
         self._raw_paste_supported = True
 
         # Read window size (16-bit little-endian)
-        window_bytes = self._conn.read_bytes(2, timeout)
+        window_bytes = self._conn.read_bytes(2, send_timeout)
         window_size = int.from_bytes(window_bytes, 'little')
         if self._log:
             self._log.info("Raw-paste window size: %d", window_size)
@@ -255,7 +262,7 @@ class MpyComm():
         while offset < len(command):
             # Check for incoming flow control byte (non-blocking)
             if remaining_window == 0 or self._conn._has_data(0):
-                flow_byte = self._conn.read_bytes(1, timeout)
+                flow_byte = self._conn.read_bytes(1, send_timeout)
                 if flow_byte == RAW_PASTE_ACK:
                     remaining_window += window_size
                 elif flow_byte == CTRL_D:
@@ -274,9 +281,13 @@ class MpyComm():
 
         # Consume remaining ACKs and wait for CTRL_D echo
         while True:
-            byte = self._conn.read_bytes(1, timeout)
+            byte = self._conn.read_bytes(1, send_timeout)
             if byte == CTRL_D:
                 break
+
+        if timeout == 0:
+            self._repl_mode = False
+            return b''
 
         result = self._conn.read_until(CTRL_D, timeout)
         if result and self._log:

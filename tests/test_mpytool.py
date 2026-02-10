@@ -1049,5 +1049,55 @@ class TestTreeCommand(unittest.TestCase):
             self.tool.process_commands(['tree', '/lib'])
 
 
+class TestRunCommand(unittest.TestCase):
+    """Tests for run command"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+        self.tool._mpy = Mock()
+        self.tool._log = Mock()
+        # Create temp directory with test file
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_file = os.path.join(self.temp_dir, "script.py")
+        with open(self.test_file, 'wb') as f:
+            f.write(b"print('hello')\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_run_missing_argument(self):
+        """'run' without file -> ParamsError"""
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool.process_commands(['run'])
+        self.assertIn('missing', str(ctx.exception).lower())
+
+    def test_run_file_not_found(self):
+        """'run nonexistent.py' -> ParamsError"""
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool.process_commands(['run', '/no/such/file.py'])
+        self.assertIn('not found', str(ctx.exception).lower())
+
+    def test_run_sends_file_content(self):
+        """'run script.py' -> reads file and sends via try_raw_paste"""
+        self.tool.process_commands(['run', self.test_file])
+        self.tool._mpy.comm.try_raw_paste.assert_called_once_with(
+            b"print('hello')\n", timeout=0)
+
+    def test_run_reads_binary_mode(self):
+        """run reads file as bytes (rb), preserving encoding"""
+        utf8_file = os.path.join(self.temp_dir, "utf8.py")
+        with open(utf8_file, 'wb') as f:
+            f.write("print('súbor')\n".encode('utf-8'))
+        self.tool.process_commands(['run', utf8_file])
+        self.tool._mpy.comm.try_raw_paste.assert_called_once_with(
+            "print('súbor')\n".encode('utf-8'), timeout=0)
+
+    def test_run_with_command_separator(self):
+        """'run script.py -- ls' -> run then ls"""
+        self.tool.process_commands(['run', self.test_file])
+        self.tool._mpy.comm.try_raw_paste.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

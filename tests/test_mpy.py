@@ -525,5 +525,83 @@ class TestChdir(unittest.TestCase):
         self.assertIn("os.chdir('..')", call_args)
 
 
+class TestExecSubmitOnly(unittest.TestCase):
+    """Tests for exec() and exec_raw_paste() with timeout=0 (submit only)"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        # enter_raw_repl needs read_until to return
+        self.mock_conn.read_until.return_value = b''
+        self.mock_conn.flush.return_value = None
+        self.comm = mpy_comm.MpyComm(self.mock_conn)
+        # Skip stop_current_operation / enter_raw_repl negotiation
+        self.comm._repl_mode = True
+
+    def test_exec_timeout_zero_returns_empty(self):
+        """exec(cmd, timeout=0) returns b'' without reading output"""
+        result = self.comm.exec("print('hello')", timeout=0)
+        self.assertEqual(result, b'')
+
+    def test_exec_timeout_zero_sets_repl_mode_false(self):
+        """exec(cmd, timeout=0) sets _repl_mode = False"""
+        self.comm.exec("print('hello')", timeout=0)
+        self.assertFalse(self.comm._repl_mode)
+
+    def test_exec_timeout_zero_sends_code(self):
+        """exec(cmd, timeout=0) still sends the code + CTRL_D"""
+        self.comm.exec("print('hello')", timeout=0)
+        writes = [c[0][0] for c in self.mock_conn.write.call_args_list]
+        self.assertIn(b"print('hello')", writes)
+        self.assertIn(mpy_comm.CTRL_D, writes)
+
+    def test_exec_timeout_zero_uses_send_timeout(self):
+        """exec(cmd, timeout=0) uses send_timeout=5 for read_until OK"""
+        self.comm.exec("x=1", timeout=0)
+        # read_until(b'OK', 5) should have been called
+        ok_call = self.mock_conn.read_until.call_args_list[0]
+        self.assertEqual(ok_call[0], (b'OK', 5))
+
+    def test_exec_raw_paste_timeout_zero_returns_empty(self):
+        """exec_raw_paste(cmd, timeout=0) returns b'' without reading output"""
+        # Mock raw-paste handshake: R + status=1 + window_size + CTRL_D echo
+        self.mock_conn.read_bytes.side_effect = [
+            (ord('R'), 1),       # header + status
+            b'\x00\x01',         # window size = 256
+            mpy_comm.CTRL_D,     # CTRL_D echo after send
+        ]
+        self.mock_conn._has_data.return_value = False
+        result = self.comm.exec_raw_paste(b"print('hello')", timeout=0)
+        self.assertEqual(result, b'')
+
+    def test_exec_raw_paste_timeout_zero_sets_repl_mode_false(self):
+        """exec_raw_paste(cmd, timeout=0) sets _repl_mode = False"""
+        self.mock_conn.read_bytes.side_effect = [
+            (ord('R'), 1),
+            b'\x00\x01',
+            mpy_comm.CTRL_D,
+        ]
+        self.mock_conn._has_data.return_value = False
+        self.comm.exec_raw_paste(b"x=1", timeout=0)
+        self.assertFalse(self.comm._repl_mode)
+
+    def test_try_raw_paste_timeout_zero_returns_empty(self):
+        """try_raw_paste(cmd, timeout=0) passes timeout=0 through"""
+        self.mock_conn.read_bytes.side_effect = [
+            (ord('R'), 1),
+            b'\x00\x01',
+            mpy_comm.CTRL_D,
+        ]
+        self.mock_conn._has_data.return_value = False
+        result = self.comm.try_raw_paste(b"print(1)", timeout=0)
+        self.assertEqual(result, b'')
+
+    def test_try_raw_paste_timeout_zero_fallback_exec(self):
+        """try_raw_paste falls back to exec when raw-paste not supported"""
+        self.comm._raw_paste_supported = False
+        result = self.comm.try_raw_paste("print(1)", timeout=0)
+        self.assertEqual(result, b'')
+        self.assertFalse(self.comm._repl_mode)
+
+
 if __name__ == "__main__":
     unittest.main()

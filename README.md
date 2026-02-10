@@ -169,6 +169,12 @@ $ mpytool exec "print('Hello!')"
 $ mpytool exec "import sys; print(sys.version)"
 ```
 
+run local Python file on device:
+```
+$ mpytool run script.py                  # run script (fire-and-forget)
+$ mpytool run script.py -- monitor       # run script and capture output
+```
+
 show device information:
 ```
 $ mpytool info

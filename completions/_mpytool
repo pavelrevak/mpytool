@@ -21,6 +21,7 @@ _mpytool_commands() {
         'monitor:monitor device output (Ctrl+C to exit)'
         'repl:interactive REPL session'
         'exec:execute Python code on device'
+        'run:run local Python file on device'
         'reset:reset device (soft/machine/rts/raw/boot/dtr-boot)'
         'info:show device information'
         'flash:flash/partition operations (list, read, write, erase)'
@@ -270,6 +271,13 @@ _mpytool() {
                     ;;
                 exec)
                     # 1 code string, -- after it
+                    [[ $nargs -ge 1 ]] && compadd -- '--'
+                    ;;
+                run)
+                    # 1 local .py file, -- after it
+                    if [[ $pos -eq 2 ]]; then
+                        _files -g '*.py'
+                    fi
                     [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
                 pwd)

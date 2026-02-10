@@ -1291,6 +1291,17 @@ class MpyTool():
         if result:
             print(result.decode('utf-8', 'backslashreplace'), end='')
 
+    def _dispatch_run(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('missing file name for run command')
+        file_path = commands.pop(0)
+        if not _os.path.isfile(file_path):
+            raise ParamsError(f"file not found: {file_path}")
+        with open(file_path, 'rb') as f:
+            code = f.read()
+        self.verbose(f"RUN: {file_path} ({len(code)} bytes)", 1)
+        self._mpy.comm.try_raw_paste(code, timeout=0)
+
     def _dispatch_info(self, commands, is_last_group):
         self.cmd_info()
 
@@ -1384,7 +1395,7 @@ class MpyTool():
 
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
-        'reset', 'monitor', 'repl', 'exec', 'info', 'flash',
+        'reset', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
         'ota', 'sleep', 'cp', 'mv', 'speedtest', '_paths',
     })
 
@@ -1425,6 +1436,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   monitor                       print device output (Ctrl+C to stop)
   repl                          interactive REPL
   exec {code}                   execute Python code
+  run {file.py}                 run local Python file on device
   info                          show device information
   flash                         show flash/partitions info
   flash read [{label}] {file}   read flash/partition to file

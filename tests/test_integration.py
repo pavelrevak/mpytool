@@ -1486,5 +1486,97 @@ class TestRawPasteMode(unittest.TestCase):
         self.assertEqual(result, bytearray(b'recovered\r\n'))
 
 
+@requires_device
+class TestRunCommand(unittest.TestCase):
+    """Test run command"""
+
+    TEST_DIR = "/_mpytool_run_test"
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.tool = MpyTool(cls.conn)
+        cls.tool._mpy = cls.mpy
+        cls.temp_dir = tempfile.mkdtemp()
+        try:
+            cls.mpy.mkdir(cls.TEST_DIR)
+        except Exception:
+            pass
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+        try:
+            cls.mpy.delete(cls.TEST_DIR)
+        except Exception:
+            pass
+        try:
+            cls.mpy.comm.exit_raw_repl()
+        except Exception:
+            pass
+        cls.conn.close()
+
+    def _recover_repl(self):
+        """Recover to clean REPL state after run (timeout=0)"""
+        import time
+        time.sleep(0.5)
+        self.mpy.comm._repl_mode = None
+        self.mpy.comm.stop_current_operation()
+
+    def test_01_run_creates_file(self):
+        """Test run executes script that creates file on device"""
+        script_path = os.path.join(self.temp_dir, 'create_file.py')
+        with open(script_path, 'w') as f:
+            f.write(
+                f"with open('{self.TEST_DIR}/result.txt', 'w') as f:\n"
+                f"    f.write('hello from run')\n")
+        self.tool.process_commands(['run', script_path])
+        self._recover_repl()
+        content = self.mpy.get(self.TEST_DIR + '/result.txt')
+        self.assertEqual(content, b'hello from run')
+
+    def test_02_run_with_monitor(self):
+        """Test run file.py -- monitor captures script output"""
+        import io
+        import signal
+        from unittest.mock import patch
+        from mpytool.mpytool import _run_commands
+
+        if not hasattr(signal, 'SIGALRM'):
+            self.skipTest('SIGALRM not available')
+
+        script_path = os.path.join(self.temp_dir, 'print_lines.py')
+        with open(script_path, 'w') as f:
+            f.write("for i in range(3):\n    print(f'RUN_TEST_{i}')\n")
+
+        captured = io.StringIO()
+
+        def alarm_handler(signum, frame):
+            raise KeyboardInterrupt()
+
+        old_handler = signal.signal(signal.SIGALRM, alarm_handler)
+        signal.alarm(3)
+        try:
+            with patch('sys.stdout', captured):
+                _run_commands(
+                    self.tool,
+                    [['run', script_path], ['monitor']],
+                    with_progress=False)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+            self._recover_repl()
+
+        output = captured.getvalue()
+        self.assertIn('RUN_TEST_0', output)
+        self.assertIn('RUN_TEST_1', output)
+        self.assertIn('RUN_TEST_2', output)
+
+
 if __name__ == "__main__":
     unittest.main()

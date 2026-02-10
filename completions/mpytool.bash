@@ -7,7 +7,7 @@ _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 _MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd monitor repl exec reset info flash ota sleep"
+_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd monitor repl exec run reset info flash ota sleep"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -229,6 +229,13 @@ _mpytool() {
             ;;
         exec)
             # 1 code string, -- after it
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
+            ;;
+        run)
+            # 1 local .py file, -- after it
+            if [[ $pos -eq 2 ]]; then
+                COMPREPLY=($(compgen -f -X '!*.py' -- "$cur"))
+            fi
             [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         pwd)
