@@ -5,6 +5,9 @@ import zlib
 
 import mpytool.mpy_comm as _mpy_comm
 
+# Timeout for flash I/O operations (open/close/gc) - some FLASH GC can block >5s
+FLASH_IO_TIMEOUT = 20
+
 
 def _escape_path(path: str) -> str:
     """Escape path for use in Python string literal"""
@@ -515,7 +518,7 @@ def _mt_pfind(label):
             self.import_module('deflate as df')
             self.import_module('io as _io')
 
-        self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'wb')")
+        self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'wb')", timeout=FLASH_IO_TIMEOUT)
         while data:
             chunk = data[:chunk_size]
             cmd, orig_size, enc_type = self._encode_chunk(chunk, compress)
@@ -527,10 +530,10 @@ def _mt_pfind(label):
             transferred += orig_size
             if progress_callback:
                 progress_callback(transferred, total_size)
-        self._mpy_comm.exec("f.close()")
+        self._mpy_comm.exec("f.close()", timeout=FLASH_IO_TIMEOUT)
         # Run garbage collection to free memory and allow flash to settle
         self.import_module('gc')
-        self._mpy_comm.exec("gc.collect()")
+        self._mpy_comm.exec("gc.collect()", timeout=FLASH_IO_TIMEOUT)
         return encodings_used, wire_bytes
 
     def platform(self):
