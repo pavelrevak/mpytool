@@ -27,6 +27,7 @@ _mpytool_commands() {
         'flash:flash/partition operations (list, read, write, erase)'
         'ota:OTA firmware update (ESP32)'
         'sleep:sleep for specified seconds'
+        'speedtest:serial link speed test'
     )
     _describe -t commands 'mpytool command' commands
 }
@@ -352,6 +353,10 @@ _mpytool() {
                 sleep)
                     # 1 number, -- after it
                     [[ $nargs -ge 1 ]] && compadd -- '--'
+                    ;;
+                speedtest)
+                    # No arguments, -- immediately
+                    compadd -- '--'
                     ;;
                 --)
                     _mpytool_commands

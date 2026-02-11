@@ -60,25 +60,25 @@ Then restart your shell (`exec zsh` or `exec bash`) and use `mpytool` directly.
 
 Adding venv bin at the end of PATH keeps your system `python` and `pip` as default, while making `mpytool` available when not found elsewhere.
 
-## Examples:
+## Examples
 
-help:
+### Help
 ```
 $ mpytool --help
 ```
 
-list files:
+### List files
 ```
 $ mpytool -p /dev/ttyACM0 ls         # list CWD (default)
 $ mpytool -p /dev/ttyACM0 ls :/lib   # list /lib
 ```
 
-tree:
+### Tree
 ```
 $ mpytool -p /dev/ttyACM0 tree       # tree of CWD (default)
 ```
 
-copy files (: prefix = device path):
+### Copy files (: prefix = device path)
 ```
 $ mpytool cp main.py :/             # upload file to device root
 $ mpytool cp main.py lib.py :/lib/  # upload multiple files to directory
@@ -95,7 +95,7 @@ Path semantics: `:` = device CWD, `:/` = device root. Trailing `/` on source = c
 Unchanged files are automatically skipped (compares size and SHA256 hash).
 Use `-f` or `--force` to upload all files regardless.
 
-transfer options:
+### Transfer options
 ```
 $ mpytool cp -z main.py :/           # force compression (auto-detected by default)
 $ mpytool cp --no-compress data.bin :/  # disable compression
@@ -105,20 +105,20 @@ $ mpytool -c 8K cp main.py :/        # set chunk size (512, 1K, 2K, 4K, 8K, 16K,
 Compression is auto-detected based on device RAM and deflate module availability.
 Chunk size is auto-detected based on free RAM (larger chunks = faster transfer).
 
-move/rename on device:
+### Move/rename on device
 ```
 $ mpytool mv :/old.py :/new.py      # rename file
 $ mpytool mv :/file.py :/lib/       # move file to directory
 $ mpytool mv :/a.py :/b.py :/lib/   # move multiple files to directory
 ```
 
-view file contents:
+### View file contents
 ```
 $ mpytool cat :boot.py            # print file from CWD
 $ mpytool cat :/lib/module.py     # print file with absolute path
 ```
 
-make directory, delete files (: prefix = device path):
+### Make directory, delete files (: prefix = device path)
 ```
 $ mpytool mkdir :lib :data        # create directories in CWD
 $ mpytool mkdir :/lib/subdir      # create with absolute path
@@ -129,7 +129,7 @@ $ mpytool rm :                    # delete everything in CWD
 $ mpytool rm :/                   # delete everything on device (root)
 ```
 
-current working directory:
+### Current working directory
 ```
 $ mpytool pwd                     # print current directory
 /
@@ -139,7 +139,7 @@ $ mpytool cd :..                  # change to parent directory
 $ mpytool cd :/lib -- ls          # change directory and list files
 ```
 
-reset and REPL:
+### Reset and REPL
 ```
 $ mpytool reset              # soft reset (Ctrl-D, runs boot.py/main.py)
 $ mpytool reset --raw        # soft reset in raw REPL (clears RAM only)
@@ -153,7 +153,7 @@ $ mpytool repl               # enter REPL mode
 $ mpytool sleep 2            # sleep for 2 seconds (useful between commands)
 ```
 
-serial terminal and monitor (general purpose):
+### Serial terminal and monitor (general purpose)
 ```
 $ mpytool repl                       # auto-detect port, 115200 baud
 $ mpytool -p /dev/ttyUSB0 repl       # specify port
@@ -163,19 +163,32 @@ $ mpytool -p /dev/ttyUSB0 -b 9600 monitor   # monitor at 9600 baud
 
 Both `repl` and `monitor` can be used as general-purpose serial tools - not just for MicroPython devices. Use them to interact with any serial device (Arduino, ESP with custom firmware, GPS modules, etc.). When only one serial port is detected, it is used automatically. Default baudrate is 115200.
 
-execute Python code on device:
+### Execute Python code on device
 ```
 $ mpytool exec "print('Hello!')"
 $ mpytool exec "import sys; print(sys.version)"
 ```
 
-run local Python file on device:
+### Run local Python file on device
 ```
 $ mpytool run script.py                  # run script (fire-and-forget)
 $ mpytool run script.py -- monitor       # run script and capture output
 ```
 
-show device information:
+### Serial link speed test
+```
+$ mpytool speedtest
+SPEEDTEST
+               upload      download  verify
+     0B             -             -  ok
+    16B       11.8K/s       24.4K/s  ok
+    32B       13.1K/s       42.6K/s  ok
+  ...
+  4.00K        120K/s       11.1K/s  ok
+  8.00K        157K/s       11.0K/s  ok
+```
+
+### Show device information
 ```
 $ mpytool info
 Platform:    rp2
@@ -193,7 +206,7 @@ MAC WiFi:    aa:bb:cc:dd:ee:01
 MAC WiFi AP: aa:bb:cc:dd:ee:02
 ```
 
-flash operations (RP2 and ESP32):
+### Flash operations (RP2 and ESP32)
 ```
 # RP2 - user flash (entire filesystem area)
 $ mpytool flash                       # show flash info and filesystem type
@@ -219,20 +232,20 @@ $ mpytool flash erase vfs                  # quick erase partition
 $ mpytool flash erase vfs --full           # full erase partition
 ```
 
-OTA firmware update (ESP32):
+### OTA firmware update (ESP32)
 ```
 $ mpytool ota firmware.app-bin                    # flash to next OTA partition
 $ mpytool ota firmware.app-bin -- reset --machine          # flash and reboot
 $ mpytool ota firmware.app-bin -- reset --machine -t 30    # flash and reboot with 30s timeout
 ```
 
-multiple commands separated by `--`:
+### Multiple commands separated by `--`
 ```
 $ mpytool cp main.py boot.py : -- reset -- monitor
 $ mpytool rm :old.py -- cp new.py : -- reset
 ```
 
-auto-detect serial port (if only one device is connected):
+### Auto-detect serial port (if only one device is connected)
 ```
 $ mpytool ls lib/
           uhttp/
@@ -240,7 +253,7 @@ $ mpytool ls lib/
   4.95 KB wlan_http.py
 ```
 
-tree view:
+### Tree view
 ```
 $ mpytool tree
    142 KB ./
@@ -258,18 +271,18 @@ $ mpytool tree
   3.03 KB └─ main.py
 ```
 
-connect over network (TCP, default port 23):
+### Connect over network (TCP, default port 23)
 ```
 $ mpytool -a 192.168.1.100 ls
 $ mpytool -a 192.168.1.100:8266 tree
 ```
 
-set baudrate (default 115200):
+### Set baudrate (default 115200)
 ```
 $ mpytool -p /dev/ttyACM0 -b 9600 ls
 ```
 
-show version:
+### Show version
 ```
 $ mpytool -V
 ```
