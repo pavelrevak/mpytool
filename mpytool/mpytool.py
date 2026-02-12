@@ -12,6 +12,7 @@ import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.utils as _utils
 from mpytool.logger import SimpleColorLogger
+from mpytool.mpy_cross import MpyCross
 
 try:
     _about = _metadata.metadata("mpytool")
@@ -67,7 +68,7 @@ class MpyTool():
         self._conn = conn
         self._log = log if log is not None else SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
-        self._exclude_dirs = {'.*', '*.pyc'}
+        self._exclude_dirs = {'.*', '*.pyc', '__pycache__'}
         if exclude_dirs:
             self._exclude_dirs.update(exclude_dirs)
         self._mpy = _mpytool.Mpy(conn, log=self._log, chunk_size=chunk_size)
@@ -87,6 +88,9 @@ class MpyTool():
         self._stats_wire_bytes = 0  # Actual bytes sent over wire (with encoding)
         self._stats_transferred_files = 0
         self._stats_start_time = None
+        # mpy-cross compilation
+        self._mpy_cross = False  # --mpy flag active
+        self._mpy_compiler = MpyCross(self._log, self.verbose)
         # Remote file info cache for batch operations
         self._remote_file_cache = {}  # {path: (size, hash) or None}
 
@@ -281,7 +285,12 @@ class MpyTool():
             basename = _os.path.basename(src_path)
             if basename and not _os.path.basename(dst_path):
                 dst_path = _join_remote_path(dst_path, basename)
-            files[dst_path] = _os.path.getsize(src_path)
+            cache = self._mpy_compiler.compiled.get(src_path)
+            if cache:
+                dst_path = dst_path[:-3] + '.mpy'
+                files[dst_path] = _os.path.getsize(cache)
+            else:
+                files[dst_path] = _os.path.getsize(src_path)
         elif _os.path.isdir(src_path):
             # For directories, mimic _put_dir behavior
             if add_src_basename:
@@ -296,9 +305,16 @@ class MpyTool():
                     rel_path = ''
                 for file_name in filenames:
                     spath = _os.path.join(root, file_name)
-                    dpath = _join_remote_path(
-                        _join_remote_path(dst_path, rel_path), file_name)
-                    files[dpath] = _os.path.getsize(spath)
+                    cache = self._mpy_compiler.compiled.get(spath)
+                    if cache:
+                        dst_name = file_name[:-3] + '.mpy'
+                        dpath = _join_remote_path(
+                            _join_remote_path(dst_path, rel_path), dst_name)
+                        files[dpath] = _os.path.getsize(cache)
+                    else:
+                        dpath = _join_remote_path(
+                            _join_remote_path(dst_path, rel_path), file_name)
+                        files[dpath] = _os.path.getsize(spath)
         return files
 
     def _file_needs_update(self, local_data, remote_path):
@@ -539,6 +555,13 @@ class MpyTool():
 
     def _upload_file(self, data, src_path, dst_path, show_progress):
         """Upload file data to device with stats tracking and progress display"""
+        # Use compiled .mpy data if available
+        cache = self._mpy_compiler.compiled.get(src_path)
+        if cache:
+            with open(cache, 'rb') as f:
+                data = f.read()
+            if dst_path.endswith('.py'):
+                dst_path = dst_path[:-3] + '.mpy'
         file_size = len(data)
         self._stats_total_bytes += file_size
         if show_progress and self._verbose >= 1:
@@ -750,28 +773,33 @@ class MpyTool():
 
     def cmd_cp(self, *args):
         """Copy files between local and device"""
-        # Parse flags: -f/--force, -z/--compress, -Z/--no-compress
+        # Parse flags: -f/--force, -m/--mpy, -z/--compress, -Z/--no-compress
         args = list(args)
         force = None
+        mpy_cross = None
         compress = None  # None = use global setting
         filtered_args = []
         for a in args:
             if a == '--force':
                 force = True
+            elif a == '--mpy':
+                mpy_cross = True
             elif a == '--compress':
                 compress = True
             elif a == '--no-compress':
                 compress = False
             elif a.startswith('-') and not a.startswith('--') and len(a) > 1:
-                # Handle combined short flags like -fz, -fZ
+                # Handle combined short flags like -fmz, -fZ
                 flags = a[1:]
                 if 'f' in flags:
                     force = True
+                if 'm' in flags:
+                    mpy_cross = True
                 if 'z' in flags:
                     compress = True
                 if 'Z' in flags:
                     compress = False
-                remaining = flags.replace('f', '').replace('z', '').replace('Z', '')
+                remaining = flags.replace('f', '').replace('m', '').replace('z', '').replace('Z', '')
                 if remaining:
                     filtered_args.append('-' + remaining)
             else:
@@ -782,8 +810,11 @@ class MpyTool():
         # Save and set flags for this command
         saved_force = self._force
         saved_compress = self._compress
+        saved_mpy_cross = self._mpy_cross
         if force is not None:
             self._force = force
+        if mpy_cross is not None:
+            self._mpy_cross = mpy_cross
         if compress is not None:
             self._compress = compress
         try:
@@ -791,12 +822,19 @@ class MpyTool():
         finally:
             self._force = saved_force
             self._compress = saved_compress
+            self._mpy_cross = saved_mpy_cross
 
     def _cmd_cp_impl(self, args):
         sources = list(args[:-1])
         dest = args[-1]
         dest_is_remote = dest.startswith(':')
         dest_path = dest[1:] if dest_is_remote else dest
+        # Initialize mpy-cross compilation if requested
+        if self._mpy_cross:
+            self._mpy_compiler.init(self._mpy.platform())
+            if self._mpy_compiler.active:
+                self._mpy_compiler.compile_sources(
+                    sources, self._is_excluded)
         # Determine if destination is a directory:
         # - Remote: '' (CWD) or '/' (root) or ends with '/'
         # - Local: ends with '/' or exists as directory
@@ -1421,7 +1459,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   ls [:path]                    list files and sizes (default: CWD)
   tree [:path]                  list directory tree (default: CWD)
   cat {:path} [...]             print file content to stdout
-  cp [-f] {src} [...] {dst}     copy files (-f = force overwrite)
+  cp [-f] [-m] {src} [...] {dst} copy files (-f force, -m compile .mpy)
   mv {:src} [...] {:dst}        move/rename on device
   mkdir {:path} [...]           create directory (with parents)
   rm {:path} [...]              delete file/dir (:path/ = contents only)

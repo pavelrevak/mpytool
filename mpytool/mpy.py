@@ -568,9 +568,11 @@ def _mt_pfind(label):
             mpy_int = self._mpy_comm.exec_eval("sys.implementation._mpy")
             mpy_ver = mpy_int & 0xFF
             mpy_sub = (mpy_int >> 8) & 3
+            mpy_arch = (mpy_int >> 10) & 0x0F
         except (_mpy_comm.CmdError, AttributeError):
             mpy_ver = None
             mpy_sub = None
+            mpy_arch = 0
 
         return {
             'platform': platform,
@@ -580,6 +582,7 @@ def _mt_pfind(label):
             'machine': machine,
             'mpy_ver': mpy_ver,
             'mpy_sub': mpy_sub,
+            'mpy_arch': mpy_arch,
         }
 
     def memory(self):

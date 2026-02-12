@@ -89,6 +89,7 @@ $ mpytool cp :/main.py ./           # download file to current directory
 $ mpytool cp :/ ./backup/           # download entire device to backup/
 $ mpytool cp :/old.py :/new.py      # copy file on device
 $ mpytool cp -f main.py :/          # force upload even if unchanged
+$ mpytool cp -m myapp :/            # compile .py to .mpy via mpy-cross
 ```
 
 Path semantics: `:` = device CWD, `:/` = device root. Trailing `/` on source = copy contents only.
@@ -100,10 +101,19 @@ Use `-f` or `--force` to upload all files regardless.
 $ mpytool cp -z main.py :/           # force compression (auto-detected by default)
 $ mpytool cp --no-compress data.bin :/  # disable compression
 $ mpytool -c 8K cp main.py :/        # set chunk size (512, 1K, 2K, 4K, 8K, 16K, 32K)
+$ mpytool cp -m myapp :/             # compile .py to .mpy before upload
+$ mpytool cp -fm myapp :/            # force upload + compile .mpy
 ```
 
 Compression is auto-detected based on device RAM and deflate module availability.
 Chunk size is auto-detected based on free RAM (larger chunks = faster transfer).
+
+The `-m`/`--mpy` flag compiles `.py` files to `.mpy` bytecode using `mpy-cross` before upload.
+Compiled files are cached in `__pycache__/` (recompiled only when source changes).
+`boot.py` and `main.py` are always uploaded as `.py` (firmware requirement).
+Requires `mpy-cross` in PATH (`pip install mpy-cross`). If mpy-cross version differs
+from device, automatically uses `-b` flag to target the correct bytecode version.
+If `mpy-cross` is not found, falls back to uploading `.py` with a warning.
 
 ### Move/rename on device
 ```

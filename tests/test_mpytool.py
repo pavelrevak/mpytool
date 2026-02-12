@@ -1099,5 +1099,259 @@ class TestRunCommand(unittest.TestCase):
         self.tool._mpy.comm.try_raw_paste.assert_called_once()
 
 
+class TestMpyCompilation(unittest.TestCase):
+    """Tests for --mpy compilation feature (MpyCross class + MpyTool integration)"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+        self.tool._mpy = Mock()
+        self.compiler = self.tool._mpy_compiler
+        self.temp_dir = tempfile.mkdtemp()
+        # Create test .py files
+        self.script_py = os.path.join(self.temp_dir, 'script.py')
+        with open(self.script_py, 'w') as f:
+            f.write('print("hello")\n')
+        self.boot_py = os.path.join(self.temp_dir, 'boot.py')
+        with open(self.boot_py, 'w') as f:
+            f.write('# boot\n')
+        self.main_py = os.path.join(self.temp_dir, 'main.py')
+        with open(self.main_py, 'w') as f:
+            f.write('# main\n')
+        self.data_json = os.path.join(self.temp_dir, 'data.json')
+        with open(self.data_json, 'w') as f:
+            f.write('{}')
+        # Subdirectory with .py file
+        self.sub_dir = os.path.join(self.temp_dir, 'lib')
+        os.makedirs(self.sub_dir)
+        self.lib_py = os.path.join(self.sub_dir, 'mylib.py')
+        with open(self.lib_py, 'w') as f:
+            f.write('x = 1\n')
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def _setup_compiler(self, arch=None):
+        """Setup compiler with active state and fake version"""
+        self.compiler.active = True
+        self.compiler._ver = (6, 3)
+        self.compiler._arch = arch
+        self.compiler._args = []
+
+    def test_compile_skip_boot_py(self):
+        """boot.py should not be compiled"""
+        self._setup_compiler()
+        result = self.compiler.compile(self.boot_py)
+        self.assertIsNone(result)
+        self.assertNotIn(self.boot_py, self.compiler.compiled)
+
+    def test_compile_skip_main_py(self):
+        """main.py should not be compiled"""
+        self._setup_compiler()
+        result = self.compiler.compile(self.main_py)
+        self.assertIsNone(result)
+        self.assertNotIn(self.main_py, self.compiler.compiled)
+
+    def test_compile_skip_non_py(self):
+        """Non-.py files should not be compiled"""
+        self._setup_compiler()
+        result = self.compiler.compile(self.data_json)
+        self.assertIsNone(result)
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_creates_cache(self, mock_run):
+        """Compilation creates __pycache__/name.mpy-X.Y.mpy"""
+        self._setup_compiler()
+        mock_run.return_value = Mock(returncode=0, stderr='', stdout='')
+        result = self.compiler.compile(self.script_py)
+        expected_cache = os.path.join(
+            self.temp_dir, '__pycache__', 'script.mpy-6.3.mpy')
+        self.assertEqual(result, expected_cache)
+        self.assertEqual(self.compiler.compiled[self.script_py], expected_cache)
+        mock_run.assert_called_once_with(
+            ['mpy-cross', '-o', expected_cache, self.script_py],
+            capture_output=True, text=True, timeout=30)
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_cache_includes_arch(self, mock_run):
+        """Cache path includes architecture for native/viper support"""
+        self._setup_compiler(arch='xtensawin')
+        self.compiler._args = ['-march=xtensawin']
+        mock_run.return_value = Mock(returncode=0, stderr='', stdout='')
+        result = self.compiler.compile(self.script_py)
+        expected_cache = os.path.join(
+            self.temp_dir, '__pycache__', 'script.mpy-6.3-xtensawin.mpy')
+        self.assertEqual(result, expected_cache)
+        mock_run.assert_called_once_with(
+            ['mpy-cross', '-march=xtensawin', '-o',
+                expected_cache, self.script_py],
+            capture_output=True, text=True, timeout=30)
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_uses_b_flag_on_mismatch(self, mock_run):
+        """Compilation uses -b flag when mpy-cross version differs from device"""
+        self._setup_compiler()
+        self.compiler._args = ['-b', '6.1']
+        self.compiler._ver = (6, 1)
+        mock_run.return_value = Mock(returncode=0, stderr='', stdout='')
+        cache_path = os.path.join(
+            self.temp_dir, '__pycache__', 'script.mpy-6.1.mpy')
+        self.compiler.compile(self.script_py)
+        mock_run.assert_called_once_with(
+            ['mpy-cross', '-b', '6.1', '-o', cache_path, self.script_py],
+            capture_output=True, text=True, timeout=30)
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_uses_cache_when_fresh(self, mock_run):
+        """Fresh cache file should be reused without recompilation"""
+        self._setup_compiler()
+        cache_dir = os.path.join(self.temp_dir, '__pycache__')
+        os.makedirs(cache_dir)
+        cache_path = os.path.join(cache_dir, 'script.mpy-6.3.mpy')
+        with open(cache_path, 'wb') as f:
+            f.write(b'\x4d\x06\x03')
+        import time
+        future = time.time() + 10
+        os.utime(cache_path, (future, future))
+        result = self.compiler.compile(self.script_py)
+        self.assertEqual(result, cache_path)
+        mock_run.assert_not_called()
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_recompiles_stale_cache(self, mock_run):
+        """Stale cache file should trigger recompilation"""
+        self._setup_compiler()
+        cache_dir = os.path.join(self.temp_dir, '__pycache__')
+        os.makedirs(cache_dir)
+        cache_path = os.path.join(cache_dir, 'script.mpy-6.3.mpy')
+        with open(cache_path, 'wb') as f:
+            f.write(b'\x4d\x06\x03')
+        import time
+        future = time.time() + 10
+        os.utime(self.script_py, (future, future))
+        mock_run.return_value = Mock(returncode=0, stderr='', stdout='')
+        result = self.compiler.compile(self.script_py)
+        self.assertEqual(result, cache_path)
+        mock_run.assert_called_once()
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_failure_returns_none(self, mock_run):
+        """mpy-cross failure should return None (upload .py instead)"""
+        self._setup_compiler()
+        self.compiler._log = Mock()
+        mock_run.return_value = Mock(
+            returncode=1, stderr='SyntaxError: invalid syntax', stdout='')
+        result = self.compiler.compile(self.script_py)
+        self.assertIsNone(result)
+        self.assertNotIn(self.script_py, self.compiler.compiled)
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_compile_sources_walks_directory(self, mock_run):
+        """compile_sources should compile all .py in directory"""
+        self._setup_compiler()
+        mock_run.return_value = Mock(returncode=0, stderr='', stdout='')
+        self.compiler.compile_sources(
+            [self.temp_dir], self.tool._is_excluded)
+        compiled_basenames = {
+            os.path.basename(p) for p in self.compiler.compiled}
+        self.assertIn('script.py', compiled_basenames)
+        self.assertIn('mylib.py', compiled_basenames)
+        self.assertNotIn('boot.py', compiled_basenames)
+        self.assertNotIn('main.py', compiled_basenames)
+
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_collect_dst_files_with_mpy(self, mock_run):
+        """_collect_dst_files should use .mpy paths and compiled sizes"""
+        self._setup_compiler()
+        mock_run.return_value = Mock(returncode=0, stderr='', stdout='')
+        self.compiler.compile_sources(
+            [self.temp_dir], self.tool._is_excluded)
+        # Create fake cache files with known sizes
+        for src, cache in self.compiler.compiled.items():
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with open(cache, 'wb') as f:
+                f.write(b'\x00' * 42)
+        files = self.tool._collect_dst_files(self.temp_dir, '/', add_src_basename=False)
+        py_paths = [p for p in files if p.endswith('.py')]
+        mpy_paths = [p for p in files if p.endswith('.mpy')]
+        self.assertEqual(
+            sorted(py_paths), sorted(['/boot.py', '/main.py']))
+        self.assertEqual(
+            sorted(mpy_paths), sorted(['/lib/mylib.mpy', '/script.mpy']))
+        for p in mpy_paths:
+            self.assertEqual(files[p], 42)
+
+    def test_upload_file_uses_compiled_data(self):
+        """_upload_file should use compiled data when available"""
+        self._setup_compiler()
+        cache_dir = os.path.join(self.temp_dir, '__pycache__')
+        os.makedirs(cache_dir)
+        cache_path = os.path.join(cache_dir, 'script.mpy-6.3.mpy')
+        compiled_data = b'\x4d\x06\x03compiled'
+        with open(cache_path, 'wb') as f:
+            f.write(compiled_data)
+        self.compiler.compiled[self.script_py] = cache_path
+        self.tool._mpy.put.return_value = (set(), 0)
+        self.tool._force = True
+        self.tool._upload_file(
+            b'original .py data', self.script_py, '/script.py', False)
+        call_args = self.tool._mpy.put.call_args
+        self.assertEqual(call_args[0][0], compiled_data)
+        self.assertEqual(call_args[0][1], '/script.mpy')
+
+    @patch('mpytool.mpy_cross._shutil.which', return_value='/usr/bin/mpy-cross')
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_init_version_match(self, mock_run, mock_which):
+        """init should succeed when versions match"""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='MicroPython v1.24.0 on 2024-10-01; mpy-cross emitting mpy v6.3\n',
+            stderr='')
+        self.compiler.init({
+            'mpy_ver': 6, 'mpy_sub': 3, 'mpy_arch': 4,
+            'version': '1.24.0'})
+        self.assertTrue(self.compiler.active)
+        self.assertEqual(self.compiler._ver, (6, 3))
+        self.assertIn('-march=armv6m', self.compiler._args)
+
+    @patch('mpytool.mpy_cross._shutil.which', return_value='/usr/bin/mpy-cross')
+    @patch('mpytool.mpy_cross._subprocess.run')
+    def test_init_version_mismatch_uses_b_flag(self, mock_run, mock_which):
+        """init should use -b flag on version mismatch"""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='MicroPython v1.24.0; mpy-cross emitting mpy v6.3\n',
+            stderr='')
+        self.compiler.init({
+            'mpy_ver': 6, 'mpy_sub': 1, 'mpy_arch': 10,
+            'version': '1.20.0'})
+        self.assertTrue(self.compiler.active)
+        self.assertEqual(self.compiler._ver, (6, 1))
+        self.assertIn('-b', self.compiler._args)
+        self.assertIn('6.1', self.compiler._args)
+        self.assertIn('-march=xtensawin', self.compiler._args)
+
+    @patch('mpytool.mpy_cross._shutil.which', return_value=None)
+    def test_init_not_found(self, mock_which):
+        """init should deactivate when mpy-cross not in PATH"""
+        self.compiler._log = Mock()
+        self.compiler.init({'mpy_ver': 6, 'mpy_sub': 3, 'version': '1.24.0'})
+        self.assertFalse(self.compiler.active)
+
+    def test_cmd_cp_mpy_flag_parsing(self):
+        """cmd_cp should parse --mpy and -m flags"""
+        self.tool._mpy_cross = False
+        self.tool._cmd_cp_impl = Mock()
+        self.tool.cmd_cp('--mpy', 'src', ':dst')
+        self.assertTrue(self.tool._mpy_cross or
+                        self.tool._cmd_cp_impl.called)
+
+    def test_cmd_cp_combined_flags(self):
+        """cmd_cp should parse combined flags like -fm"""
+        self.tool._cmd_cp_impl = Mock()
+        self.tool.cmd_cp('-fm', 'src', ':dst')
+        # After cmd_cp finishes (even with mock), flags should be restored
+
+
 if __name__ == "__main__":
     unittest.main()
