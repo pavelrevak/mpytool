@@ -463,6 +463,47 @@ mpy.memory()
 **Returns:**
 - `dict`: `{'alloc': bytes_used, 'free': bytes_free, 'total': total_bytes}`
 
+### Mount
+
+#### mount(local_path, mount_point='/remote', log=None)
+
+Mount a local directory on device as readonly VFS.
+
+```python
+mpy.mount(local_path, mount_point='/remote', log=None)
+```
+
+**Parameters:**
+- `local_path` (str): Local directory to mount
+- `mount_point` (str): Device mount point, default `/remote`
+- `log`: Optional logger instance
+
+**Returns:**
+- `MountHandler` instance
+
+The device can then read, import and execute files from the local directory
+without uploading to flash. A MicroPython agent is injected into the device
+that forwards filesystem requests (stat, listdir, open, read, close) to the
+PC over the serial link. The connection is wrapped in a transparent proxy
+(`ConnIntercept`) that intercepts VFS protocol messages while passing REPL
+I/O through.
+
+After calling `mount()`, use `mpy.comm.exit_raw_repl()` to enter friendly
+REPL, or use the CLI `mount` command which handles this automatically.
+
+Soft reset (Ctrl+D) triggers automatic re-mount.
+
+**Example:**
+```python
+>>> handler = mpy.mount('./src')
+>>> mpy.comm.exit_raw_repl()
+# Device can now: import module  (from ./src/module.py)
+#                 open('/remote/data.txt').read()
+```
+
+**Raises:**
+- `MpyError`: If agent injection or mount fails
+
 ### Reset Methods
 
 #### soft_reset()

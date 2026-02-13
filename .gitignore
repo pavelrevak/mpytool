@@ -1,6 +1,9 @@
 __pycache__
 build
 dist
+.*
+!.gitignore
+!.mpyproject
 *.egg-info
 *.md
 !README*.md

@@ -1342,3 +1342,71 @@ def _mt_pfind(label):
             'compressed': used_compress,
         }
 
+    def mount(self, local_path, mount_point='/remote', log=None):
+        """Mount local directory on device as readonly VFS
+
+        Arguments:
+            local_path: local directory to mount
+            mount_point: device mount point (default: /remote)
+            log: logger instance
+
+        Returns:
+            MountHandler instance
+        """
+        import time
+        from mpytool.conn import Timeout
+        from mpytool.mount import MOUNT_AGENT, MountHandler, ConnIntercept
+
+        # Cleanup stale VFS mount from previous session.
+        # A leftover VFS at mount_point causes any non-built-in import to
+        # trigger VFS stat bytes (0x18 CMD MID) that corrupt raw REPL.
+        # Uses uos (always a C built-in, never triggers VFS).
+        mp_escaped = _escape_path(mount_point)
+        self._mpy_comm.enter_raw_repl()
+        del self._conn._buffer[:]
+        time.sleep(0.2)
+        while self._conn._has_data(timeout=0.1):
+            self._conn._read_available()
+        try:
+            self._mpy_comm.exec(
+                f"import uos\ntry:uos.umount('{mp_escaped}')\nexcept:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except (_mpy_comm.CmdError, Timeout):
+            pass
+
+        chunk_size = self._detect_chunk_size()
+        agent_code = MOUNT_AGENT.replace('CHUNK_SIZE', str(chunk_size))
+
+        # Inject agent and mount VFS
+        self._mpy_comm.exec(agent_code, timeout=10)
+        self._mpy_comm.exec(
+            f"_mt_mount('{mp_escaped}')", timeout=5)
+
+        # Create handler and connection intercept
+        handler = MountHandler(self._conn, local_path, log=log)
+
+        def remount_fn():
+            self._do_remount(agent_code, mp_escaped, handler)
+
+        intercept = ConnIntercept(
+            self._conn, handler, remount_fn=remount_fn, log=log)
+
+        # Replace connection in all layers
+        self._conn = intercept
+        self._mpy_comm._conn = intercept
+
+        return handler
+
+    def _do_remount(self, agent_code, mp_escaped, handler):
+        """Re-inject agent and re-mount after soft reset"""
+        handler.close_all()
+        self._imported.clear()
+        self._load_helpers.clear()
+        self._mpy_comm._repl_mode = None
+        self._mpy_comm._raw_paste_supported = None
+        self._mpy_comm.enter_raw_repl()
+        self._mpy_comm.exec(agent_code, timeout=10)
+        self._mpy_comm.exec(
+            f"_mt_mount('{mp_escaped}')", timeout=5)
+        self._mpy_comm.exit_raw_repl()
+

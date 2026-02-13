@@ -12,6 +12,7 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 - **Robust REPL handling** - works reliably with USB-UART bridges (CP2102, CH340)
 - **Multiple reset options** - soft, MCU, hardware (RTS), bootloader entry
 - **General-purpose serial terminal** - `repl` and `monitor` work with any serial device
+- **Mount local directory** - readonly VFS mount for development without uploading to flash
 - **Python API** - suitable for IDE integration and automation
 - **Raw-paste mode** - flow-controlled code execution with reduced RAM usage (API)
 - **Shell completion** - ZSH and Bash with remote path completion
@@ -184,6 +185,18 @@ $ mpytool exec "import sys; print(sys.version)"
 $ mpytool run script.py                  # run script (fire-and-forget)
 $ mpytool run script.py -- monitor       # run script and capture output
 ```
+
+### Mount local directory on device
+```
+$ mpytool mount ./src                       # mount ./src as /remote, auto-start REPL
+$ mpytool mount ./src :/app                 # mount as /app instead of /remote
+$ mpytool mount ./src -- exec "import main" # mount and run code
+$ mpytool mount ./src -- monitor            # mount and monitor output
+```
+
+Mounts a local directory on the device as a readonly VFS. The device can read, import and execute files from the local directory without uploading them to flash. Changes to local files are immediately visible on the device.
+
+After mount, mpytool automatically enters REPL (unless `monitor` or `repl` follows). In REPL you can import modules from the mounted directory, Ctrl+D triggers soft reset with automatic re-mount.
 
 ### Serial link speed test
 ```

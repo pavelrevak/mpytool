@@ -1413,6 +1413,28 @@ class MpyTool():
         self.cmd_mv(*commands)
         commands.clear()
 
+    def _dispatch_mount(self, commands, is_last_group):
+        if not commands:
+            raise ParamsError('mount requires local directory path')
+        local_path = commands.pop(0)
+        if not _os.path.isdir(local_path):
+            raise ParamsError(f'mount directory not found: {local_path}')
+        # Optional mount point (e.g. :/app)
+        mount_point = '/remote'
+        if commands and commands[0].startswith(':'):
+            mp = commands.pop(0)[1:]
+            if mp and mp.startswith('/'):
+                mount_point = mp
+            else:
+                raise ParamsError(
+                    'mount point must be absolute path (e.g. :/app)')
+        self._mpy.mount(local_path, mount_point, log=self._log)
+        # Update conn so Terminal/monitor uses ConnIntercept
+        self._conn = self._mpy.conn
+        self.verbose(
+            f"Mounted {local_path} on {mount_point} (readonly)", color='green')
+        commands.clear()
+
     def _dispatch_speedtest(self, commands, is_last_group):
         from mpytool.speedtest import speedtest
         self.verbose("SPEEDTEST", 1)
@@ -1434,7 +1456,7 @@ class MpyTool():
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
         'reset', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
-        'ota', 'sleep', 'cp', 'mv', 'speedtest', '_paths',
+        'ota', 'sleep', 'cp', 'mv', 'mount', 'speedtest', '_paths',
     })
 
     def process_commands(self, commands, is_last_group=False):
@@ -1481,6 +1503,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   flash write [{label}] {file}  write file to flash/partition
   flash erase [{label}] [--full]  erase flash/partition
   ota {firmware.app-bin}        OTA update (ESP32)
+  mount {dir} [:{mount_point}]  mount local dir on device (readonly)
   speedtest                     serial link speed test
   sleep {seconds}               pause between commands
 Use -- to chain commands:
@@ -1546,6 +1569,23 @@ def _parse_chunk_size(value):
         valid_str = ', '.join(f'{v//1024}K' if v >= 1024 else str(v) for v in sorted(valid))
         raise _argparse.ArgumentTypeError(f"chunk size must be one of: {valid_str}")
     return num
+
+
+def _mount_auto_repl(command_groups):
+    """Append repl to command groups if mount is used without terminal command.
+
+    mount requires mpytool to stay alive (PC handles FS requests).
+    If the last command after mount is not repl or monitor, auto-append repl.
+    """
+    has_mount = any(
+        'mount' in group for group in command_groups)
+    if not has_mount:
+        return
+    # Check first item (command name) of last group
+    last_group = command_groups[-1] if command_groups else []
+    last_cmd = last_group[0] if last_group else None
+    if last_cmd not in ('repl', 'monitor'):
+        command_groups.append(['repl'])
 
 
 def main():
@@ -1626,6 +1666,8 @@ def main():
         conn, log=log, verbose=log, exclude_dirs=args.exclude,
         force=args.force, compress=compress, chunk_size=args.chunk_size)
     command_groups = _utils.split_commands(args.commands)
+    # Auto-REPL for mount: if mount is used and last command is not repl/monitor
+    _mount_auto_repl(command_groups)
     try:
         _run_commands(mpy_tool, command_groups, with_progress=(args.verbose >= 1))
     except (_mpytool.MpyError, _mpytool.ConnError, _mpytool.Timeout) as err:

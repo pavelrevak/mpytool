@@ -1578,5 +1578,206 @@ class TestRunCommand(unittest.TestCase):
         self.assertIn('RUN_TEST_2', output)
 
 
+@requires_device
+class TestMount(unittest.TestCase):
+    """Test mount command: local directory as VFS on device"""
+
+    LOCAL_DIR = None
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from mpytool import ConnSerial, Mpy
+
+        # Create local temp directory with test files
+        cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_mount_test_')
+        # Simple text file
+        with open(os.path.join(cls.LOCAL_DIR, 'hello.txt'), 'w') as f:
+            f.write('Hello from mount test!')
+        # Python module
+        with open(os.path.join(cls.LOCAL_DIR, 'testmod.py'), 'w') as f:
+            f.write('MOUNT_VALUE = 42\ndef double(x):\n    return x * 2\n')
+        # Binary file
+        with open(os.path.join(cls.LOCAL_DIR, 'data.bin'), 'wb') as f:
+            f.write(bytes(range(256)))
+        # Subdirectory with file
+        subdir = os.path.join(cls.LOCAL_DIR, 'subdir')
+        os.makedirs(subdir)
+        with open(os.path.join(subdir, 'nested.txt'), 'w') as f:
+            f.write('nested content')
+        # lib directory with importable module
+        libdir = os.path.join(cls.LOCAL_DIR, 'lib')
+        os.makedirs(libdir)
+        with open(os.path.join(libdir, 'libmod.py'), 'w') as f:
+            f.write('LIB_VALUE = 99\n')
+
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.handler = cls.mpy.mount(cls.LOCAL_DIR)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        try:
+            cls.mpy.comm.enter_raw_repl()
+            cls.mpy.comm.exec(
+                "import uos\ntry:uos.umount('/remote')\nexcept:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except Exception:
+            pass
+        try:
+            cls.mpy.comm.exit_raw_repl()
+        except Exception:
+            pass
+        cls.conn.close()
+        if cls.LOCAL_DIR:
+            shutil.rmtree(cls.LOCAL_DIR, ignore_errors=True)
+
+    def test_01_listdir(self):
+        """Test os.listdir on mounted VFS"""
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('/remote'))")
+        self.assertIsInstance(result, list)
+        self.assertIn('hello.txt', result)
+        self.assertIn('testmod.py', result)
+        self.assertIn('data.bin', result)
+        self.assertIn('subdir', result)
+        self.assertIn('lib', result)
+
+    def test_02_stat_file(self):
+        """Test os.stat on file via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('os').stat('/remote/hello.txt')")
+        self.assertIsInstance(result, tuple)
+        # st_size should match local file
+        self.assertEqual(result[6], len('Hello from mount test!'))
+
+    def test_03_stat_dir(self):
+        """Test os.stat on directory via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('os').stat('/remote/subdir')")
+        self.assertIsInstance(result, tuple)
+        # Directory has S_IFDIR bit (0x4000)
+        self.assertTrue(result[0] & 0x4000)
+
+    def test_04_stat_nonexistent(self):
+        """Test os.stat on nonexistent path raises OSError"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.mpy.comm.exec(
+                "__import__('os').stat('/remote/nonexistent.xyz')")
+        self.assertIn('OSError', ctx.exception.error)
+
+    def test_05_read_text_file(self):
+        """Test reading text file via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/hello.txt').read())")
+        self.assertEqual(result, 'Hello from mount test!')
+
+    def test_06_read_binary_file(self):
+        """Test reading binary file via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "open('/remote/data.bin','rb').read()")
+        self.assertEqual(result, bytes(range(256)))
+
+    def test_07_read_partial(self):
+        """Test partial read of file via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/hello.txt').read(5))")
+        self.assertEqual(result, 'Hello')
+
+    def test_08_readline(self):
+        """Test readline on text file via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/testmod.py').readline())")
+        self.assertEqual(result, 'MOUNT_VALUE = 42\n')
+
+    def test_09_listdir_subdir(self):
+        """Test os.listdir on subdirectory via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('/remote/subdir'))")
+        self.assertIn('nested.txt', result)
+
+    def test_10_read_nested_file(self):
+        """Test reading file in subdirectory via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/subdir/nested.txt').read())")
+        self.assertEqual(result, 'nested content')
+
+    def test_11_import_module(self):
+        """Test importing Python module from VFS"""
+        self.mpy.comm.exec(
+            "import sys\n"
+            "for k in list(sys.modules):\n"
+            " if k in ('testmod','libmod'):del sys.modules[k]\n")
+        result = self.mpy.comm.exec_eval(
+            "__import__('testmod').MOUNT_VALUE")
+        self.assertEqual(result, 42)
+
+    def test_12_import_function(self):
+        """Test calling imported function from VFS module"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('testmod').double(21)")
+        self.assertEqual(result, 42)
+
+    def test_13_import_from_lib(self):
+        """Test importing module from lib/ subdirectory via VFS"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('libmod').LIB_VALUE")
+        self.assertEqual(result, 99)
+
+    def test_14_chdir_and_relative(self):
+        """Test chdir to VFS mount and relative path access"""
+        self.mpy.comm.exec("__import__('os').chdir('/remote')")
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').getcwd())")
+        self.assertEqual(result, '/remote')
+        # Relative listdir
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('subdir'))")
+        self.assertIn('nested.txt', result)
+
+    def test_15_multiple_open_close(self):
+        """Test opening and closing multiple files"""
+        code = (
+            "f1 = open('/remote/hello.txt')\n"
+            "f2 = open('/remote/testmod.py')\n"
+            "r1 = f1.read(5)\n"
+            "r2 = f2.readline()\n"
+            "f1.close()\n"
+            "f2.close()\n"
+            "print(repr(r1), repr(r2))")
+        result = self.mpy.comm.exec(code)
+        self.assertIn(b'Hello', result)
+        self.assertIn(b'MOUNT_VALUE', result)
+
+    def test_16_file_modified_on_pc(self):
+        """Test that file changes on PC are reflected in VFS reads"""
+        # Write new content to a file on PC
+        dynamic_path = os.path.join(self.LOCAL_DIR, 'dynamic.txt')
+        with open(dynamic_path, 'w') as f:
+            f.write('version1')
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/dynamic.txt').read())")
+        self.assertEqual(result, 'version1')
+        # Modify file on PC
+        with open(dynamic_path, 'w') as f:
+            f.write('version2')
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/dynamic.txt').read())")
+        self.assertEqual(result, 'version2')
+
+    def test_17_large_file_read(self):
+        """Test reading file larger than chunk size via VFS"""
+        # Create a 4KB file (likely larger than typical chunk)
+        large_path = os.path.join(self.LOCAL_DIR, 'large.txt')
+        content = 'L' * 4096
+        with open(large_path, 'w') as f:
+            f.write(content)
+        result = self.mpy.comm.exec_eval(
+            "len(open('/remote/large.txt').read())")
+        self.assertEqual(result, 4096)
+
+
 if __name__ == "__main__":
     unittest.main()

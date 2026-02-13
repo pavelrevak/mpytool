@@ -26,6 +26,7 @@ _mpytool_commands() {
         'info:show device information'
         'flash:flash/partition operations (list, read, write, erase)'
         'ota:OTA firmware update (ESP32)'
+        'mount:mount local directory on device (readonly)'
         'sleep:sleep for specified seconds'
         'speedtest:serial link speed test'
     )
@@ -353,6 +354,14 @@ _mpytool() {
                 sleep)
                     # 1 number, -- after it
                     [[ $nargs -ge 1 ]] && compadd -- '--'
+                    ;;
+                mount)
+                    # 1 local dir + optional :mount_point, no -- (auto-repl)
+                    if [[ $pos -eq 2 ]]; then
+                        _files -/
+                    elif [[ $pos -eq 3 ]]; then
+                        compadd -S '' ':'
+                    fi
                     ;;
                 speedtest)
                     # No arguments, -- immediately
