@@ -7,7 +7,7 @@ _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 _MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd monitor repl exec run reset info flash ota mount sleep speedtest"
+_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd stop monitor repl exec run reset info flash ota mount sleep speedtest"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -256,7 +256,7 @@ _mpytool() {
                 [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             fi
             ;;
-        info)
+        stop|info)
             # No arguments, -- immediately
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             ;;

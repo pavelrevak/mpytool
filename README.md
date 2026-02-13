@@ -150,8 +150,10 @@ $ mpytool cd :..                  # change to parent directory
 $ mpytool cd :/lib -- ls          # change directory and list files
 ```
 
-### Reset and REPL
+### Stop, reset and REPL
 ```
+$ mpytool stop               # stop running program (Ctrl-C)
+$ mpytool stop -- repl       # stop and enter REPL
 $ mpytool reset              # soft reset (Ctrl-D, runs boot.py/main.py)
 $ mpytool reset --raw        # soft reset in raw REPL (clears RAM only)
 $ mpytool reset --machine    # MCU reset (machine.reset, auto-reconnect)

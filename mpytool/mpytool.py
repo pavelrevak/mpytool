@@ -1282,6 +1282,10 @@ class MpyTool():
         self.verbose(f"CD: {path}", 2)
         self._mpy.chdir(path)
 
+    def _dispatch_stop(self, commands, is_last_group):
+        self._mpy.stop()
+        self.verbose("STOP", 1)
+
     def _dispatch_reset(self, commands, is_last_group):
         mode = 'soft'
         timeout = None
@@ -1455,7 +1459,7 @@ class MpyTool():
 
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
-        'reset', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
+        'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
         'ota', 'sleep', 'cp', 'mv', 'mount', 'speedtest', '_paths',
     })
 
@@ -1487,6 +1491,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   rm {:path} [...]              delete file/dir (:path/ = contents only)
   pwd                           print current working directory
   cd {:path}                    change current working directory
+  stop                           stop running program (Ctrl-C)
   reset [flags]                  soft reset (Ctrl-D) by default
     --machine [-t {s}]            machine.reset() with reconnect
     --rts [-t {s}]                hardware reset via DTR/RTS signal

@@ -630,7 +630,17 @@ except KeyboardInterrupt:
     conn.close()
 ```
 
-### Reset Methods
+### Stop and Reset Methods
+
+#### stop()
+
+Stop running program and return to REPL prompt (sends Ctrl+C).
+
+```python
+mpy.stop()
+```
+
+See [Mount section](#stop) for detailed usage with mount.
 
 #### soft_reset()
 
