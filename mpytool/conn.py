@@ -57,9 +57,21 @@ class Conn():
         del self._buffer[:]
         return buffer
 
-    def read(self):
-        """Read available data from device"""
-        if self._has_data():
+    @property
+    def busy(self):
+        """True if connection is busy with internal protocol exchange"""
+        return False
+
+    def read(self, timeout=0):
+        """Read available data from device (non-blocking by default).
+
+        Returns device output bytes, or None if no data available.
+        On ConnIntercept, also services VFS requests transparently.
+
+        Arguments:
+            timeout: how long to wait for data (0 = non-blocking)
+        """
+        if self._has_data(timeout):
             return self._read_available()
         return None
 

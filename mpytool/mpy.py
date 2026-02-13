@@ -1152,6 +1152,11 @@ def _mt_pfind(label):
             result['label'] = label
         return result
 
+    def stop(self):
+        """Stop running program and return to REPL prompt"""
+        self._mpy_comm._repl_mode = None
+        self._mpy_comm.stop_current_operation()
+
     def soft_reset(self):
         """Soft reset device (Ctrl-D in REPL)
 

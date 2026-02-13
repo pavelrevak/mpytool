@@ -94,6 +94,64 @@ conn = mpytool.ConnSocket(address='192.168.1.100:8266')
 **Raises:**
 - `ConnError`: If unable to connect
 
+### Common Connection Methods
+
+All connection types (including `ConnIntercept` used by mount) share these methods:
+
+#### read(timeout=0)
+
+Read available data from device (non-blocking by default).
+
+```python
+conn.read(timeout=0)
+```
+
+**Parameters:**
+- `timeout` (float): How long to wait for data in seconds (0 = non-blocking)
+
+**Returns:**
+- `bytes`: Device output data
+- `None`: No data available (timeout)
+
+When mount is active, VFS requests from the device are handled transparently
+inside `read()` — only non-protocol output (print, traceback, etc.) is returned.
+
+**Example:**
+```python
+>>> data = conn.read(timeout=0.1)  # wait up to 100ms
+>>> if data:
+...     print(data.decode('utf-8', errors='replace'), end='')
+```
+
+#### busy
+
+Property indicating if the connection is busy with an internal protocol exchange (VFS request).
+
+```python
+conn.busy  # True during VFS dispatch, False otherwise
+```
+
+Always `False` on plain `ConnSerial`/`ConnSocket`. On `ConnIntercept` (after mount), `True` while servicing a VFS request from the device.
+
+#### fd
+
+File descriptor for use with `select()`.
+
+```python
+conn.fd  # int file descriptor, or None
+```
+
+#### write(data)
+
+Write data to device.
+
+```python
+conn.write(data)
+```
+
+**Raises:**
+- `MpyError`: If connection is busy (VFS request in progress)
+
 ## Mpy Class
 
 High-level API for file operations on MicroPython devices.
@@ -503,6 +561,74 @@ Soft reset (Ctrl+D) triggers automatic re-mount.
 
 **Raises:**
 - `MpyError`: If agent injection or mount fails
+
+#### stop()
+
+Stop running program on device and return to REPL prompt.
+
+```python
+mpy.stop()
+```
+
+Sends Ctrl+C to interrupt the running program and waits for the `>>> ` prompt.
+After `stop()`, API methods like `exec()` work normally. VFS remains mounted.
+
+**Example:**
+```python
+>>> mpy.mount('./src')
+>>> mpy.comm.exec("exec(open('/remote/main.py').read())", timeout=0)
+>>> # ... device runs main.py ...
+>>> mpy.stop()          # Ctrl+C, wait for >>>
+>>> mpy.comm.exec_eval("1 + 1")  # works
+2
+```
+
+#### Mount with monitoring (select loop)
+
+After mount, use `conn.read()` in a loop to service VFS requests and capture
+device output. This is the API equivalent of the CLI `mount` + `monitor` command.
+
+```python
+import select
+import sys
+import mpytool
+
+conn = mpytool.ConnSerial(port='/dev/ttyACM0')
+mpy = mpytool.Mpy(conn)
+
+# Mount and run script
+mpy.mount('./src')
+mpy.comm.exec("exec(open('/remote/main.py').read())", timeout=0)
+
+# Monitor output with select loop
+try:
+    while True:
+        ready, _, _ = select.select([conn.fd], [], [], 1.0)
+        if ready:
+            data = conn.read()
+            if data:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+except KeyboardInterrupt:
+    mpy.stop()
+    conn.close()
+```
+
+For simple use cases without `select()`:
+
+```python
+mpy.mount('./src')
+mpy.comm.exec("exec(open('/remote/main.py').read())", timeout=0)
+
+try:
+    while True:
+        data = conn.read(timeout=0.1)
+        if data:
+            print(data.decode('utf-8', errors='replace'), end='')
+except KeyboardInterrupt:
+    mpy.stop()
+    conn.close()
+```
 
 ### Reset Methods
 

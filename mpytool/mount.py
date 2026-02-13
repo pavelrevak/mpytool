@@ -8,6 +8,7 @@ import os as _os
 import struct as _struct
 
 from mpytool.conn import Conn
+from mpytool.mpy_comm import MpyError
 
 # Protocol constants
 ESCAPE = 0x18  # CAN / Ctrl+X
@@ -317,6 +318,7 @@ class ConnIntercept(Conn):
         self._handler = handler
         self._remount_fn = remount_fn
         self._pending = b''
+        self._busy = False
         # Soft reboot detection
         self._reboot_buf = b''
         self._needs_remount = False
@@ -324,6 +326,10 @@ class ConnIntercept(Conn):
     @property
     def fd(self):
         return self._conn.fd
+
+    @property
+    def busy(self):
+        return self._busy
 
     def _has_data(self, timeout=0):
         if self._pending:
@@ -359,8 +365,12 @@ class ConnIntercept(Conn):
                 cmd = data[i + 1]
                 if CMD_MIN <= cmd <= CMD_MAX:
                     # Valid VFS command — send ACK and dispatch
-                    self._conn.write(_ESCAPE_BYTE)
-                    self._handler.dispatch(cmd)
+                    self._busy = True
+                    try:
+                        self._conn.write(_ESCAPE_BYTE)
+                        self._handler.dispatch(cmd)
+                    finally:
+                        self._busy = False
                     i += 3
                 else:
                     # Not a valid VFS command — pass through
@@ -397,6 +407,8 @@ class ConnIntercept(Conn):
                 self._reboot_buf = b''
 
     def _write_raw(self, data):
+        if self._busy:
+            raise MpyError("connection busy (VFS request in progress)")
         return self._conn._write_raw(data)
 
     def close(self):

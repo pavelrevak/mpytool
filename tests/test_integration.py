@@ -1778,6 +1778,80 @@ class TestMount(unittest.TestCase):
             "len(open('/remote/large.txt').read())")
         self.assertEqual(result, 4096)
 
+    def test_18_busy_false_by_default(self):
+        """Test that conn.busy is False when no VFS request in progress"""
+        self.assertFalse(self.mpy.conn.busy)
+
+    def test_19_read_no_data(self):
+        """Test conn.read() returns None when no data available"""
+        result = self.mpy.conn.read(timeout=0)
+        self.assertIsNone(result)
+
+    def test_20_read_with_timeout(self):
+        """Test conn.read(timeout) waits and returns None on timeout"""
+        import time
+        start = time.time()
+        result = self.mpy.conn.read(timeout=0.1)
+        elapsed = time.time() - start
+        self.assertIsNone(result)
+        self.assertGreaterEqual(elapsed, 0.05)
+
+    def test_21_read_device_output(self):
+        """Test conn.read() returns device output after exec with timeout=0"""
+        # Submit print without waiting for output
+        self.mpy.comm.exec("print('mount_read_test')", timeout=0)
+        import time
+        time.sleep(0.1)
+        # Read output via conn.read()
+        data = self.mpy.conn.read(timeout=0.5)
+        self.assertIsNotNone(data)
+        self.assertIn(b'mount_read_test', data)
+        # Drain remaining output and restore REPL state
+        while self.mpy.conn.read(timeout=0.2):
+            pass
+        self.mpy.stop()
+
+    def test_22_stop(self):
+        """Test mpy.stop() interrupts running program"""
+        import time
+        # Start a long-running program (timeout=0 = fire-and-forget)
+        self.mpy.comm.exec(
+            "import time\nwhile True:\n time.sleep(0.1)\n", timeout=0)
+        time.sleep(0.3)
+        # Stop it
+        self.mpy.stop()
+        # Now exec should work
+        result = self.mpy.comm.exec_eval("1 + 1")
+        self.assertEqual(result, 2)
+
+    def test_23_stop_then_vfs(self):
+        """Test VFS still works after stop()"""
+        self.mpy.stop()
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/hello.txt').read())")
+        self.assertEqual(result, 'Hello from mount test!')
+
+    def test_24_read_vfs_transparent(self):
+        """Test conn.read() services VFS requests transparently"""
+        # Submit code that reads VFS file and prints result
+        self.mpy.comm.exec(
+            "print(open('/remote/hello.txt').read())", timeout=0)
+        import time
+        time.sleep(0.1)
+        # read() should handle VFS + return print output
+        output = b''
+        for _ in range(50):
+            data = self.mpy.conn.read(timeout=0.1)
+            if data:
+                output += data
+            if b'Hello from mount test!' in output:
+                break
+        self.assertIn(b'Hello from mount test!', output)
+        # Drain remaining and restore REPL state
+        while self.mpy.conn.read(timeout=0.2):
+            pass
+        self.mpy.stop()
+
 
 if __name__ == "__main__":
     unittest.main()
