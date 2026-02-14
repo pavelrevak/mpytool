@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock
 
 from mpytool.mpytool import MpyTool, ParamsError
+from mpytool.mpy_cross import MpyCross
 
 
 class TestCollectDstFiles(unittest.TestCase):
@@ -1106,7 +1107,8 @@ class TestMpyCompilation(unittest.TestCase):
         self.mock_conn = Mock()
         self.tool = MpyTool(self.mock_conn, verbose=None)
         self.tool._mpy = Mock()
-        self.compiler = self.tool._mpy_compiler
+        self.compiler = MpyCross(self.tool._log, self.tool.verbose)
+        self.tool._mpy_cross = self.compiler
         self.temp_dir = tempfile.mkdtemp()
         # Create test .py files
         self.script_py = os.path.join(self.temp_dir, 'script.py')
@@ -1340,11 +1342,16 @@ class TestMpyCompilation(unittest.TestCase):
 
     def test_cmd_cp_mpy_flag_parsing(self):
         """cmd_cp should parse --mpy and -m flags"""
-        self.tool._mpy_cross = False
-        self.tool._cmd_cp_impl = Mock()
+        self.tool._mpy_cross = None
+        captured = {}
+        orig = self.tool._cmd_cp_impl
+        def capture_impl(args):
+            captured['mpy_cross'] = self.tool._mpy_cross
+        self.tool._cmd_cp_impl = capture_impl
         self.tool.cmd_cp('--mpy', 'src', ':dst')
-        self.assertTrue(self.tool._mpy_cross or
-                        self.tool._cmd_cp_impl.called)
+        self.assertIsInstance(captured['mpy_cross'], MpyCross)
+        # Restored after cmd_cp
+        self.assertIsNone(self.tool._mpy_cross)
 
     def test_cmd_cp_combined_flags(self):
         """cmd_cp should parse combined flags like -fm"""

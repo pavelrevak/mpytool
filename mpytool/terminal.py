@@ -63,10 +63,10 @@ class TerminalBase:
             self._flush_device()
             self._loop()
         except OSError as err:
-            if self._log:
-                self._log.error(err)
-        self._restore()
-        self.write(b'\r\n')
+            self._log.error(err)
+        finally:
+            self._restore()
+            self.write(b'\r\n')
 
 
 try:

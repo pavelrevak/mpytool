@@ -88,9 +88,7 @@ class MpyTool():
         self._stats_wire_bytes = 0  # Actual bytes sent over wire (with encoding)
         self._stats_transferred_files = 0
         self._stats_start_time = None
-        # mpy-cross compilation
-        self._mpy_cross = False  # --mpy flag active
-        self._mpy_compiler = MpyCross(self._log, self.verbose)
+        self._mpy_cross = None  # MpyCross instance when --mpy active
         # Remote file info cache for batch operations
         self._remote_file_cache = {}  # {path: (size, hash) or None}
 
@@ -285,7 +283,7 @@ class MpyTool():
             basename = _os.path.basename(src_path)
             if basename and not _os.path.basename(dst_path):
                 dst_path = _join_remote_path(dst_path, basename)
-            cache = self._mpy_compiler.compiled.get(src_path)
+            cache = self._mpy_cross and self._mpy_cross.compiled.get(src_path)
             if cache:
                 dst_path = dst_path[:-3] + '.mpy'
                 files[dst_path] = _os.path.getsize(cache)
@@ -305,7 +303,7 @@ class MpyTool():
                     rel_path = ''
                 for file_name in filenames:
                     spath = _os.path.join(root, file_name)
-                    cache = self._mpy_compiler.compiled.get(spath)
+                    cache = self._mpy_cross and self._mpy_cross.compiled.get(spath)
                     if cache:
                         dst_name = file_name[:-3] + '.mpy'
                         dpath = _join_remote_path(
@@ -556,7 +554,7 @@ class MpyTool():
     def _upload_file(self, data, src_path, dst_path, show_progress):
         """Upload file data to device with stats tracking and progress display"""
         # Use compiled .mpy data if available
-        cache = self._mpy_compiler.compiled.get(src_path)
+        cache = self._mpy_cross and self._mpy_cross.compiled.get(src_path)
         if cache:
             with open(cache, 'rb') as f:
                 data = f.read()
@@ -813,8 +811,8 @@ class MpyTool():
         saved_mpy_cross = self._mpy_cross
         if force is not None:
             self._force = force
-        if mpy_cross is not None:
-            self._mpy_cross = mpy_cross
+        if mpy_cross:
+            self._mpy_cross = MpyCross(self._log, self.verbose)
         if compress is not None:
             self._compress = compress
         try:
@@ -831,9 +829,9 @@ class MpyTool():
         dest_path = dest[1:] if dest_is_remote else dest
         # Initialize mpy-cross compilation if requested
         if self._mpy_cross:
-            self._mpy_compiler.init(self._mpy.platform())
-            if self._mpy_compiler.active:
-                self._mpy_compiler.compile_sources(
+            self._mpy_cross.init(self._mpy.platform())
+            if self._mpy_cross.active:
+                self._mpy_cross.compile_sources(
                     sources, self._is_excluded)
         # Determine if destination is a directory:
         # - Remote: '' (CWD) or '/' (root) or ends with '/'

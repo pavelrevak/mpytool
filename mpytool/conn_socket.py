@@ -44,14 +44,23 @@ class ConnSocket(_conn.Conn):
 
     def _read_available(self):
         """Read available data from socket"""
+        if self._socket is None:
+            raise _conn.ConnError("Not connected")
         try:
             data = self._socket.recv(4096)
             if data:
                 return data
         except BlockingIOError:
             pass
+        except OSError as err:
+            raise _conn.ConnError(f"Connection lost: {err}") from err
         return None
 
     def _write_raw(self, data):
         """Write data to socket"""
-        return self._socket.send(data)
+        if self._socket is None:
+            raise _conn.ConnError("Not connected")
+        try:
+            return self._socket.send(data)
+        except OSError as err:
+            raise _conn.ConnError(f"Connection lost: {err}") from err

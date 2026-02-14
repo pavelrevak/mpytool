@@ -155,6 +155,7 @@ class MountHandler:
         self._log = log
         self._files = {}
         self._next_fd = 0
+        self._free_fds = []
         self._submounts = {}  # {subpath: realpath} for virtual nested mounts
         self._dispatch = {
             CMD_STAT: self._do_stat,
@@ -262,6 +263,7 @@ class MountHandler:
             self._wr_s32(-_errno.EACCES)
             return
         entries = []
+        real_dir = False
         try:
             for name in _os.listdir(local):
                 full = _os.path.join(local, name)
@@ -270,6 +272,7 @@ class MountHandler:
                     entries.append((name, st.st_mode & 0xF000))
                 except OSError:
                     pass
+            real_dir = True
         except OSError:
             pass  # Virtual intermediate dir — may have submount entries
         # Inject virtual entries for submounts
@@ -293,7 +296,7 @@ class MountHandler:
                     mode = 0x4000  # virtual intermediate dir
                 entries.append((child_name, mode))
                 existing.add(child_name)
-        if not entries:
+        if not entries and not real_dir and not self._is_virtual_dir(path):
             self._wr_s32(-_errno.ENOENT)
             return
         self._wr_s32(len(entries))
@@ -312,8 +315,11 @@ class MountHandler:
             # Always binary on PC side — text conversion happens on device
             bin_mode = mode if 'b' in mode else mode + 'b'
             f = open(local, bin_mode)
-            fd = self._next_fd
-            self._next_fd += 1
+            if self._free_fds:
+                fd = self._free_fds.pop()
+            else:
+                fd = self._next_fd
+                self._next_fd += 1
             self._files[fd] = f
             self._wr_s8(fd)
         except OSError:
@@ -324,6 +330,7 @@ class MountHandler:
         f = self._files.pop(fd, None)
         if f:
             f.close()
+            self._free_fds.append(fd)
         # No response (fire-and-forget)
 
     def _do_read(self):
@@ -345,6 +352,7 @@ class MountHandler:
                 pass
         self._files.clear()
         self._next_fd = 0
+        self._free_fds.clear()
 
 
 class ConnIntercept(Conn):

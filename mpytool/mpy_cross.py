@@ -77,7 +77,7 @@ class MpyCross:
         # Bytecode version targeting
         cross_str = f'v{cross_ver}.{cross_sub}'
         if cross_ver != dev_ver or cross_sub != dev_sub:
-            self._args = ['-b', f'{dev_ver}.{dev_sub}']
+            self._args += ['-b', f'{dev_ver}.{dev_sub}']
             cross_str += f' -> v{dev_ver}.{dev_sub}'
         # Native architecture for @native/@viper support
         dev_arch = platform_info.get('mpy_arch', 0)
