@@ -151,6 +151,20 @@ $ mpytool cd :..                  # change to parent directory
 $ mpytool cd :/lib -- ls          # change directory and list files
 ```
 
+### Module search path (sys.path)
+```
+$ mpytool path                    # show current sys.path
+'', '/lib'
+$ mpytool path : :/lib            # replace entire sys.path
+$ mpytool path -f :/custom        # prepend to sys.path (remove duplicates)
+$ mpytool path -a :/sdcard/lib    # append to sys.path (remove duplicates)
+$ mpytool path -d :/custom        # delete from sys.path
+$ mpytool path -f : :/lib :/extra # prepend multiple paths
+$ mpytool cd :/app -- path -f :   # combine with cd to set working dir
+```
+
+Path semantics: `:` = empty string (CWD) in sys.path, `:/` = root directory. The `-f` and `-a` flags automatically remove duplicates (move existing paths to new position).
+
 ### Stop, reset and REPL
 ```
 $ mpytool stop               # stop running program (Ctrl-C)

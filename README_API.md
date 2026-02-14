@@ -432,6 +432,123 @@ mpy.chdir(path)
 **Raises:**
 - `DirNotFound`: If directory doesn't exist or path is a file
 
+#### get_sys_path()
+
+Get current module search path from device.
+
+```python
+mpy.get_sys_path()
+```
+
+**Returns:**
+- `list`: Current `sys.path` list from device
+
+**Example:**
+```python
+>>> mpy.get_sys_path()
+['', '/lib']
+```
+
+#### set_sys_path(*paths)
+
+Replace entire module search path on device.
+
+```python
+mpy.set_sys_path(*paths)
+```
+
+**Parameters:**
+- `*paths` (str): New paths for `sys.path`
+
+**Example:**
+```python
+>>> mpy.set_sys_path('', '/lib')          # Set to ['', '/lib']
+>>> mpy.set_sys_path('/', '/sd/lib')      # Set to ['/', '/sd/lib']
+```
+
+#### prepend_sys_path(*paths)
+
+Add paths to beginning of module search path (automatically removes duplicates).
+
+```python
+mpy.prepend_sys_path(*paths)
+```
+
+**Parameters:**
+- `*paths` (str): Paths to prepend to `sys.path`
+
+If a path already exists in `sys.path`, it is removed first and then added
+at the beginning. This effectively moves the path to the front.
+
+**Example:**
+```python
+>>> mpy.get_sys_path()
+['', '/lib']
+>>> mpy.prepend_sys_path('/custom')
+>>> mpy.get_sys_path()
+['/custom', '', '/lib']
+
+# Move existing path to front
+>>> mpy.prepend_sys_path('/lib')
+>>> mpy.get_sys_path()
+['/lib', '/custom', '']
+```
+
+#### append_sys_path(*paths)
+
+Add paths to end of module search path (automatically removes duplicates).
+
+```python
+mpy.append_sys_path(*paths)
+```
+
+**Parameters:**
+- `*paths` (str): Paths to append to `sys.path`
+
+If a path already exists in `sys.path`, it is removed first and then added
+at the end. This effectively moves the path to the back.
+
+**Example:**
+```python
+>>> mpy.get_sys_path()
+['', '/lib']
+>>> mpy.append_sys_path('/sdcard/lib')
+>>> mpy.get_sys_path()
+['', '/lib', '/sdcard/lib']
+
+# Move existing path to end
+>>> mpy.append_sys_path('')
+>>> mpy.get_sys_path()
+['/lib', '/sdcard/lib', '']
+```
+
+#### remove_from_sys_path(*paths)
+
+Remove specified paths from module search path.
+
+```python
+mpy.remove_from_sys_path(*paths)
+```
+
+**Parameters:**
+- `*paths` (str): Paths to remove from `sys.path`
+
+Silently ignores paths that don't exist in `sys.path`.
+
+**Example:**
+```python
+>>> mpy.get_sys_path()
+['', '/lib', '/custom']
+>>> mpy.remove_from_sys_path('/custom')
+>>> mpy.get_sys_path()
+['', '/lib']
+
+# Remove multiple paths
+>>> mpy.remove_from_sys_path('', '/lib')
+>>> mpy.get_sys_path()
+[]
+```
+
 #### hashfile(path)
 
 Compute SHA256 hash of a file on device.

@@ -353,6 +353,54 @@ def _mt_pfind(label):
         except _mpy_comm.CmdError as err:
             raise DirNotFound(path) from err
 
+    def get_sys_path(self):
+        """Get current sys.path from device
+
+        Returns:
+            list of path strings
+        """
+        self.import_module('sys')
+        return self._mpy_comm.exec_eval("sys.path")
+
+    def set_sys_path(self, *paths):
+        """Replace entire sys.path with new paths
+
+        Arguments:
+            *paths: path strings
+        """
+        self.import_module('sys')
+        self._mpy_comm.exec(f"sys.path = {list(paths)!r}")
+
+    def prepend_sys_path(self, *paths):
+        """Add paths to beginning of sys.path (removes duplicates)
+
+        Arguments:
+            *paths: path strings to prepend
+        """
+        current = self.get_sys_path()
+        current = [p for p in current if p not in paths]
+        self._mpy_comm.exec(f"sys.path = {list(paths) + current!r}")
+
+    def append_sys_path(self, *paths):
+        """Add paths to end of sys.path (removes duplicates)
+
+        Arguments:
+            *paths: path strings to append
+        """
+        current = self.get_sys_path()
+        current = [p for p in current if p not in paths]
+        self._mpy_comm.exec(f"sys.path = {current + list(paths)!r}")
+
+    def remove_from_sys_path(self, *paths):
+        """Remove specified paths from sys.path
+
+        Arguments:
+            *paths: path strings to remove
+        """
+        current = self.get_sys_path()
+        new_path = [p for p in current if p not in paths]
+        self._mpy_comm.exec(f"sys.path = {new_path!r}")
+
     def hashfile(self, path):
         """Compute SHA256 hash of file
 

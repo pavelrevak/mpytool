@@ -1360,5 +1360,88 @@ class TestMpyCompilation(unittest.TestCase):
         # After cmd_cp finishes (even with mock), flags should be restored
 
 
+class TestPathCommand(unittest.TestCase):
+    """Tests for path command dispatch"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+        self.tool._mpy = Mock()
+
+    def test_path_show(self):
+        """Test path without arguments shows current path"""
+        self.tool._mpy.get_sys_path.return_value = ['', '/lib']
+        with patch('builtins.print') as mock_print:
+            self.tool._dispatch_path([], False)
+        mock_print.assert_called_once_with(": :/lib")
+
+    def test_path_replace(self):
+        """Test path replacement without flags"""
+        commands = [':/', ':/lib', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.set_sys_path.assert_called_once_with('/', '/lib', '/custom')
+
+    def test_path_prepend(self):
+        """Test path prepend with -f flag"""
+        commands = ['-f', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.prepend_sys_path.assert_called_once_with('/custom')
+
+    def test_path_prepend_long_flag(self):
+        """Test path prepend with --first flag"""
+        commands = ['--first', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.prepend_sys_path.assert_called_once_with('/custom')
+
+    def test_path_append(self):
+        """Test path append with -a flag"""
+        commands = ['-a', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.append_sys_path.assert_called_once_with('/custom')
+
+    def test_path_append_long_flag(self):
+        """Test path append with --append flag"""
+        commands = ['--append', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.append_sys_path.assert_called_once_with('/custom')
+
+    def test_path_delete(self):
+        """Test path delete with -d flag"""
+        commands = ['-d', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.remove_from_sys_path.assert_called_once_with('/custom')
+
+    def test_path_delete_long_flag(self):
+        """Test path delete with --delete flag"""
+        commands = ['--delete', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.remove_from_sys_path.assert_called_once_with('/custom')
+
+    def test_path_requires_colon_prefix(self):
+        """Test that path requires : prefix"""
+        commands = ['/lib']
+        with self.assertRaises(ParamsError):
+            self.tool._dispatch_path(commands, False)
+
+    def test_path_multiple_paths(self):
+        """Test path with multiple paths"""
+        commands = [':', ':/lib', ':/custom']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.set_sys_path.assert_called_once_with('', '/lib', '/custom')
+
+    def test_path_prepend_multiple(self):
+        """Test prepending multiple paths"""
+        commands = ['-f', ':/a', ':/b']
+        self.tool._dispatch_path(commands, False)
+        self.tool._mpy.prepend_sys_path.assert_called_once_with('/a', '/b')
+
+    def test_path_unknown_flag(self):
+        """Test unknown flag raises error"""
+        commands = ['-x', ':/lib']
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_path(commands, False)
+        self.assertIn('unknown', str(ctx.exception).lower())
+
+
 if __name__ == "__main__":
     unittest.main()

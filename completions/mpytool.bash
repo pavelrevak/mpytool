@@ -7,7 +7,7 @@ _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 _MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd stop monitor repl exec run reset info flash ota mount ln sleep speedtest"
+_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd path stop monitor repl exec run reset info flash ota mount ln sleep speedtest"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -202,6 +202,28 @@ _mpytool() {
             else
                 [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             fi
+            ;;
+        path)
+            # path [-f|-a|-d] [paths...]
+            # Check if flags already present
+            local has_flag=0
+            for w in "${COMP_WORDS[@]:cmd_start+1}"; do
+                case "$w" in
+                    -f|--first|-a|--append|-d|--delete) has_flag=1 ;;
+                esac
+            done
+            # Offer flags first
+            if [[ $has_flag -eq 0 && ( "$cur" == -* || -z "$cur" ) ]]; then
+                COMPREPLY=($(compgen -W "-f --first -a --append -d --delete" -- "$cur"))
+            fi
+            # Remote paths (: prefix)
+            if [[ "$cur" == :* ]]; then
+                _mpytool_complete_remote "$cur"
+            else
+                COMPREPLY+=($(compgen -W ":" -- "$cur"))
+            fi
+            # -- after at least one path
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         cp)
             # n local + 1 remote OR n remote + 1 local

@@ -1997,5 +1997,105 @@ class TestMountLn(unittest.TestCase):
         self.assertIn('single.py', result)
 
 
+@requires_device
+class TestPathOperations(unittest.TestCase):
+    """Test sys.path operations"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        # Save original sys.path
+        cls.original_path = cls.mpy.get_sys_path()
+
+    @classmethod
+    def tearDownClass(cls):
+        # Restore original sys.path
+        try:
+            cls.mpy.set_sys_path(*cls.original_path)
+        except Exception:
+            pass
+        cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
+
+    def setUp(self):
+        # Reset to original path before each test
+        self.mpy.set_sys_path(*self.original_path)
+
+    def test_01_get_sys_path(self):
+        """Test getting sys.path from device"""
+        path = self.mpy.get_sys_path()
+        self.assertIsInstance(path, list)
+        self.assertGreater(len(path), 0)
+
+    def test_02_set_sys_path(self):
+        """Test setting entire sys.path"""
+        self.mpy.set_sys_path('', '/lib')
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path, ['', '/lib'])
+
+    def test_03_prepend_sys_path(self):
+        """Test prepending to sys.path"""
+        self.mpy.set_sys_path('', '/lib')
+        self.mpy.prepend_sys_path('/custom')
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path, ['/custom', '', '/lib'])
+
+    def test_04_append_sys_path(self):
+        """Test appending to sys.path"""
+        self.mpy.set_sys_path('', '/lib')
+        self.mpy.append_sys_path('/extra')
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path, ['', '/lib', '/extra'])
+
+    def test_05_prepend_removes_duplicates(self):
+        """Test that prepend removes existing occurrences"""
+        self.mpy.set_sys_path('', '/lib', '/custom')
+        self.mpy.prepend_sys_path('')  # Move '' to front
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path[0], '')
+        self.assertEqual(path.count(''), 1)
+
+    def test_06_append_removes_duplicates(self):
+        """Test that append removes existing occurrences"""
+        self.mpy.set_sys_path('/custom', '', '/lib')
+        self.mpy.append_sys_path('/custom')  # Move /custom to end
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path[-1], '/custom')
+        self.assertEqual(path.count('/custom'), 1)
+
+    def test_07_remove_from_sys_path(self):
+        """Test removing paths from sys.path"""
+        self.mpy.set_sys_path('', '/lib', '/custom', '/extra')
+        self.mpy.remove_from_sys_path('/custom', '/extra')
+        path = self.mpy.get_sys_path()
+        self.assertNotIn('/custom', path)
+        self.assertNotIn('/extra', path)
+        self.assertIn('', path)
+        self.assertIn('/lib', path)
+
+    def test_08_remove_nonexistent_path(self):
+        """Test removing nonexistent path doesn't raise error"""
+        self.mpy.set_sys_path('', '/lib')
+        self.mpy.remove_from_sys_path('/nonexistent')
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path, ['', '/lib'])
+
+    def test_09_prepend_multiple_paths(self):
+        """Test prepending multiple paths at once"""
+        self.mpy.set_sys_path('', '/lib')
+        self.mpy.prepend_sys_path('/a', '/b')
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path[:2], ['/a', '/b'])
+
+    def test_10_append_multiple_paths(self):
+        """Test appending multiple paths at once"""
+        self.mpy.set_sys_path('', '/lib')
+        self.mpy.append_sys_path('/a', '/b')
+        path = self.mpy.get_sys_path()
+        self.assertEqual(path[-2:], ['/a', '/b'])
+
+
 if __name__ == "__main__":
     unittest.main()

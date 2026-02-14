@@ -1280,6 +1280,47 @@ class MpyTool():
         self.verbose(f"CD: {path}", 2)
         self._mpy.chdir(path)
 
+    def _dispatch_path(self, commands, is_last_group):
+        # Parse flags
+        mode = 'replace'
+        while commands and commands[0].startswith('-'):
+            flag = commands[0]
+            if flag in ('-f', '--first'):
+                mode = 'prepend'
+                commands.pop(0)
+            elif flag in ('-a', '--append'):
+                mode = 'append'
+                commands.pop(0)
+            elif flag in ('-d', '--delete'):
+                mode = 'delete'
+                commands.pop(0)
+            else:
+                raise ParamsError(f"unknown path flag: '{flag}'")
+        # No arguments = show current path
+        if not commands:
+            paths = self._mpy.get_sys_path()
+            print(' '.join(f':{p}' for p in paths))
+            return
+        # Parse paths (with : prefix)
+        parsed_paths = []
+        for arg in commands:
+            path = _parse_device_path(arg, 'path')
+            parsed_paths.append(path)
+        commands.clear()
+        # Apply operation
+        if mode == 'replace':
+            self._mpy.set_sys_path(*parsed_paths)
+            self.verbose(f"PATH set to {len(parsed_paths)} entries", 1)
+        elif mode == 'prepend':
+            self._mpy.prepend_sys_path(*parsed_paths)
+            self.verbose(f"PATH prepended {len(parsed_paths)} entries", 1)
+        elif mode == 'append':
+            self._mpy.append_sys_path(*parsed_paths)
+            self.verbose(f"PATH appended {len(parsed_paths)} entries", 1)
+        elif mode == 'delete':
+            self._mpy.remove_from_sys_path(*parsed_paths)
+            self.verbose(f"PATH removed {len(parsed_paths)} entries", 1)
+
     def _dispatch_stop(self, commands, is_last_group):
         self._mpy.stop()
         self.verbose("STOP", 1)
@@ -1550,7 +1591,7 @@ class MpyTool():
     # -- command dispatching --
 
     _COMMANDS = frozenset({
-        'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
+        'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd', 'path',
         'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
         'ota', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest', '_paths',
     })
@@ -1583,6 +1624,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   rm {:path} [...]              delete file/dir (:path/ = contents only)
   pwd                           print current working directory
   cd {:path}                    change current working directory
+  path [-f|-a|-d] [{paths...}]  manage sys.path (-f prepend, -a append, -d delete)
   stop                           stop running program (Ctrl-C)
   reset [flags]                  soft reset (Ctrl-D) by default
     --machine [-t {s}]            machine.reset() with reconnect
