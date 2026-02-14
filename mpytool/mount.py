@@ -49,11 +49,6 @@ def _mt_rs():
 def _mt_ws(v):
  b=v.encode();_mt_w('<i',len(b))
  if b:_mt_so.write(b)
-def _mt_rbi(buf,n):
- mv=memoryview(buf);p=0
- while p<n:
-  r=_mt_si.readinto(mv[p:n])
-  if r:p+=r
 class _mt_RF(io.IOBase):
  def __init__(s,fd,txt):
   s.fd=fd;s.txt=txt
@@ -62,38 +57,33 @@ class _mt_RF(io.IOBase):
  def _refill(s):
   _mt_bg(5);_mt_w('b',s.fd);_mt_w('<i',CHUNK_SIZE)
   n=_mt_r('<i')
-  if n>0:_mt_rbi(s._rb,n)
+  if n>0:
+   mv=memoryview(s._rb);p=0
+   while p<n:
+    r=_mt_si.readinto(mv[p:n])
+    if r:p+=r
   _mt_en();s._rn=n;s._rp=0
  def readinto(s,buf):
-  n=len(buf)
-  if n>=CHUNK_SIZE:
-   _mt_bg(5);_mt_w('b',s.fd);_mt_w('<i',n)
-   g=_mt_r('<i')
-   if g>0:_mt_rbi(buf,g)
-   _mt_en()
-   return g if g>0 else 0
-  if s._rp>=s._rn:
-   s._refill()
-   if s._rn<=0:return 0
-  a=min(n,s._rn-s._rp)
-  buf[:a]=s._rb[s._rp:s._rp+a]
-  s._rp+=a
-  return a
+  n=len(buf);p=0
+  while p<n:
+   if s._rp>=s._rn:
+    s._refill()
+    if s._rn<=0:break
+   a=min(n-p,s._rn-s._rp)
+   buf[p:p+a]=s._rb[s._rp:s._rp+a]
+   s._rp+=a;p+=a
+  return p
  def readline(s):
-  p=[]
+  r=bytearray()
   while True:
    if s._rp>=s._rn:
     s._refill()
     if s._rn<=0:break
    i=s._rb.find(b'\\n',s._rp,s._rn)
    if i>=0:
-    p.append(bytes(s._rb[s._rp:i+1]))
-    s._rp=i+1
-    break
-   p.append(bytes(s._rb[s._rp:s._rn]))
-   s._rp=s._rn
-  d=b''.join(p)
-  return str(d,'utf8') if s.txt else d
+    r+=s._rb[s._rp:i+1];s._rp=i+1;break
+   r+=s._rb[s._rp:s._rn];s._rp=s._rn
+  return str(r,'utf8') if s.txt else bytes(r)
  def read(s,n=-1):
   if n>0:
    b=bytearray(n);d=bytes(b[:s.readinto(b)])
@@ -149,11 +139,10 @@ class _mt_FS:
   fd=_mt_r('b');_mt_en()
   if fd<0:raise OSError(-fd)
   return _mt_RF(fd,'b' not in mode)
-def _mt_mount(mp='/remote'):
+def _mt_mount(mp='/remote',mid=0):
  try:os.umount(mp)
  except:pass
- os.mount(_mt_FS(),mp);os.chdir(mp)
- if 'lib' not in sys.path:sys.path.insert(2,'lib')
+ os.mount(_mt_FS(mid=mid),mp)
 """
 
 
@@ -166,6 +155,7 @@ class MountHandler:
         self._log = log
         self._files = {}
         self._next_fd = 0
+        self._submounts = {}  # {subpath: realpath} for virtual nested mounts
         self._dispatch = {
             CMD_STAT: self._do_stat,
             CMD_LISTDIR: self._do_listdir,
@@ -173,6 +163,10 @@ class MountHandler:
             CMD_CLOSE: self._do_close,
             CMD_READ: self._do_read,
         }
+
+    def add_submount(self, subpath, local_dir):
+        """Add virtual submount — subpath is relative to VFS root"""
+        self._submounts[subpath] = _os.path.realpath(local_dir)
 
     # -- read/write primitives --
 
@@ -205,12 +199,23 @@ class MountHandler:
     # -- path security --
 
     def _resolve_path(self, path):
-        """Resolve path within mount root, prevent traversal"""
-        # Normalize: remove leading / (device paths are absolute, local are relative to root)
+        """Resolve path within mount root or submount, prevent traversal"""
         path = path.lstrip('/')
+        # Check submounts (longest prefix first to handle nested submounts)
+        for subpath in sorted(
+                self._submounts, key=len, reverse=True):
+            if path == subpath or path.startswith(subpath + '/'):
+                local_dir = self._submounts[subpath]
+                remainder = path[len(subpath):].lstrip('/')
+                full = _os.path.realpath(
+                    _os.path.join(local_dir, remainder))
+                if not full.startswith(local_dir):
+                    return None
+                return full
+        # Default: resolve in root
         full = _os.path.realpath(_os.path.join(self._root, path))
         if not full.startswith(self._root):
-            return None  # path traversal attempt
+            return None
         return full
 
     # -- command handlers --
@@ -251,6 +256,21 @@ class MountHandler:
                     entries.append((name, st.st_mode & 0xF000))
                 except OSError:
                     pass
+            # Inject virtual directories for submounts
+            prefix = path.lstrip('/').rstrip('/')
+            existing = {name for name, _ in entries}
+            for subpath in self._submounts:
+                if prefix:
+                    if not subpath.startswith(prefix + '/'):
+                        continue
+                    child = subpath[len(prefix) + 1:]
+                else:
+                    child = subpath
+                # Only direct children
+                child_name = child.split('/')[0]
+                if child_name and child_name not in existing:
+                    entries.append((child_name, 0x4000))
+                    existing.add(child_name)
             self._wr_s32(len(entries))
             for name, mode in entries:
                 self._wr_bytes(name.encode('utf-8'))
@@ -312,16 +332,20 @@ class ConnIntercept(Conn):
     dispatches them to MountHandler, and passes everything else through.
     """
 
-    def __init__(self, conn, handler, remount_fn=None, log=None):
+    def __init__(self, conn, handlers, remount_fn=None, log=None):
         super().__init__(log=log)
         self._conn = conn
-        self._handler = handler
+        self._handlers = handlers  # {mid: MountHandler}
         self._remount_fn = remount_fn
         self._pending = b''
         self._busy = False
         # Soft reboot detection
         self._reboot_buf = b''
         self._needs_remount = False
+
+    def add_handler(self, mid, handler):
+        """Add mount handler for given mount ID"""
+        self._handlers[mid] = handler
 
     @property
     def fd(self):
@@ -363,14 +387,17 @@ class ConnIntercept(Conn):
                     self._pending = bytes(data[i:])
                     break
                 cmd = data[i + 1]
+                mid = data[i + 2]
                 if CMD_MIN <= cmd <= CMD_MAX:
                     # Valid VFS command — send ACK and dispatch
-                    self._busy = True
-                    try:
-                        self._conn.write(_ESCAPE_BYTE)
-                        self._handler.dispatch(cmd)
-                    finally:
-                        self._busy = False
+                    handler = self._handlers.get(mid)
+                    if handler:
+                        self._busy = True
+                        try:
+                            self._conn.write(_ESCAPE_BYTE)
+                            handler.dispatch(cmd)
+                        finally:
+                            self._busy = False
                     i += 3
                 else:
                     # Not a valid VFS command — pass through
@@ -412,7 +439,8 @@ class ConnIntercept(Conn):
         return self._conn._write_raw(data)
 
     def close(self):
-        self._handler.close_all()
+        for handler in self._handlers.values():
+            handler.close_all()
         self._conn.close()
 
     def hard_reset(self):

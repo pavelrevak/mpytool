@@ -192,11 +192,15 @@ $ mpytool run script.py -- monitor       # run script and capture output
 ```
 $ mpytool mount ./src                       # mount ./src as /remote, auto-start REPL
 $ mpytool mount ./src :/app                 # mount as /app instead of /remote
+$ mpytool mount ./src -- cd :/app -- repl   # mount, change CWD, enter REPL
 $ mpytool mount ./src -- exec "import main" # mount and run code
 $ mpytool mount ./src -- monitor            # mount and monitor output
+$ mpytool mount ./app :/app -- mount ./lib :/lib -- repl  # multiple mounts
 ```
 
 Mounts a local directory on the device as a readonly VFS. The device can read, import and execute files from the local directory without uploading them to flash. Changes to local files are immediately visible on the device.
+
+Mount does not change CWD or `sys.path` — use `cd` command to set working directory after mount. Multiple independent (non-nested) mounts are supported.
 
 After mount, mpytool automatically enters REPL (unless `monitor` or `repl` follows). In REPL you can import modules from the mounted directory, Ctrl+D triggers soft reset with automatic re-mount.
 

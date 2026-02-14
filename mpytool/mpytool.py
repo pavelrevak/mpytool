@@ -1417,26 +1417,62 @@ class MpyTool():
         self.cmd_mv(*commands)
         commands.clear()
 
+    def _list_mounts(self):
+        """List all mount points on device"""
+        mounts = self._mpy.list_mounts()
+        if not mounts:
+            print("No filesystems found")
+            return
+        for fs in mounts:
+            mp = fs['mount']
+            if fs['fs_type']:
+                print(f"{mp:12} {fs['fs_type']}")
+            else:
+                used_pct = (
+                    fs['used'] / fs['total'] * 100
+                ) if fs['total'] > 0 else 0
+                print(
+                    f"{mp:12} {_utils.format_size(fs['used'])} /"
+                    f" {_utils.format_size(fs['total'])}"
+                    f" ({used_pct:.0f}% used)")
+
     def _dispatch_mount(self, commands, is_last_group):
         if not commands:
-            raise ParamsError('mount requires local directory path')
-        local_path = commands.pop(0)
-        if not _os.path.isdir(local_path):
-            raise ParamsError(f'mount directory not found: {local_path}')
-        # Optional mount point (e.g. :/app)
-        mount_point = '/remote'
-        if commands and commands[0].startswith(':'):
-            mp = commands.pop(0)[1:]
-            if mp and mp.startswith('/'):
-                mount_point = mp
-            else:
+            self._list_mounts()
+            return
+        # Parse dir :/mount_point pairs
+        pairs = []
+        while commands and not commands[0].startswith(':'):
+            local_path = commands.pop(0)
+            if not _os.path.isdir(local_path):
                 raise ParamsError(
-                    'mount point must be absolute path (e.g. :/app)')
-        self._mpy.mount(local_path, mount_point, log=self._log)
+                    f'mount directory not found: {local_path}')
+            mount_point = '/remote'
+            if commands and commands[0].startswith(':'):
+                mp = commands.pop(0)[1:]
+                if mp and mp.startswith('/'):
+                    mount_point = mp
+                else:
+                    raise ParamsError(
+                        'mount point must be absolute path'
+                        ' (e.g. :/app)')
+            pairs.append((local_path, mount_point))
+        # Validate unique mount points
+        mps = [mp for _, mp in pairs]
+        if len(set(mps)) != len(mps):
+            raise ParamsError('duplicate mount points')
+        for local_path, mount_point in pairs:
+            if self._mpy.is_submount(mount_point):
+                raise ParamsError(
+                    f"nested mount '{mount_point}'"
+                    " is not allowed")
+            self._mpy.mount(
+                local_path, mount_point, log=self._log)
+            self.verbose(
+                f"Mounted {local_path} on {mount_point} (readonly)",
+                color='green')
         # Update conn so Terminal/monitor uses ConnIntercept
         self._conn = self._mpy.conn
-        self.verbose(
-            f"Mounted {local_path} on {mount_point} (readonly)", color='green')
         commands.clear()
 
     def _dispatch_speedtest(self, commands, is_last_group):
@@ -1582,8 +1618,11 @@ def _mount_auto_repl(command_groups):
     mount requires mpytool to stay alive (PC handles FS requests).
     If the last command after mount is not repl or monitor, auto-append repl.
     """
+    # mount with args = real mount (needs repl to stay alive)
+    # mount without args = listing only (no repl needed)
     has_mount = any(
-        'mount' in group for group in command_groups)
+        group[0] == 'mount' and len(group) > 1
+        for group in command_groups if group)
     if not has_mount:
         return
     # Check first item (command name) of last group

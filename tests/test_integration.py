@@ -1706,6 +1706,7 @@ class TestMount(unittest.TestCase):
 
     def test_11_import_module(self):
         """Test importing Python module from VFS"""
+        self.mpy.chdir('/remote')
         self.mpy.comm.exec(
             "import sys\n"
             "for k in list(sys.modules):\n"
@@ -1720,11 +1721,6 @@ class TestMount(unittest.TestCase):
             "__import__('testmod').double(21)")
         self.assertEqual(result, 42)
 
-    def test_13_import_from_lib(self):
-        """Test importing module from lib/ subdirectory via VFS"""
-        result = self.mpy.comm.exec_eval(
-            "__import__('libmod').LIB_VALUE")
-        self.assertEqual(result, 99)
 
     def test_14_chdir_and_relative(self):
         """Test chdir to VFS mount and relative path access"""

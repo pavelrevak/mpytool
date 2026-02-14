@@ -112,6 +112,12 @@ class MpyComm():
                 self._conn.write(CTRL_B)
             else:
                 self._conn.write(CTRL_C)
+            # Stale VFS agent recovery: send VFS ACK byte (0x18) to
+            # unblock agent stuck in _mt_bg() waiting for response.
+            # The fake ACK causes the agent to proceed, read garbage
+            # parameters, crash with exception, and return to REPL.
+            if attempt >= 4:
+                self._conn.write(b'\x18')
             try:
                 self._conn.read_until(b'\r\n>>> ', timeout=0.2)
                 self._repl_mode = False

@@ -546,6 +546,9 @@ PC over the serial link. The connection is wrapped in a transparent proxy
 (`ConnIntercept`) that intercepts VFS protocol messages while passing REPL
 I/O through.
 
+Mount does not change CWD or `sys.path` — use `mpy.chdir()` to set working
+directory after mount. Multiple independent (non-nested) mounts are supported.
+
 After calling `mount()`, use `mpy.comm.exit_raw_repl()` to enter friendly
 REPL, or use the CLI `mount` command which handles this automatically.
 
@@ -554,13 +557,15 @@ Soft reset (Ctrl+D) triggers automatic re-mount.
 **Example:**
 ```python
 >>> handler = mpy.mount('./src')
+>>> mpy.chdir('/remote')          # set CWD to mounted directory
 >>> mpy.comm.exit_raw_repl()
 # Device can now: import module  (from ./src/module.py)
 #                 open('/remote/data.txt').read()
 ```
 
 **Raises:**
-- `MpyError`: If agent injection or mount fails
+- `MpyError`: If agent injection or mount fails, or if mount point is nested
+  inside an existing mount
 
 #### stop()
 

@@ -136,6 +136,12 @@ def _mt_pfind(label):
         self._load_helpers = []
         self._chunk_size = chunk_size  # None = auto-detect
         self._platform = None  # Cached platform name
+        self._stale_cleanup_done = False  # Stale VFS cleanup on first use
+        # Multi-mount state
+        self._intercept = None  # ConnIntercept (shared for all mounts)
+        self._mounts = []  # [(mid, mount_point, local_path, handler), ...]
+        self._next_mid = 0
+        self._mount_agent_code = None
 
     @property
     def conn(self):
@@ -158,6 +164,7 @@ def _mt_pfind(label):
         self._load_helpers = []
         self._mpy_comm._repl_mode = None
         self._platform = None
+        self._stale_cleanup_done = False
         Mpy._CHUNK_AUTO_DETECTED = None
         Mpy._DEFLATE_AVAILABLE = None
 
@@ -179,12 +186,37 @@ def _mt_pfind(label):
             self._mpy_comm.exec(self._HELPERS[helper])
             self._load_helpers.append(helper)
 
+    def _cleanup_stale_vfs(self):
+        """Remove stale VFS mounts from previous sessions.
+
+        Uses uos (C built-in) to avoid triggering stale VFS agent.
+        Detects stale mounts by checking statvfs — RemoteFS doesn't
+        support it, so failure indicates a stale mount to remove.
+        """
+        if self._intercept is not None:
+            return  # Active mount session, don't cleanup
+        try:
+            self._mpy_comm.exec(
+                "import uos\n"
+                "for _d in uos.listdir('/'):\n"
+                " _p='/'+_d\n"
+                " try:uos.statvfs(_p)\n"
+                " except:\n"
+                "  try:uos.umount(_p)\n"
+                "  except:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except Exception:
+            pass
+
     def import_module(self, module):
         """Import module to MicroPython
 
         Arguments:
             module: module name to import
         """
+        if not self._stale_cleanup_done:
+            self._stale_cleanup_done = True
+            self._cleanup_stale_vfs()
         if module not in self._imported:
             self._mpy_comm.exec(f'import {module}')
             self._imported.append(module)
@@ -701,6 +733,87 @@ def _mt_pfind(label):
                     pass
         except _mpy_comm.CmdError:
             pass
+
+        return result
+
+    def list_mounts(self):
+        """List all mount points with filesystem type
+
+        Returns:
+            list of dicts: mount, total, free, used, fs_type
+            fs_type is 'RemoteFS' for remote VFS, None for regular FS
+        """
+        self.import_module('os')
+        result = []
+        remote_mps = {mp for _, mp, _, _ in self._mounts}
+
+        # Root filesystem
+        root_sv = None
+        try:
+            root_sv = self._mpy_comm.exec_eval(
+                "os.statvfs('/')")
+            fs_total = root_sv[0] * root_sv[2]
+            fs_free = root_sv[0] * root_sv[3]
+            result.append({
+                'mount': '/',
+                'total': fs_total,
+                'free': fs_free,
+                'used': fs_total - fs_free,
+                'fs_type': None,
+            })
+        except _mpy_comm.CmdError:
+            pass
+
+        # Check subdirectories for additional mount points
+        try:
+            root_dirs = self._mpy_comm.exec_eval(
+                "[d[0] for d in os.ilistdir('/')"
+                " if d[1] == 0x4000]")
+        except _mpy_comm.CmdError:
+            root_dirs = []
+
+        for dirname in sorted(root_dirs):
+            path = '/' + dirname
+            path_escaped = _escape_path(path)
+            try:
+                sub_sv = self._mpy_comm.exec_eval(
+                    f"os.statvfs('{path_escaped}')")
+                # Skip if same filesystem as root
+                if root_sv and sub_sv[:3] == root_sv[:3]:
+                    continue
+                sub_total = sub_sv[0] * sub_sv[2]
+                sub_free = sub_sv[0] * sub_sv[3]
+                if sub_total == 0:
+                    continue
+                result.append({
+                    'mount': path,
+                    'total': sub_total,
+                    'free': sub_free,
+                    'used': sub_total - sub_free,
+                    'fs_type': None,
+                })
+            except _mpy_comm.CmdError:
+                # statvfs failed — RemoteFS or special VFS
+                fs_type = 'RemoteFS' if path in remote_mps else 'VFS'
+                result.append({
+                    'mount': path,
+                    'total': 0,
+                    'free': 0,
+                    'used': 0,
+                    'fs_type': fs_type,
+                })
+
+        # Add submounts (virtual, not visible on device)
+        listed = {fs['mount'] for fs in result}
+        for mid, mp, _, _ in self._mounts:
+            if mp not in listed:
+                result.append({
+                    'mount': mp,
+                    'total': 0,
+                    'free': 0,
+                    'used': 0,
+                    'fs_type': 'RemoteFS',
+                })
 
         return result
 
@@ -1347,6 +1460,15 @@ def _mt_pfind(label):
             'compressed': used_compress,
         }
 
+    def is_submount(self, mount_point):
+        """Check if mount_point would become a virtual submount (link)"""
+        new_norm = mount_point.rstrip('/') + '/'
+        for p_mid, p_mp, _, _ in self._mounts:
+            p_norm = p_mp.rstrip('/') + '/'
+            if new_norm.startswith(p_norm) and p_mid is not None:
+                return True
+        return False
+
     def mount(self, local_path, mount_point='/remote', log=None):
         """Mount local directory on device as readonly VFS
 
@@ -1357,61 +1479,112 @@ def _mt_pfind(label):
 
         Returns:
             MountHandler instance
+
+        Raises:
+            MpyError: if mount_point is already mounted
         """
         import time
         from mpytool.conn import Timeout
         from mpytool.mount import MOUNT_AGENT, MountHandler, ConnIntercept
 
-        # Cleanup stale VFS mount from previous session.
-        # A leftover VFS at mount_point causes any non-built-in import to
-        # trigger VFS stat bytes (0x18 CMD MID) that corrupt raw REPL.
-        # Uses uos (always a C built-in, never triggers VFS).
+        # Check for duplicate mount points and detect nested mounts
+        for p_mid, p_mp, _, p_handler in self._mounts:
+            if p_mp == mount_point:
+                raise _mpy_comm.MpyError(
+                    f"mount point '{mount_point}' already mounted")
+            p_norm = p_mp.rstrip('/') + '/'
+            new_norm = mount_point.rstrip('/') + '/'
+            if new_norm.startswith(p_norm) and p_mid is not None:
+                raise _mpy_comm.MpyError(
+                    f"'{mount_point}' is nested inside"
+                    f" '{p_mp}'")
+            if p_norm.startswith(new_norm):
+                raise _mpy_comm.MpyError(
+                    f"cannot mount '{mount_point}' — existing"
+                    f" mount '{p_mp}' would be nested inside it")
+
+        mid = self._next_mid
         mp_escaped = _escape_path(mount_point)
-        self._mpy_comm.enter_raw_repl()
-        del self._conn._buffer[:]
-        time.sleep(0.2)
-        while self._conn._has_data(timeout=0.1):
-            self._conn._read_available()
-        try:
+
+        if self._intercept is None:
+            # First mount: full setup
+            self._mpy_comm.enter_raw_repl()
+            del self._conn._buffer[:]
+            time.sleep(0.2)
+            while self._conn._has_data(timeout=0.1):
+                self._conn._read_available()
+            # Cleanup all stale VFS from previous sessions
+            try:
+                self._mpy_comm.exec(
+                    "import uos\n"
+                    "for _d in uos.listdir('/'):\n"
+                    " _p='/'+_d\n"
+                    " try:uos.statvfs(_p)\n"
+                    " except:\n"
+                    "  try:uos.umount(_p)\n"
+                    "  except:pass\n"
+                    "uos.chdir('/')", timeout=3)
+            except (_mpy_comm.CmdError, Timeout):
+                pass
+
+            chunk_size = self._detect_chunk_size()
+            agent_code = MOUNT_AGENT.replace(
+                'CHUNK_SIZE', str(chunk_size))
+            self._mount_agent_code = agent_code
+
+            # Inject agent and mount VFS
+            self._mpy_comm.exec(agent_code, timeout=10)
             self._mpy_comm.exec(
-                f"import uos\ntry:uos.umount('{mp_escaped}')\nexcept:pass\n"
-                "uos.chdir('/')", timeout=3)
-        except (_mpy_comm.CmdError, Timeout):
-            pass
+                f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
 
-        chunk_size = self._detect_chunk_size()
-        agent_code = MOUNT_AGENT.replace('CHUNK_SIZE', str(chunk_size))
+            # Create handler and connection intercept
+            handler = MountHandler(self._conn, local_path, log=log)
+            intercept = ConnIntercept(
+                self._conn, {mid: handler},
+                remount_fn=self._do_remount_all, log=log)
 
-        # Inject agent and mount VFS
-        self._mpy_comm.exec(agent_code, timeout=10)
-        self._mpy_comm.exec(
-            f"_mt_mount('{mp_escaped}')", timeout=5)
+            # Replace connection in all layers
+            self._conn = intercept
+            self._mpy_comm._conn = intercept
+            self._intercept = intercept
+        else:
+            # Additional mount: agent already injected
+            self._mpy_comm.enter_raw_repl()
+            # Cleanup stale VFS at this mount point
+            try:
+                self._mpy_comm.exec(
+                    "import uos\n"
+                    f"try:uos.umount('{mp_escaped}')\nexcept:pass",
+                    timeout=3)
+            except (_mpy_comm.CmdError, Timeout):
+                pass
+            self._mpy_comm.exec(
+                f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
 
-        # Create handler and connection intercept
-        handler = MountHandler(self._conn, local_path, log=log)
+            # Create handler and add to existing intercept
+            handler = MountHandler(
+                self._intercept._conn, local_path, log=log)
+            self._intercept.add_handler(mid, handler)
 
-        def remount_fn():
-            self._do_remount(agent_code, mp_escaped, handler)
-
-        intercept = ConnIntercept(
-            self._conn, handler, remount_fn=remount_fn, log=log)
-
-        # Replace connection in all layers
-        self._conn = intercept
-        self._mpy_comm._conn = intercept
-
+        self._mounts.append((mid, mount_point, local_path, handler))
+        self._next_mid += 1
         return handler
 
-    def _do_remount(self, agent_code, mp_escaped, handler):
-        """Re-inject agent and re-mount after soft reset"""
-        handler.close_all()
+    def _do_remount_all(self):
+        """Re-inject agent and re-mount all VFS after soft reset"""
+        for handler in self._intercept._handlers.values():
+            handler.close_all()
         self._imported.clear()
         self._load_helpers.clear()
         self._mpy_comm._repl_mode = None
         self._mpy_comm._raw_paste_supported = None
         self._mpy_comm.enter_raw_repl()
-        self._mpy_comm.exec(agent_code, timeout=10)
-        self._mpy_comm.exec(
-            f"_mt_mount('{mp_escaped}')", timeout=5)
+        self._mpy_comm.exec(self._mount_agent_code, timeout=10)
+        for mid, mount_point, _, _ in self._mounts:
+            if mid is None:
+                continue  # submount — PC-only, persists in handler
+            mp_escaped = _escape_path(mount_point)
+            self._mpy_comm.exec(
+                f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
         self._mpy_comm.exit_raw_repl()
 
