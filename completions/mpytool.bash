@@ -7,7 +7,7 @@ _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 _MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd stop monitor repl exec run reset info flash ota mount sleep speedtest"
+_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd stop monitor repl exec run reset info flash ota mount ln sleep speedtest"
 
 _mpytool_detect_ports() {
     # Detect serial ports based on platform (same logic as mpytool)
@@ -294,11 +294,34 @@ _mpytool() {
             [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         mount)
-            # 1 local dir + optional :mount_point, no -- (auto-repl)
+            # 1 local dir + optional :mount_point, -- for chaining (ln, repl, etc.)
             if [[ $pos -eq 2 ]]; then
                 COMPREPLY=($(compgen -d -- "$cur"))
             elif [[ $pos -eq 3 ]]; then
-                COMPREPLY=($(compgen -W ":" -- "$cur"))
+                COMPREPLY=($(compgen -W ": --" -- "$cur"))
+            else
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            fi
+            ;;
+        ln)
+            # n local sources + 1 remote dest (: prefix, absolute path)
+            local n_local=0 n_remote=0
+            for ((j=cmd_start+1; j < COMP_CWORD; j++)); do
+                if [[ "${COMP_WORDS[j]}" == :* ]]; then
+                    ((n_remote++))
+                else
+                    ((n_local++))
+                fi
+            done
+            if [[ $n_local -ge 1 && $n_remote -ge 1 ]]; then
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            else
+                if [[ "$cur" == :* ]]; then
+                    _mpytool_complete_remote "$cur"
+                else
+                    COMPREPLY=($(compgen -f -- "$cur"))
+                    COMPREPLY+=($(compgen -W ":" -- "$cur"))
+                fi
             fi
             ;;
         speedtest)

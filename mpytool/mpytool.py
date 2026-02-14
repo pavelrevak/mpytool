@@ -1475,6 +1475,64 @@ class MpyTool():
         self._conn = self._mpy.conn
         commands.clear()
 
+    def _dispatch_ln(self, commands, is_last_group):
+        if len(commands) < 2:
+            raise ParamsError('ln requires source(s) and destination')
+        # Last arg is dst (must have : prefix with absolute path)
+        args = list(commands)
+        commands.clear()
+        dst_arg = args[-1]
+        src_args = args[:-1]
+        if not dst_arg.startswith(':'):
+            raise ParamsError(
+                'ln destination must be device path (: prefix)')
+        dst_path = dst_arg[1:]
+        if not dst_path.startswith('/'):
+            raise ParamsError(
+                'ln destination must be absolute path (e.g. :/lib/)')
+        dst_is_dir = dst_path.endswith('/')
+        # Multiple sources or source with trailing / require directory dst
+        has_contents = any(
+            s.endswith('/') or s.endswith(_os.sep)
+            for s in src_args)
+        if len(src_args) > 1 and not dst_is_dir:
+            raise ParamsError(
+                'multiple sources require directory destination'
+                ' (trailing /)')
+        if has_contents and not dst_is_dir:
+            raise ParamsError(
+                'contents source (trailing /) requires directory'
+                ' destination (trailing /)')
+        # Find parent mount (longest matching mount_point)
+        best_mp = None
+        dst_norm = dst_path.rstrip('/')
+        for p_mid, p_mp, _, _ in self._mpy._mounts:
+            if p_mid is None:
+                continue
+            mp_norm = p_mp.rstrip('/')
+            if dst_norm == mp_norm or dst_norm.startswith(mp_norm + '/'):
+                if best_mp is None or len(p_mp) > len(best_mp):
+                    best_mp = p_mp
+        if best_mp is None:
+            raise ParamsError(
+                'ln requires an active mount (use mount first)')
+        mp_prefix = best_mp.rstrip('/')
+        dst_rel = dst_path[len(mp_prefix):].strip('/')
+        for src in src_args:
+            is_contents = src.endswith('/') or src.endswith(_os.sep)
+            local_path = src.rstrip('/').rstrip(_os.sep)
+            if not _os.path.exists(local_path):
+                raise ParamsError(f"source not found: '{local_path}'")
+            if dst_is_dir and not is_contents:
+                basename = _os.path.basename(local_path)
+                subpath = dst_rel + '/' + basename if dst_rel else basename
+            else:
+                subpath = dst_rel
+            self._mpy.add_submount(best_mp, subpath, local_path)
+            self.verbose(
+                f"Linked {local_path} -> {best_mp}/{subpath}",
+                color='green')
+
     def _dispatch_speedtest(self, commands, is_last_group):
         from mpytool.speedtest import speedtest
         self.verbose("SPEEDTEST", 1)
@@ -1496,7 +1554,7 @@ class MpyTool():
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd',
         'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
-        'ota', 'sleep', 'cp', 'mv', 'mount', 'speedtest', '_paths',
+        'ota', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest', '_paths',
     })
 
     def process_commands(self, commands, is_last_group=False):
@@ -1545,6 +1603,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   flash erase [{label}] [--full]  erase flash/partition
   ota {firmware.app-bin}        OTA update (ESP32)
   mount {dir} [:{mount_point}]  mount local dir on device (readonly)
+  ln {src} [...] {:path}        link local file/dir into mounted VFS
   speedtest                     serial link speed test
   sleep {seconds}               pause between commands
 Use -- to chain commands:

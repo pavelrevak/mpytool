@@ -28,6 +28,24 @@ def _pack_str(s):
     return _pack_s32(len(data)) + data
 
 
+def _parse_listdir(data):
+    """Parse listdir wire output into {name: mode} dict"""
+    count = struct.unpack('<i', data[0:4])[0]
+    if count < 0:
+        return count, {}
+    entries = {}
+    offset = 4
+    for _ in range(count):
+        name_len = struct.unpack('<i', data[offset:offset + 4])[0]
+        offset += 4
+        name = data[offset:offset + name_len].decode()
+        offset += name_len
+        mode = struct.unpack('<I', data[offset:offset + 4])[0]
+        offset += 4
+        entries[name] = mode
+    return count, entries
+
+
 class MockConnForHandler:
     """Mock connection that records writes and provides reads from a queue"""
 
@@ -126,23 +144,12 @@ class TestMountHandler(unittest.TestCase):
         self.assertEqual(mode, 0x4000)
 
     def test_listdir(self):
-        """listdir() returns all entries with modes"""
+        """listdir() returns all entries with modes and sizes"""
         self.conn.feed(_pack_str('/'))
         self.handler.dispatch(CMD_LISTDIR)
         data = self.conn.get_written()
-        count = struct.unpack('<i', data[0:4])[0]
+        count, entries = _parse_listdir(data)
         self.assertEqual(count, 3)  # test.py, data.bin, lib/
-        # Parse entries
-        entries = {}
-        offset = 4
-        for _ in range(count):
-            name_len = struct.unpack('<i', data[offset:offset + 4])[0]
-            offset += 4
-            name = data[offset:offset + name_len].decode()
-            offset += name_len
-            mode = struct.unpack('<I', data[offset:offset + 4])[0]
-            offset += 4
-            entries[name] = mode
         self.assertIn('test.py', entries)
         self.assertIn('data.bin', entries)
         self.assertIn('lib', entries)
@@ -302,38 +309,17 @@ class TestMountHandlerSubmount(unittest.TestCase):
         """listdir root includes virtual submount directory"""
         self.conn.feed(_pack_str('/'))
         self.handler.dispatch(CMD_LISTDIR)
-        data = self.conn.get_written()
-        count = struct.unpack('<i', data[0:4])[0]
-        # Parse entry names
-        names = []
-        offset = 4
-        for _ in range(count):
-            name_len = struct.unpack('<i', data[offset:offset + 4])[0]
-            offset += 4
-            name = data[offset:offset + name_len].decode()
-            offset += name_len
-            offset += 4  # skip mode
-            names.append(name)
-        self.assertIn('test.py', names)
-        self.assertIn('lib', names)  # virtual dir injected
+        count, entries = _parse_listdir(self.conn.get_written())
+        self.assertIn('test.py', entries)
+        self.assertIn('lib', entries)  # virtual dir injected
 
     def test_listdir_submount(self):
         """listdir on submount path lists submount contents"""
         self.conn.feed(_pack_str('/lib'))
         self.handler.dispatch(CMD_LISTDIR)
-        data = self.conn.get_written()
-        count = struct.unpack('<i', data[0:4])[0]
-        names = []
-        offset = 4
-        for _ in range(count):
-            name_len = struct.unpack('<i', data[offset:offset + 4])[0]
-            offset += 4
-            name = data[offset:offset + name_len].decode()
-            offset += name_len
-            offset += 4
-            names.append(name)
-        self.assertIn('helper.py', names)
-        self.assertIn('subdir', names)
+        count, entries = _parse_listdir(self.conn.get_written())
+        self.assertIn('helper.py', entries)
+        self.assertIn('subdir', entries)
 
     def test_open_read_submount(self):
         """Open and read file from submount"""
@@ -365,19 +351,92 @@ class TestMountHandlerSubmount(unittest.TestCase):
         os.makedirs(os.path.join(self.temp_root, 'lib'), exist_ok=True)
         self.conn.feed(_pack_str('/'))
         self.handler.dispatch(CMD_LISTDIR)
-        data = self.conn.get_written()
-        count = struct.unpack('<i', data[0:4])[0]
-        names = []
-        offset = 4
-        for _ in range(count):
-            name_len = struct.unpack('<i', data[offset:offset + 4])[0]
-            offset += 4
-            name = data[offset:offset + name_len].decode()
-            offset += name_len
-            offset += 4
-            names.append(name)
+        count, entries = _parse_listdir(self.conn.get_written())
+        names = list(entries.keys())
         # 'lib' should appear only once
         self.assertEqual(names.count('lib'), 1)
+
+
+class TestMountHandlerVirtualDir(unittest.TestCase):
+    """Tests for virtual intermediate directories from submounts"""
+
+    def setUp(self):
+        self.temp_root = tempfile.mkdtemp()
+        self.temp_pkg = tempfile.mkdtemp()
+        self.temp_file_dir = tempfile.mkdtemp()
+        # Root has root.txt only (no 'lib' directory)
+        with open(os.path.join(self.temp_root, 'root.txt'), 'wb') as f:
+            f.write(b'root\n')
+        # Package dir has mod.py
+        with open(os.path.join(self.temp_pkg, 'mod.py'), 'wb') as f:
+            f.write(b'# mod\n')
+        # Single file
+        self.single_file = os.path.join(self.temp_file_dir, 'single.py')
+        with open(self.single_file, 'wb') as f:
+            f.write(b'# single\n')
+        self.conn = MockConnForHandler()
+        self.handler = MountHandler(self.conn, self.temp_root)
+        # Submounts create virtual 'lib' intermediate directory
+        self.handler.add_submount('lib/pkg', self.temp_pkg)
+        self.handler.add_submount('lib/single.py', self.single_file)
+
+    def tearDown(self):
+        self.handler.close_all()
+        shutil.rmtree(self.temp_root)
+        shutil.rmtree(self.temp_pkg)
+        shutil.rmtree(self.temp_file_dir)
+
+    def test_stat_virtual_dir(self):
+        """stat on virtual intermediate dir returns S_IFDIR"""
+        self.conn.feed(_pack_str('/lib'))
+        self.handler.dispatch(CMD_STAT)
+        data = self.conn.get_written()
+        result = struct.unpack('b', data[0:1])[0]
+        self.assertEqual(result, 0)  # OK
+        mode = struct.unpack('<I', data[1:5])[0]
+        self.assertEqual(mode, 0x4000)
+
+    def test_listdir_virtual_dir(self):
+        """listdir on virtual intermediate dir returns submount entries"""
+        self.conn.feed(_pack_str('/lib'))
+        self.handler.dispatch(CMD_LISTDIR)
+        count, entries = _parse_listdir(self.conn.get_written())
+        self.assertEqual(count, 2)
+        self.assertIn('pkg', entries)
+        self.assertIn('single.py', entries)
+        self.assertEqual(entries['pkg'], 0x4000)  # directory
+        self.assertEqual(entries['single.py'], 0x8000)  # file
+
+    def test_listdir_root_shows_virtual(self):
+        """listdir root includes virtual 'lib' directory"""
+        self.conn.feed(_pack_str('/'))
+        self.handler.dispatch(CMD_LISTDIR)
+        count, entries = _parse_listdir(self.conn.get_written())
+        self.assertIn('root.txt', entries)
+        self.assertIn('lib', entries)
+
+    def test_stat_nonexistent_in_virtual(self):
+        """stat on nonexistent path under virtual dir returns ENOENT"""
+        self.conn.feed(_pack_str('/lib/nope'))
+        self.handler.dispatch(CMD_STAT)
+        data = self.conn.get_written()
+        result = struct.unpack('b', data[0:1])[0]
+        self.assertEqual(result, -errno.ENOENT)
+
+    def test_open_file_submount(self):
+        """open and read single file submount"""
+        self.conn.feed(_pack_str('/lib/single.py') + _pack_str('rb'))
+        self.handler.dispatch(CMD_OPEN)
+        data = self.conn.get_written()
+        fd = struct.unpack('b', data[0:1])[0]
+        self.assertGreaterEqual(fd, 0)
+        # Read
+        self.conn.feed(struct.pack('b', fd) + _pack_s32(4096))
+        self.handler.dispatch(CMD_READ)
+        data = self.conn.get_written()
+        length = struct.unpack('<i', data[0:4])[0]
+        content = data[4:4 + length]
+        self.assertEqual(content, b'# single\n')
 
 
 class TestConnIntercept(unittest.TestCase):
@@ -999,6 +1058,149 @@ class TestStaleVfsCleanup(unittest.TestCase):
         mpy._stale_cleanup_done = True
         mpy.reset_state()
         self.assertFalse(mpy._stale_cleanup_done)
+
+
+class TestLnDispatch(unittest.TestCase):
+    """Tests for ln command dispatch"""
+
+    def setUp(self):
+        from mpytool.mpytool import MpyTool
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+        self.tool._mpy = Mock()
+        self.mock_handler = Mock()
+        # Simulate active mount at /app
+        self.tool._mpy._mounts = [
+            (0, '/app', '/tmp/src', self.mock_handler)]
+        self.tool._mpy.add_submount = Mock()
+        self.temp_dir = tempfile.mkdtemp()
+        self.temp_file = os.path.join(self.temp_dir, 'file.py')
+        with open(self.temp_file, 'w') as f:
+            f.write('# test')
+        self.temp_sub = os.path.join(self.temp_dir, 'pkg')
+        os.makedirs(self.temp_sub)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_ln_dir(self):
+        """ln ./dir :/app/lib -> subpath 'lib'"""
+        self.tool._dispatch_ln(
+            [self.temp_sub, ':/app/lib'], is_last_group=True)
+        self.tool._mpy.add_submount.assert_called_once_with(
+            '/app', 'lib', self.temp_sub)
+
+    def test_ln_dir_trailing_slash_dst(self):
+        """ln ./dir :/app/lib/ -> subpath 'lib/pkg'"""
+        self.tool._dispatch_ln(
+            [self.temp_sub, ':/app/lib/'], is_last_group=True)
+        self.tool._mpy.add_submount.assert_called_once_with(
+            '/app', 'lib/pkg', self.temp_sub)
+
+    def test_ln_dir_contents(self):
+        """ln ./dir/ :/app/lib/ -> subpath 'lib' (contents)"""
+        self.tool._dispatch_ln(
+            [self.temp_sub + '/', ':/app/lib/'], is_last_group=True)
+        self.tool._mpy.add_submount.assert_called_once_with(
+            '/app', 'lib', self.temp_sub)
+
+    def test_ln_file(self):
+        """ln ./file.py :/app/file.py -> subpath 'file.py'"""
+        self.tool._dispatch_ln(
+            [self.temp_file, ':/app/file.py'], is_last_group=True)
+        self.tool._mpy.add_submount.assert_called_once_with(
+            '/app', 'file.py', self.temp_file)
+
+    def test_ln_file_to_dir(self):
+        """ln ./file.py :/app/lib/ -> subpath 'lib/file.py'"""
+        self.tool._dispatch_ln(
+            [self.temp_file, ':/app/lib/'], is_last_group=True)
+        self.tool._mpy.add_submount.assert_called_once_with(
+            '/app', 'lib/file.py', self.temp_file)
+
+    def test_ln_multi_src(self):
+        """ln ./a.py ./pkg :/app/lib/ -> two add_submount calls"""
+        self.tool._dispatch_ln(
+            [self.temp_file, self.temp_sub, ':/app/lib/'],
+            is_last_group=True)
+        calls = self.tool._mpy.add_submount.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0].args, ('/app', 'lib/file.py', self.temp_file))
+        self.assertEqual(
+            calls[1].args, ('/app', 'lib/pkg', self.temp_sub))
+
+    def test_ln_multi_src_no_trailing_slash_error(self):
+        """ln ./a ./b :/lib -> error (no trailing /)"""
+        from mpytool.mpytool import ParamsError
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_ln(
+                [self.temp_file, self.temp_sub, ':/app/lib'],
+                is_last_group=True)
+        self.assertIn('directory destination', str(ctx.exception))
+
+    def test_ln_contents_no_trailing_slash_error(self):
+        """ln ./dir/ :/lib -> error (contents without trailing /)"""
+        from mpytool.mpytool import ParamsError
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_ln(
+                [self.temp_sub + '/', ':/app/lib'],
+                is_last_group=True)
+        self.assertIn('directory', str(ctx.exception))
+
+    def test_ln_no_mount_error(self):
+        """ln without active mount -> error"""
+        from mpytool.mpytool import ParamsError
+        self.tool._mpy._mounts = []
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_ln(
+                [self.temp_file, ':/lib/file.py'], is_last_group=True)
+        self.assertIn('mount', str(ctx.exception))
+
+    def test_ln_no_args_error(self):
+        """ln without arguments -> error"""
+        from mpytool.mpytool import ParamsError
+        with self.assertRaises(ParamsError):
+            self.tool._dispatch_ln([], is_last_group=True)
+
+    def test_ln_nonexistent_source_error(self):
+        """ln with nonexistent source -> error"""
+        from mpytool.mpytool import ParamsError
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_ln(
+                ['/nonexistent/path', ':/app/lib/'],
+                is_last_group=True)
+        self.assertIn('not found', str(ctx.exception))
+
+    def test_ln_in_commands(self):
+        """ln is in _COMMANDS set"""
+        from mpytool.mpytool import MpyTool
+        self.assertIn('ln', MpyTool._COMMANDS)
+
+    def test_ln_dst_without_colon_error(self):
+        """ln dst without : prefix -> error"""
+        from mpytool.mpytool import ParamsError
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_ln(
+                [self.temp_file, '/app/lib/'], is_last_group=True)
+        self.assertIn(': prefix', str(ctx.exception))
+
+    def test_ln_dst_relative_path_error(self):
+        """ln dst with relative path -> error"""
+        from mpytool.mpytool import ParamsError
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_ln(
+                [self.temp_file, ':lib/'], is_last_group=True)
+        self.assertIn('absolute', str(ctx.exception))
+
+    def test_ln_root_mount(self):
+        """ln with mount at / works correctly"""
+        self.tool._mpy._mounts = [
+            (0, '/', '/tmp/src', self.mock_handler)]
+        self.tool._dispatch_ln(
+            [self.temp_sub, ':/lib/'], is_last_group=True)
+        self.tool._mpy.add_submount.assert_called_once_with(
+            '/', 'lib/pkg', self.temp_sub)
 
 
 if __name__ == '__main__':

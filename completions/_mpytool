@@ -28,6 +28,7 @@ _mpytool_commands() {
         'flash:flash/partition operations (list, read, write, erase)'
         'ota:OTA firmware update (ESP32)'
         'mount:mount local directory on device (readonly)'
+        'ln:link local file/dir into mounted VFS'
         'sleep:sleep for specified seconds'
         'speedtest:serial link speed test'
     )
@@ -357,11 +358,36 @@ _mpytool() {
                     [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
                 mount)
-                    # 1 local dir + optional :mount_point, no -- (auto-repl)
+                    # 1 local dir + optional :mount_point, -- for chaining (ln, repl, etc.)
                     if [[ $pos -eq 2 ]]; then
                         _files -/
                     elif [[ $pos -eq 3 ]]; then
                         compadd -S '' ':'
+                        compadd -- '--'
+                    else
+                        compadd -- '--'
+                    fi
+                    ;;
+                ln)
+                    # n local sources + 1 remote dest (: prefix, absolute path)
+                    local n_local=0 n_remote=0
+                    for ((i=cmd_start+1; i < CURRENT; i++)); do
+                        if [[ "${words[i]}" == :* ]]; then
+                            ((n_remote++))
+                        else
+                            ((n_local++))
+                        fi
+                    done
+                    if [[ $n_local -ge 1 && $n_remote -ge 1 ]]; then
+                        # Complete, only offer --
+                        compadd -- '--'
+                    else
+                        if [[ "$words[CURRENT]" == :* ]]; then
+                            _mpytool_complete_remote
+                        else
+                            _files
+                            compadd -S '' ':'
+                        fi
                     fi
                     ;;
                 speedtest)

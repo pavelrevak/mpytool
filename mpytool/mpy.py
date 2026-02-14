@@ -58,7 +58,8 @@ def _mt_tree(p):
     for e in os.ilistdir(p):
         n,a=e[:2]
         if a=={_ATTR_FILE}:
-            F.append((n,e[3],None));sz+=e[3]
+            s=e[3] if len(e)>3 else 0
+            F.append((n,s,None));sz+=s
         elif a=={_ATTR_DIR}:
             _,s,t=_mt_tree((p+'/'if p not in('','/')else p)+n)
             D.append((n,s,t));sz+=s
@@ -1468,6 +1469,23 @@ def _mt_pfind(label):
             if new_norm.startswith(p_norm) and p_mid is not None:
                 return True
         return False
+
+    def add_submount(self, mount_point, subpath, local_path):
+        """Add virtual submount (ln) to existing mount handler
+
+        Arguments:
+            mount_point: existing device mount point (e.g. '/app')
+            subpath: path relative to mount root (e.g. 'lib/pkg')
+            local_path: local file or directory path
+        """
+        for p_mid, p_mp, _, p_handler in self._mounts:
+            if p_mp == mount_point and p_mid is not None:
+                p_handler.add_submount(subpath, local_path)
+                self._mounts.append(
+                    (None, mount_point + '/' + subpath, local_path,
+                     p_handler))
+                return
+        raise _mpy_comm.MpyError(f"no mount at '{mount_point}'")
 
     def mount(self, local_path, mount_point='/remote', log=None):
         """Mount local directory on device as readonly VFS

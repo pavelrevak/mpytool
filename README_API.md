@@ -567,6 +567,41 @@ Soft reset (Ctrl+D) triggers automatic re-mount.
 - `MpyError`: If agent injection or mount fails, or if mount point is nested
   inside an existing mount
 
+#### add_submount(mount_point, subpath, local_path)
+
+Add a virtual submount (symlink) into an existing mount.
+
+```python
+mpy.add_submount(mount_point, subpath, local_path)
+```
+
+**Parameters:**
+- `mount_point` (str): Existing device mount point (e.g., `/remote`)
+- `subpath` (str): Path relative to mount root (e.g., `lib/pkg`)
+- `local_path` (str): Local file or directory path
+
+Links a local file or directory into the mounted VFS at the specified subpath.
+The device sees it as part of the mounted filesystem. Virtual intermediate
+directories are created automatically (e.g., adding `lib/pkg` creates a virtual
+`lib` directory).
+
+Works entirely on the PC side — no changes needed on the device agent.
+This is the API equivalent of the CLI `ln` command.
+
+**Example:**
+```python
+>>> mpy.mount('./app', '/remote')
+>>> mpy.add_submount('/remote', 'lib/drivers', './drivers')
+>>> mpy.add_submount('/remote', 'lib/config.py', './config.py')
+>>> mpy.comm.exit_raw_repl()
+# Device can now:
+#   import drivers.motor   (from ./drivers/motor.py)
+#   open('/remote/lib/config.py').read()
+```
+
+**Raises:**
+- `MpyError`: If no mount exists at `mount_point`
+
 #### stop()
 
 Stop running program on device and return to REPL prompt.

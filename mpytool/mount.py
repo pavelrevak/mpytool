@@ -226,6 +226,14 @@ class MountHandler:
         if handler:
             handler()
 
+    def _is_virtual_dir(self, path):
+        """Check if path is a virtual intermediate directory from submounts"""
+        prefix = path.lstrip('/').rstrip('/')
+        if not prefix:
+            return False
+        return any(
+            sp.startswith(prefix + '/') for sp in self._submounts)
+
     def _do_stat(self):
         path = self._rd_str()
         local = self._resolve_path(path)
@@ -239,7 +247,13 @@ class MountHandler:
             self._wr_u32(st.st_size)
             self._wr_u32(int(st.st_mtime))
         except OSError:
-            self._wr_s8(-_errno.ENOENT)
+            if self._is_virtual_dir(path):
+                self._wr_s8(0)
+                self._wr_u32(0x4000)  # S_IFDIR
+                self._wr_u32(0)
+                self._wr_u32(0)
+            else:
+                self._wr_s8(-_errno.ENOENT)
 
     def _do_listdir(self):
         path = self._rd_str()
@@ -247,8 +261,8 @@ class MountHandler:
         if local is None:
             self._wr_s32(-_errno.EACCES)
             return
+        entries = []
         try:
-            entries = []
             for name in _os.listdir(local):
                 full = _os.path.join(local, name)
                 try:
@@ -256,27 +270,36 @@ class MountHandler:
                     entries.append((name, st.st_mode & 0xF000))
                 except OSError:
                     pass
-            # Inject virtual directories for submounts
-            prefix = path.lstrip('/').rstrip('/')
-            existing = {name for name, _ in entries}
-            for subpath in self._submounts:
-                if prefix:
-                    if not subpath.startswith(prefix + '/'):
-                        continue
-                    child = subpath[len(prefix) + 1:]
-                else:
-                    child = subpath
-                # Only direct children
-                child_name = child.split('/')[0]
-                if child_name and child_name not in existing:
-                    entries.append((child_name, 0x4000))
-                    existing.add(child_name)
-            self._wr_s32(len(entries))
-            for name, mode in entries:
-                self._wr_bytes(name.encode('utf-8'))
-                self._wr_u32(mode)
         except OSError:
+            pass  # Virtual intermediate dir — may have submount entries
+        # Inject virtual entries for submounts
+        prefix = path.lstrip('/').rstrip('/')
+        existing = {name for name, _ in entries}
+        for subpath in self._submounts:
+            if prefix:
+                if not subpath.startswith(prefix + '/'):
+                    continue
+                child = subpath[len(prefix) + 1:]
+            else:
+                child = subpath
+            # Only direct children
+            child_name = child.split('/')[0]
+            if child_name and child_name not in existing:
+                if child_name == child:
+                    # Direct submount — use actual type
+                    local_sub = self._submounts[subpath]
+                    mode = 0x4000 if _os.path.isdir(local_sub) else 0x8000
+                else:
+                    mode = 0x4000  # virtual intermediate dir
+                entries.append((child_name, mode))
+                existing.add(child_name)
+        if not entries:
             self._wr_s32(-_errno.ENOENT)
+            return
+        self._wr_s32(len(entries))
+        for name, mode in entries:
+            self._wr_bytes(name.encode('utf-8'))
+            self._wr_u32(mode)
 
     def _do_open(self):
         path = self._rd_str()

@@ -13,6 +13,7 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 - **Multiple reset options** - soft, MCU, hardware (RTS), bootloader entry
 - **General-purpose serial terminal** - `repl` and `monitor` work with any serial device
 - **Mount local directory** - readonly VFS mount for development without uploading to flash
+- **Virtual symlinks** - `ln` links individual files/directories into mounted VFS
 - **Python API** - suitable for IDE integration and automation
 - **Raw-paste mode** - flow-controlled code execution with reduced RAM usage (API)
 - **Shell completion** - ZSH and Bash with remote path completion
@@ -203,6 +204,19 @@ Mounts a local directory on the device as a readonly VFS. The device can read, i
 Mount does not change CWD or `sys.path` — use `cd` command to set working directory after mount. Multiple independent (non-nested) mounts are supported.
 
 After mount, mpytool automatically enters REPL (unless `monitor` or `repl` follows). In REPL you can import modules from the mounted directory, Ctrl+D triggers soft reset with automatic re-mount.
+
+### Link files into mounted VFS
+```
+$ mpytool mount ./app :/ -- ln ./drivers :/lib/ -- repl       # mount app, link drivers into /lib/
+$ mpytool mount ./app :/ -- ln ./extra.py :/lib/ -- repl      # link single file into /lib/
+$ mpytool mount ./app :/ -- ln ./pkg :/lib/pkg -- repl        # link as specific name
+$ mpytool mount ./app :/ -- ln ./pkg/ :/lib/ -- repl          # link package contents into /lib/
+$ mpytool mount ./app :/ -- ln ./a.py ./b.py :/lib/ -- repl   # link multiple sources
+```
+
+Links local files or directories into an already mounted VFS as virtual submounts. Works entirely on the PC side — no changes needed on the device. Useful for composing a virtual filesystem from multiple local directories without copying.
+
+Path semantics follow the same trailing `/` rules as `cp`: `ln dir :/lib/` creates `:/lib/dir/...`, `ln dir/ :/lib/` copies contents into `:/lib/...`. Destination must be an absolute device path with `:` prefix.
 
 ### Serial link speed test
 ```

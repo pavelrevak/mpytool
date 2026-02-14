@@ -1849,5 +1849,153 @@ class TestMount(unittest.TestCase):
         self.mpy.stop()
 
 
+@requires_device
+class TestMountLn(unittest.TestCase):
+    """Test ln command: virtual submounts into mounted VFS"""
+
+    LOCAL_DIR = None
+    LN_DIR = None
+    LN_FILE_DIR = None
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from mpytool import ConnSerial, Mpy
+
+        # Main mount directory with a root file
+        cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_ln_root_')
+        with open(os.path.join(cls.LOCAL_DIR, 'root.txt'), 'w') as f:
+            f.write('root file')
+
+        # Separate directory to link as submount
+        cls.LN_DIR = tempfile.mkdtemp(prefix='mpytool_ln_pkg_')
+        with open(os.path.join(cls.LN_DIR, 'mod.py'), 'w') as f:
+            f.write('LN_VALUE = 77\n')
+        subpkg = os.path.join(cls.LN_DIR, 'inner')
+        os.makedirs(subpkg)
+        with open(os.path.join(subpkg, 'deep.txt'), 'w') as f:
+            f.write('deep content')
+
+        # Single file to link
+        cls.LN_FILE_DIR = tempfile.mkdtemp(prefix='mpytool_ln_file_')
+        with open(os.path.join(cls.LN_FILE_DIR, 'single.py'), 'w') as f:
+            f.write('SINGLE = 123\n')
+
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.handler = cls.mpy.mount(cls.LOCAL_DIR, '/lntest')
+
+        # Add submounts via API (what ln command does internally)
+        cls.mpy.add_submount('/lntest', 'lib/pkg', cls.LN_DIR)
+        cls.mpy.add_submount(
+            '/lntest', 'lib/single.py',
+            os.path.join(cls.LN_FILE_DIR, 'single.py'))
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        try:
+            cls.mpy.comm.enter_raw_repl()
+            cls.mpy.comm.exec(
+                "import uos\ntry:uos.umount('/lntest')\nexcept:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except Exception:
+            pass
+        try:
+            cls.mpy.comm.exit_raw_repl()
+        except Exception:
+            pass
+        cls.conn.close()
+        for d in (cls.LOCAL_DIR, cls.LN_DIR, cls.LN_FILE_DIR):
+            if d:
+                shutil.rmtree(d, ignore_errors=True)
+
+    def test_01_root_still_works(self):
+        """Root mount files still accessible after adding submounts"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/lntest/root.txt').read())")
+        self.assertEqual(result, 'root file')
+
+    def test_02_listdir_root_shows_virtual(self):
+        """listdir root includes virtual 'lib' directory from submount"""
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('/lntest'))")
+        self.assertIn('root.txt', result)
+        self.assertIn('lib', result)
+
+    def test_03_listdir_submount_dir(self):
+        """listdir on submount shows linked directory contents"""
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('/lntest/lib/pkg'))")
+        self.assertIn('mod.py', result)
+        self.assertIn('inner', result)
+
+    def test_04_read_submount_file(self):
+        """Read file from linked directory"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/lntest/lib/pkg/mod.py').read())")
+        self.assertEqual(result, 'LN_VALUE = 77\n')
+
+    def test_05_read_deep_nested(self):
+        """Read file in subdirectory of linked directory"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/lntest/lib/pkg/inner/deep.txt').read())")
+        self.assertEqual(result, 'deep content')
+
+    def test_06_stat_submount_dir(self):
+        """stat on submount directory returns S_IFDIR"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('os').stat('/lntest/lib/pkg')")
+        self.assertTrue(result[0] & 0x4000)
+
+    def test_07_stat_submount_file(self):
+        """stat on submount file returns S_IFREG"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('os').stat('/lntest/lib/pkg/mod.py')")
+        self.assertTrue(result[0] & 0x8000)
+
+    def test_08_single_file_link(self):
+        """Read single file linked as submount"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/lntest/lib/single.py').read())")
+        self.assertEqual(result, 'SINGLE = 123\n')
+
+    def test_09_stat_single_file(self):
+        """stat on single file submount returns S_IFREG"""
+        result = self.mpy.comm.exec_eval(
+            "__import__('os').stat('/lntest/lib/single.py')")
+        self.assertTrue(result[0] & 0x8000)
+
+    def test_10_import_from_submount(self):
+        """Import module from linked directory"""
+        self.mpy.comm.exec(
+            "import sys\n"
+            "sys.path.append('/lntest/lib/pkg')\n"
+            "for k in list(sys.modules):\n"
+            " if k=='mod':del sys.modules[k]\n")
+        result = self.mpy.comm.exec_eval("__import__('mod').LN_VALUE")
+        self.assertEqual(result, 77)
+        # Cleanup sys.path
+        self.mpy.comm.exec(
+            "import sys\n"
+            "if '/lntest/lib/pkg' in sys.path:"
+            "sys.path.remove('/lntest/lib/pkg')\n")
+
+    def test_11_nonexistent_in_submount(self):
+        """stat on nonexistent file in submount raises OSError"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.mpy.comm.exec(
+                "__import__('os').stat('/lntest/lib/pkg/nope.xyz')")
+        self.assertIn('OSError', ctx.exception.error)
+
+    def test_12_listdir_virtual_intermediate(self):
+        """listdir on 'lib' (virtual intermediate dir) shows submount entries"""
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('/lntest/lib'))")
+        self.assertIn('pkg', result)
+        self.assertIn('single.py', result)
+
+
 if __name__ == "__main__":
     unittest.main()
