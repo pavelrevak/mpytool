@@ -1503,7 +1503,6 @@ class MpyTool():
         if not commands:
             self._list_mounts()
             return
-        # Parse dir :/mount_point pairs
         pairs = []
         while commands and not commands[0].startswith(':'):
             local_path = commands.pop(0)
@@ -1520,10 +1519,12 @@ class MpyTool():
                         'mount point must be absolute path'
                         ' (e.g. :/app)')
             pairs.append((local_path, mount_point))
-        # Validate unique mount points
         mps = [mp for _, mp in pairs]
         if len(set(mps)) != len(mps):
             raise ParamsError('duplicate mount points')
+        first_mount_point = None
+        if not self._mpy._mounts:
+            first_mount_point = pairs[0][1]
         for local_path, mount_point in pairs:
             if self._mpy.is_submount(mount_point):
                 raise ParamsError(
@@ -1534,8 +1535,12 @@ class MpyTool():
             self.verbose(
                 f"Mounted {local_path} on {mount_point} (readonly)",
                 color='green')
-        # Update conn so Terminal/monitor uses ConnIntercept
         self._conn = self._mpy.conn
+        if first_mount_point:
+            self._mpy.chdir(first_mount_point)
+            self.verbose(
+                f"Changed CWD to {first_mount_point}",
+                color='cyan')
         commands.clear()
 
     def _dispatch_ln(self, commands, is_last_group):
