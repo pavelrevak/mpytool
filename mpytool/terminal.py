@@ -38,7 +38,7 @@ class TerminalBase:
 
     def _read_event_terminal(self):
         data = self.read()
-        self._log.info('from terminal: %s', data)
+        self._log.debug('from terminal: %s', data)
         if 0x1d in data:  # CTRL + ]
             self._running = False
             return
@@ -47,7 +47,7 @@ class TerminalBase:
 
     def _read_event_device(self):
         data = self._conn.read()
-        self._log.info('from device: %s', data)
+        self._log.debug('from device: %s', data)
         if data:
             self.write(data)
 

@@ -34,10 +34,8 @@ class Terminal(TerminalBase):
 
     def _loop(self):
         select_fds = [self._stdin_fd, self._conn.fd]
-        self._log.info("select: %s", select_fds)
         while self._running:
             ret = _select.select(select_fds, [], [], 1)
-            self._log.info("selected: %s", ret)
             if ret[0]:
                 if self._stdin_fd in ret[0]:
                     self._read_event_terminal()

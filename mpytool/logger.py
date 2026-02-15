@@ -41,12 +41,14 @@ class SimpleColorLogger():
     def _clear_pending(self):
         """End pending progress line before printing a new message"""
         if self._pending_line:
-            print(file=_sys.stderr)
+            # Use \r\n for TTY to handle raw terminal mode (REPL)
+            print(file=_sys.stderr, end='\r\n' if self._is_tty else '\n')
             self._pending_line = False
 
     def log(self, msg):
         self._clear_pending()
-        print(msg, file=_sys.stderr)
+        # Use \r\n for TTY to handle raw terminal mode (REPL)
+        print(msg, file=_sys.stderr, end='\r\n' if self._is_tty else '\n')
 
     def error(self, msg, *args):
         if args:

@@ -237,6 +237,8 @@ class MountHandler:
 
     def _do_stat(self):
         path = self._rd_str()
+        if self._log:
+            self._log.info("MOUNT: STAT: '%s'", path)
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(-_errno.EACCES)
@@ -258,6 +260,8 @@ class MountHandler:
 
     def _do_listdir(self):
         path = self._rd_str()
+        if self._log:
+            self._log.info("MOUNT: LISTDIR: '%s'", path)
         local = self._resolve_path(path)
         if local is None:
             self._wr_s32(-_errno.EACCES)
@@ -307,6 +311,8 @@ class MountHandler:
     def _do_open(self):
         path = self._rd_str()
         mode = self._rd_str()
+        if self._log:
+            self._log.info("MOUNT: OPEN: '%s' mode=%s", path, mode)
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(-_errno.EACCES)
@@ -327,6 +333,8 @@ class MountHandler:
 
     def _do_close(self):
         fd = self._rd_s8()
+        if self._log:
+            self._log.info("MOUNT: CLOSE: fd=%d", fd)
         f = self._files.pop(fd, None)
         if f:
             f.close()
@@ -336,6 +344,8 @@ class MountHandler:
     def _do_read(self):
         fd = self._rd_s8()
         n = self._rd_s32()
+        if self._log:
+            self._log.info("MOUNT: READ: fd=%d n=%d", fd, n)
         f = self._files.get(fd)
         if f is None:
             self._wr_s32(0)
