@@ -9,6 +9,7 @@ import struct as _struct
 
 from mpytool.conn import Conn
 from mpytool.mpy_comm import MpyError
+from mpytool.mpy_cross import BOOT_FILES
 
 # Protocol constants
 ESCAPE = 0x18  # CAN / Ctrl+X
@@ -149,10 +150,11 @@ def _mt_mount(mp='/remote',mid=0):
 class MountHandler:
     """PC-side handler for VFS requests from device"""
 
-    def __init__(self, conn, root, log=None):
+    def __init__(self, conn, root, log=None, mpy_cross=None):
         self._conn = conn
         self._root = _os.path.realpath(root)
         self._log = log
+        self._mpy_cross = mpy_cross
         self._files = {}
         self._next_fd = 0
         self._free_fds = []
@@ -196,6 +198,13 @@ class MountHandler:
         self._wr_s32(len(data))
         if data:
             self._conn.write(data)
+
+    def _send_stat(self, st):
+        """Send stat response for successful stat"""
+        self._wr_s8(0)  # OK
+        self._wr_u32(st.st_mode & 0xF000)  # type bits only
+        self._wr_u32(st.st_size)
+        self._wr_u32(int(st.st_mtime))
 
     # -- path security --
 
@@ -243,12 +252,65 @@ class MountHandler:
         if local is None:
             self._wr_s8(-_errno.EACCES)
             return
+
+        # .py file with -m mode
+        if path.endswith('.py') and self._mpy_cross:
+            basename = _os.path.basename(local)
+            # Always use .py for boot files
+            if basename in BOOT_FILES:
+                try:
+                    self._send_stat(_os.stat(local))
+                except OSError:
+                    self._wr_s8(-_errno.ENOENT)
+                return
+
+            try:
+                st = _os.stat(local)
+                # Empty file - no need to compile
+                if st.st_size == 0:
+                    self._send_stat(st)
+                    return
+                # Try compile (lazy on-demand)
+                cache_path = self._mpy_cross.compile(local)
+                if cache_path:
+                    # Compilation OK → redirect to .mpy
+                    self._wr_s8(-_errno.ENOENT)
+                else:
+                    # Compilation failed → fallback to .py
+                    self._send_stat(st)
+            except OSError:
+                self._wr_s8(-_errno.ENOENT)
+            return
+
+        # .mpy file with -m mode
+        if path.endswith('.mpy') and self._mpy_cross:
+            py_path = path[:-4] + '.py'
+            local_py = self._resolve_path(py_path)
+
+            if local_py and _os.path.isfile(local_py):
+                # 1. Check prebuilt .mpy in same dir
+                local_mpy = local_py[:-3] + '.mpy'
+                if _os.path.exists(local_mpy):
+                    try:
+                        self._send_stat(_os.stat(local_mpy))
+                        return
+                    except OSError:
+                        pass
+                # 2. Check cache (from previous .py stat)
+                cache_path = self._mpy_cross.compiled.get(local_py)
+                if cache_path and _os.path.exists(cache_path):
+                    try:
+                        self._send_stat(_os.stat(cache_path))
+                        return
+                    except OSError:
+                        pass
+            # Not found
+            self._wr_s8(-_errno.ENOENT)
+            return
+
+        # Normal stat without -m mode
         try:
-            st = _os.stat(local)
-            self._wr_s8(0)  # OK
-            self._wr_u32(st.st_mode & 0xF000)  # type bits only
-            self._wr_u32(st.st_size)
-            self._wr_u32(int(st.st_mtime))
+            self._send_stat(_os.stat(local))
         except OSError:
             if self._is_virtual_dir(path):
                 self._wr_s8(0)
@@ -317,6 +379,23 @@ class MountHandler:
         if local is None:
             self._wr_s8(-_errno.EACCES)
             return
+
+        # .mpy file with -m mode: redirect to prebuilt or cache
+        if path.endswith('.mpy') and self._mpy_cross:
+            py_path = path[:-4] + '.py'
+            local_py = self._resolve_path(py_path)
+
+            if local_py and _os.path.isfile(local_py):
+                # 1. Check prebuilt .mpy in same dir
+                local_mpy = local_py[:-3] + '.mpy'
+                if _os.path.exists(local_mpy):
+                    local = local_mpy
+                else:
+                    # 2. Check cache
+                    cache_path = self._mpy_cross.compiled.get(local_py)
+                    if cache_path and _os.path.exists(cache_path):
+                        local = cache_path
+
         try:
             # Always binary on PC side — text conversion happens on device
             bin_mode = mode if 'b' in mode else mode + 'b'

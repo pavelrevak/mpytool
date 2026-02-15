@@ -222,6 +222,11 @@ Mounted ./src on /app (readonly)
 Changed CWD to /app
 REPL (Ctrl+] to exit)  CWD: /app  PATH: : :.frozen :/lib
 
+$ mpytool mount -m ./src :/app              # mount with automatic .mpy compilation
+Mounted ./src on /app (readonly, .mpy compilation)
+Changed CWD to /app
+>>> import foo                              # imports /app/foo.mpy (compiled from ./src/foo.py)
+
 $ mpytool mount ./src -- exec "import main" # mount and run code
 $ mpytool mount ./src -- monitor            # mount and monitor output
 $ mpytool mount ./app :/app -- mount ./lib :/lib -- repl  # multiple mounts (CWD = /app)
@@ -231,6 +236,8 @@ Mounted ./lib on /lib (readonly)
 ```
 
 Mounts a local directory on the device as a readonly VFS. The device can read, import and execute files from the local directory without uploading them to flash. Changes to local files are immediately visible on the device.
+
+**`-m` / `--mpy` flag:** Enables transparent `.mpy` compilation. When the device imports a module, the `.py` file is automatically compiled to `.mpy` bytecode on-demand and served from cache (`__pycache__/`). Benefits: faster imports, less RAM usage, support for `@native`/`@viper` code with `-march`. Boot files (`boot.py`, `main.py`) and empty files remain as `.py`. If compilation fails, automatically falls back to `.py`. Prebuilt `.mpy` files have priority over cache.
 
 The first mount automatically changes CWD to the mount point (mpremote compatibility). Subsequent mounts do not change CWD. Use `cd` command to change working directory manually if needed. Multiple independent (non-nested) mounts are supported.
 

@@ -389,13 +389,26 @@ _mpytool() {
                     [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
                 mount)
-                    # 1 local dir + optional :mount_point, -- for chaining (ln, repl, etc.)
-                    if [[ $pos -eq 2 ]]; then
-                        _files -/
-                    elif [[ $pos -eq 3 ]]; then
+                    # -m flag + 1 local dir + optional :mount_point, -- for chaining
+                    # Check if -m flag already present
+                    local has_m=0
+                    for w in "${words[cmd_start+1,-1]}"; do
+                        [[ "$w" == "-m" || "$w" == "--mpy" ]] && has_m=1
+                    done
+                    # Offer -m flag first
+                    if [[ $has_m -eq 0 && "$words[CURRENT]" != :* ]]; then
+                        local -a mount_flags=(
+                            '-m:compile .py to .mpy on-demand'
+                            '--mpy:compile .py to .mpy on-demand'
+                        )
+                        _describe -t flags 'mount flag' mount_flags
+                    fi
+                    # Then local dir and mount point
+                    if [[ "$words[CURRENT]" == :* ]]; then
                         compadd -S '' ':'
                         compadd -- '--'
                     else
+                        _files -/
                         compadd -- '--'
                     fi
                     ;;

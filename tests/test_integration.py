@@ -1998,6 +1998,172 @@ class TestMountLn(unittest.TestCase):
 
 
 @requires_device
+class TestMountMpyCross(unittest.TestCase):
+    """Test mount -m command: transparent .mpy compilation"""
+
+    LOCAL_DIR = None
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        import shutil
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpy_cross import MpyCross
+        from mpytool.logger import SimpleColorLogger
+
+        # Create local temp directory with test files
+        cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_mount_mpy_test_')
+
+        # Regular module that should be compiled
+        with open(os.path.join(cls.LOCAL_DIR, 'regular.py'), 'w') as f:
+            f.write('VALUE = 123\ndef func():\n    return "compiled"\n')
+
+        # Boot file that should NOT be compiled
+        with open(os.path.join(cls.LOCAL_DIR, 'boot.py'), 'w') as f:
+            f.write('BOOT_VALUE = 456\n')
+
+        # Empty __init__.py that should NOT be compiled
+        with open(os.path.join(cls.LOCAL_DIR, '__init__.py'), 'w') as f:
+            pass
+
+        # Prebuilt .mpy file (should have priority)
+        with open(os.path.join(cls.LOCAL_DIR, 'prebuilt.py'), 'w') as f:
+            f.write('PREBUILT_VALUE = 999\n')
+        # Create fake prebuilt .mpy (device will reject invalid bytecode)
+        with open(os.path.join(cls.LOCAL_DIR, 'prebuilt.mpy'), 'wb') as f:
+            f.write(b'FAKE_MPY')
+
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+
+        # Initialize MpyCross
+        log = SimpleColorLogger(loglevel=0)  # Quiet logger
+        cls.mpy_cross = MpyCross(log)
+        platform_info = cls.mpy.platform()
+        cls.mpy_cross.init(platform_info)
+
+        if not cls.mpy_cross.active:
+            raise unittest.SkipTest('mpy-cross not available or version mismatch')
+
+        # Mount with -m flag
+        cls.handler = cls.mpy.mount(
+            cls.LOCAL_DIR, '/mpytest', mpy_cross=cls.mpy_cross)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        try:
+            cls.mpy.comm.enter_raw_repl()
+            cls.mpy.comm.exec(
+                "import uos\ntry:uos.umount('/mpytest')\nexcept:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except Exception:
+            pass
+        try:
+            cls.mpy.comm.exit_raw_repl()
+        except Exception:
+            pass
+        try:
+            cls.conn.close()
+        except Exception:
+            pass
+        if cls.LOCAL_DIR:
+            shutil.rmtree(cls.LOCAL_DIR, ignore_errors=True)
+
+    def test_01_regular_module_uses_mpy(self):
+        """Import regular module uses .mpy (compiled)"""
+        # Add to sys.path and import
+        self.mpy.comm.exec(
+            "import sys\n"
+            "if '/mpytest' not in sys.path:\n"
+            "    sys.path.insert(0, '/mpytest')\n"
+            "import regular")
+        # Check imported values
+        result = self.mpy.comm.exec_eval("regular.VALUE")
+        self.assertEqual(result, 123)
+        # For string result, check via print
+        output = self.mpy.comm.exec("print(regular.func())")
+        self.assertIn(b'compiled', output)
+
+    def test_02_boot_file_uses_py(self):
+        """Boot files remain as .py (not compiled)"""
+        # Import boot.py directly
+        self.mpy.comm.exec(
+            "import sys\n"
+            "if '/mpytest' not in sys.path:\n"
+            "    sys.path.insert(0, '/mpytest')\n"
+            "import boot")
+        result = self.mpy.comm.exec_eval("boot.BOOT_VALUE")
+        self.assertEqual(result, 456)
+
+    def test_03_empty_file_uses_py(self):
+        """Empty __init__.py remains as .py (not compiled)"""
+        # Stat should return size=0 for .py (not redirected to .mpy)
+        self.mpy.comm.exec("import uos")
+        result = self.mpy.comm.exec_eval("uos.stat('/mpytest/__init__.py')[6]")
+        self.assertEqual(result, 0)
+
+    def test_04_prebuilt_mpy_has_priority(self):
+        """Prebuilt .mpy file is used instead of compiling .py"""
+        self.mpy.comm.exec("import uos")
+        # Check that prebuilt.mpy exists
+        self.mpy.comm.exec(
+            "try:\n"
+            " uos.stat('/mpytest/prebuilt.mpy')\n"
+            " _r1 = True\n"
+            "except:\n"
+            " _r1 = False")
+        result = self.mpy.comm.exec_eval("_r1")
+        self.assertTrue(result)
+        # Check that prebuilt.py is hidden (ENOENT)
+        self.mpy.comm.exec(
+            "try:\n"
+            " uos.stat('/mpytest/prebuilt.py')\n"
+            " _r2 = False\n"
+            "except OSError:\n"
+            " _r2 = True")
+        result = self.mpy.comm.exec_eval("_r2")
+        self.assertTrue(result)
+
+    def test_05_cache_directory_created(self):
+        """Cache directory __pycache__ is created on local filesystem"""
+        cache_dir = os.path.join(self.LOCAL_DIR, '__pycache__')
+        # Trigger compilation by stat (happens during import)
+        self.mpy.comm.exec(
+            "import uos\n"
+            "try:\n"
+            " uos.stat('/mpytest/regular.py')\n"
+            "except: pass")
+        # Now import should use the compiled .mpy
+        self.mpy.comm.exec(
+            "import sys\n"
+            "if '/mpytest' not in sys.path:\n"
+            "    sys.path.insert(0, '/mpytest')\n"
+            "try:\n import regular\nexcept:pass")
+        # Check that cache was created locally
+        self.assertTrue(os.path.exists(cache_dir))
+        # Find any .mpy cache files
+        cache_files = [
+            f for f in os.listdir(cache_dir)
+            if f.endswith('.mpy')]
+        self.assertGreater(len(cache_files), 0,
+                          f"No .mpy files in {cache_dir}: {os.listdir(cache_dir)}")
+
+    def test_06_cache_visible_in_listdir(self):
+        """__pycache__ directory is visible in listdir (PC-side directory)"""
+        # Trigger compilation first
+        self.mpy.comm.exec(
+            "import sys\n"
+            "if '/mpytest' not in sys.path:\n"
+            "    sys.path.insert(0, '/mpytest')\n"
+            "try:\n import regular\nexcept:pass")
+        # Check that __pycache__ is visible
+        result = self.mpy.comm.exec_eval(
+            "repr(__import__('os').listdir('/mpytest'))")
+        self.assertIn('__pycache__', result)
+
+
+@requires_device
 class TestPathOperations(unittest.TestCase):
     """Test sys.path operations"""
 

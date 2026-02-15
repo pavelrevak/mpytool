@@ -316,14 +316,24 @@ _mpytool() {
             [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         mount)
-            # 1 local dir + optional :mount_point, -- for chaining (ln, repl, etc.)
-            if [[ $pos -eq 2 ]]; then
-                COMPREPLY=($(compgen -d -- "$cur"))
-            elif [[ $pos -eq 3 ]]; then
-                COMPREPLY=($(compgen -W ": --" -- "$cur"))
-            else
-                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            # mount [-m] local_dir [:mount_point], -- for chaining
+            # Check if -m flag already present
+            local has_m=0
+            for w in "${COMP_WORDS[@]:cmd_start+1}"; do
+                [[ "$w" == "-m" || "$w" == "--mpy" ]] && has_m=1
+            done
+            # Offer -m flag first
+            if [[ $has_m -eq 0 && ( "$cur" == -* || -z "$cur" ) ]]; then
+                COMPREPLY=($(compgen -W "-m --mpy" -- "$cur"))
             fi
+            # Local dir and mount point
+            if [[ "$cur" == :* ]]; then
+                COMPREPLY+=($(compgen -W ":" -- "$cur"))
+            else
+                COMPREPLY+=($(compgen -d -- "$cur"))
+            fi
+            # -- for chaining
+            [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             ;;
         ln)
             # n local sources + 1 remote dest (: prefix, absolute path)

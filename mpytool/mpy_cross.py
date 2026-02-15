@@ -14,7 +14,7 @@ _MPY_ARCH_NAMES = (
     'rv64imc',
 )
 
-_BOOT_FILES = frozenset(('boot.py', 'main.py'))
+BOOT_FILES = frozenset(('boot.py', 'main.py'))
 
 
 class MpyCross:
@@ -101,7 +101,7 @@ class MpyCross:
         Uses cache if fresh (mtime check).
         """
         basename = _os.path.basename(src_path)
-        if basename in _BOOT_FILES:
+        if basename in BOOT_FILES:
             self._verbose(f'mpy: skip {basename} (boot file)', 2)
             return None
         if not basename.endswith('.py'):

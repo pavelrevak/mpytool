@@ -640,18 +640,19 @@ mpy.memory()
 
 ### Mount
 
-#### mount(local_path, mount_point='/remote', log=None)
+#### mount(local_path, mount_point='/remote', log=None, mpy_cross=None)
 
 Mount a local directory on device as readonly VFS.
 
 ```python
-mpy.mount(local_path, mount_point='/remote', log=None)
+mpy.mount(local_path, mount_point='/remote', log=None, mpy_cross=None)
 ```
 
 **Parameters:**
 - `local_path` (str): Local directory to mount
 - `mount_point` (str): Device mount point, default `/remote`
 - `log`: Optional logger instance
+- `mpy_cross`: Optional `MpyCross` instance for transparent `.mpy` compilation
 
 **Returns:**
 - `MountHandler` instance
@@ -662,6 +663,12 @@ that forwards filesystem requests (stat, listdir, open, read, close) to the
 PC over the serial link. The connection is wrapped in a transparent proxy
 (`ConnIntercept`) that intercepts VFS protocol messages while passing REPL
 I/O through.
+
+**Transparent .mpy compilation:** If `mpy_cross` is provided, `.py` files are
+automatically compiled to `.mpy` bytecode on-demand when imported by the device.
+Compiled files are cached in `__pycache__/` with mtime checking. Boot files
+(`boot.py`, `main.py`) and empty files remain as `.py`. Falls back to `.py`
+if compilation fails. Prebuilt `.mpy` files have priority over cache.
 
 Mount does not change CWD or `sys.path` — use `mpy.chdir()` to set working
 directory after mount. Multiple independent (non-nested) mounts are supported.
@@ -678,6 +685,15 @@ Soft reset (Ctrl+D) triggers automatic re-mount.
 >>> mpy.comm.exit_raw_repl()
 # Device can now: import module  (from ./src/module.py)
 #                 open('/remote/data.txt').read()
+
+# With .mpy compilation:
+>>> from mpytool.mpy_cross import MpyCross
+>>> from mpytool.logger import SimpleColorLogger
+>>> log = SimpleColorLogger()
+>>> mpy_cross = MpyCross(log)
+>>> mpy_cross.init(mpy.platform())
+>>> handler = mpy.mount('./src', mpy_cross=mpy_cross)
+# Device imports .mpy files (compiled on-demand)
 ```
 
 **Raises:**

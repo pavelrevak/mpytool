@@ -1476,10 +1476,34 @@ class MpyTool():
                     f" {_utils.format_size(fs['total'])}"
                     f" ({used_pct:.0f}% used)")
 
-    def _dispatch_mount(self, commands, is_last_group):
-        if not commands:
-            self._list_mounts()
-            return
+    def _parse_mount_flags(self, commands):
+        """Parse mount flags and return (mpy_cross, filtered_commands)"""
+        mpy_cross = None
+        filtered_commands = []
+        for cmd in commands:
+            if cmd == '--mpy':
+                mpy_cross = True
+            elif (cmd.startswith('-') and not cmd.startswith('--')
+                    and len(cmd) > 1):
+                # Handle combined short flags like -m
+                flags = cmd[1:]
+                if 'm' in flags:
+                    mpy_cross = True
+                remaining = flags.replace('m', '')
+                if remaining:
+                    filtered_commands.append('-' + remaining)
+            else:
+                filtered_commands.append(cmd)
+        # Initialize mpy-cross if requested
+        if mpy_cross:
+            mpy_cross = MpyCross(self._log, self.verbose)
+            mpy_cross.init(self._mpy.platform())
+            if not mpy_cross.active:
+                mpy_cross = None
+        return mpy_cross, filtered_commands
+
+    def _parse_mount_pairs(self, commands):
+        """Parse mount directory/point pairs from commands"""
         pairs = []
         while commands and not commands[0].startswith(':'):
             local_path = commands.pop(0)
@@ -1493,25 +1517,41 @@ class MpyTool():
                     mount_point = mp
                 else:
                     raise ParamsError(
-                        'mount point must be absolute path'
-                        ' (e.g. :/app)')
+                        'mount point must be absolute path (e.g. :/app)')
             pairs.append((local_path, mount_point))
+        # Check for duplicate mount points
         mps = [mp for _, mp in pairs]
         if len(set(mps)) != len(mps):
             raise ParamsError('duplicate mount points')
+        return pairs
+
+    def _dispatch_mount(self, commands, is_last_group):
+        if not commands:
+            self._list_mounts()
+            return
+        # Parse flags
+        mpy_cross, commands[:] = self._parse_mount_flags(commands)
+        # Parse mount pairs
+        pairs = self._parse_mount_pairs(commands)
+        # Determine first mount point for auto-chdir
         first_mount_point = None
         if not self._mpy._mounts:
             first_mount_point = pairs[0][1]
+        # Execute mounts
         for local_path, mount_point in pairs:
             if self._mpy.is_submount(mount_point):
                 raise ParamsError(
-                    f"nested mount '{mount_point}'"
-                    " is not allowed")
+                    f"nested mount '{mount_point}' is not allowed")
             self._mpy.mount(
-                local_path, mount_point, log=self._log)
+                local_path, mount_point, log=self._log,
+                mpy_cross=mpy_cross)
+            mode = "readonly"
+            if mpy_cross:
+                mode += ", .mpy compilation"
             self.verbose(
-                f"Mounted {local_path} on {mount_point} (readonly)",
+                f"Mounted {local_path} on {mount_point} ({mode})",
                 color='green')
+        # Update connection and CWD
         self._conn = self._mpy.conn
         if first_mount_point:
             self._mpy.chdir(first_mount_point)
@@ -1648,7 +1688,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   flash write [{label}] {file}  write file to flash/partition
   flash erase [{label}] [--full]  erase flash/partition
   ota {firmware.app-bin}        OTA update (ESP32)
-  mount {dir} [:{mount_point}]  mount local dir on device (readonly)
+  mount [-m] {dir} [:{mount_point}]  mount local dir (-m compile .mpy)
   ln {src} [...] {:path}        link local file/dir into mounted VFS
   speedtest                     serial link speed test
   sleep {seconds}               pause between commands

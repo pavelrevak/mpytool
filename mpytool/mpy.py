@@ -1535,13 +1535,16 @@ def _mt_pfind(label):
                 return
         raise _mpy_comm.MpyError(f"no mount at '{mount_point}'")
 
-    def mount(self, local_path, mount_point='/remote', log=None):
+    def mount(
+            self, local_path, mount_point='/remote', log=None,
+            mpy_cross=None):
         """Mount local directory on device as readonly VFS
 
         Arguments:
             local_path: local directory to mount
             mount_point: device mount point (default: /remote)
             log: logger instance
+            mpy_cross: MpyCross instance for transparent .mpy serving
 
         Returns:
             MountHandler instance
@@ -1604,7 +1607,8 @@ def _mt_pfind(label):
                 f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
 
             # Create handler and connection intercept
-            handler = MountHandler(self._conn, local_path, log=log)
+            handler = MountHandler(
+                self._conn, local_path, log=log, mpy_cross=mpy_cross)
             intercept = ConnIntercept(
                 self._conn, {mid: handler},
                 remount_fn=self._do_remount_all, log=log)
@@ -1629,7 +1633,8 @@ def _mt_pfind(label):
 
             # Create handler and add to existing intercept
             handler = MountHandler(
-                self._intercept._conn, local_path, log=log)
+                self._intercept._conn, local_path, log=log,
+                mpy_cross=mpy_cross)
             self._intercept.add_handler(mid, handler)
 
         self._mounts.append((mid, mount_point, local_path, handler))

@@ -719,7 +719,7 @@ class TestMountDispatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.tool._dispatch_mount([d], is_last_group=False)
             self.tool._mpy.mount.assert_called_once_with(
-                d, '/remote', log=self.tool._log)
+                d, '/remote', log=self.tool._log, mpy_cross=None)
 
     def test_mount_custom_mountpoint(self):
         """mount with custom mount point"""
@@ -727,7 +727,7 @@ class TestMountDispatch(unittest.TestCase):
             self.tool._dispatch_mount(
                 [d, ':/app'], is_last_group=False)
             self.tool._mpy.mount.assert_called_once_with(
-                d, '/app', log=self.tool._log)
+                d, '/app', log=self.tool._log, mpy_cross=None)
 
     def test_mount_in_commands(self):
         """mount is in _COMMANDS set"""
@@ -1201,6 +1201,205 @@ class TestLnDispatch(unittest.TestCase):
             [self.temp_sub, ':/lib/'], is_last_group=True)
         self.tool._mpy.add_submount.assert_called_once_with(
             '/', 'lib/pkg', self.temp_sub)
+
+
+class TestMountHandlerMpyCross(unittest.TestCase):
+    """Tests for MountHandler with mpy-cross compilation (-m flag)"""
+
+    def setUp(self):
+        self.temp_dir = os.path.realpath(tempfile.mkdtemp())
+        self.cache_dir = os.path.join(self.temp_dir, '__pycache__')
+        os.makedirs(self.cache_dir)
+
+        # Create test files
+        self.test_py = os.path.join(self.temp_dir, 'test.py')
+        with open(self.test_py, 'w') as f:
+            f.write('print("hello")\n')
+
+        self.boot_py = os.path.join(self.temp_dir, 'boot.py')
+        with open(self.boot_py, 'w') as f:
+            f.write('# boot file\n')
+
+        self.empty_py = os.path.join(self.temp_dir, 'empty.py')
+        with open(self.empty_py, 'w') as f:
+            pass
+
+        # Mock connection
+        self.conn = MockConnForHandler()
+
+        # Mock MpyCross
+        self.mpy_cross = Mock()
+        self.mpy_cross.compiled = {}
+
+        # Create handler with mpy_cross
+        self.handler = MountHandler(
+            self.conn, self.temp_dir, mpy_cross=self.mpy_cross)
+
+    def tearDown(self):
+        self.handler.close_all()
+        shutil.rmtree(self.temp_dir)
+
+    def test_stat_boot_py_always_normal(self):
+        """stat('boot.py') always returns normal stat, never redirects"""
+        self.mpy_cross.compile.return_value = '/cache/boot.mpy-6.3.mpy'
+
+        self.conn.feed(_pack_str('/boot.py'))
+        self.handler._do_stat()
+
+        # Should return OK + stat, not ENOENT
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+        # Should NOT call compile for boot files
+        self.mpy_cross.compile.assert_not_called()
+
+    def test_stat_empty_py_no_compile(self):
+        """stat('empty.py') with size=0 returns normal stat, no compile"""
+        self.conn.feed(_pack_str('/empty.py'))
+        self.handler._do_stat()
+
+        # Should return OK + stat with size=0
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+        size = struct.unpack('<I', result[5:9])[0]
+        self.assertEqual(size, 0)
+        # Should NOT call compile for empty files
+        self.mpy_cross.compile.assert_not_called()
+
+    def test_stat_py_compile_success_redirects(self):
+        """stat('test.py') with successful compile returns ENOENT (redirect)"""
+        cache_path = os.path.join(self.cache_dir, 'test.mpy-6.3.mpy')
+        with open(cache_path, 'wb') as f:
+            f.write(b'MPY\x06\x03...')  # fake .mpy
+        self.mpy_cross.compile.return_value = cache_path
+
+        self.conn.feed(_pack_str('/test.py'))
+        self.handler._do_stat()
+
+        # Should return ENOENT to force MicroPython to try .mpy
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.ENOENT)
+        self.mpy_cross.compile.assert_called_once_with(self.test_py)
+
+    def test_stat_py_compile_fail_fallback(self):
+        """stat('test.py') with failed compile returns normal stat"""
+        self.mpy_cross.compile.return_value = None  # compile failed
+
+        self.conn.feed(_pack_str('/test.py'))
+        self.handler._do_stat()
+
+        # Should return OK + normal .py stat
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+        size = struct.unpack('<I', result[5:9])[0]
+        self.assertGreater(size, 0)
+        self.mpy_cross.compile.assert_called_once_with(self.test_py)
+
+    def test_stat_mpy_prebuilt_found(self):
+        """stat('test.mpy') finds prebuilt .mpy in same directory"""
+        # Create prebuilt .mpy next to .py
+        prebuilt_mpy = os.path.join(self.temp_dir, 'test.mpy')
+        with open(prebuilt_mpy, 'wb') as f:
+            f.write(b'MPY\x06\x03...')
+
+        self.conn.feed(_pack_str('/test.mpy'))
+        self.handler._do_stat()
+
+        # Should return OK + stat for prebuilt .mpy
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)
+        size = struct.unpack('<I', result[5:9])[0]
+        self.assertEqual(size, len(b'MPY\x06\x03...'))
+
+    def test_stat_mpy_cache_found(self):
+        """stat('test.mpy') finds cache when prebuilt doesn't exist"""
+        cache_path = os.path.join(self.cache_dir, 'test.mpy-6.3.mpy')
+        with open(cache_path, 'wb') as f:
+            f.write(b'MPY\x06\x03cache...')
+        # Use realpath for dict key (matches _resolve_path behavior)
+        self.mpy_cross.compiled[os.path.realpath(self.test_py)] = cache_path
+
+        self.conn.feed(_pack_str('/test.mpy'))
+        self.handler._do_stat()
+
+        # Should return OK + stat for cache .mpy
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)
+        size = struct.unpack('<I', result[5:9])[0]
+        self.assertEqual(size, len(b'MPY\x06\x03cache...'))
+
+    def test_stat_mpy_not_found(self):
+        """stat('test.mpy') returns ENOENT when neither prebuilt nor cache"""
+        self.conn.feed(_pack_str('/test.mpy'))
+        self.handler._do_stat()
+
+        # Should return ENOENT
+        result = bytes(self.conn._written)
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.ENOENT)
+
+    def test_open_mpy_prebuilt_priority(self):
+        """open('test.mpy') prefers prebuilt over cache"""
+        # Create both prebuilt and cache
+        prebuilt_mpy = os.path.join(self.temp_dir, 'test.mpy')
+        with open(prebuilt_mpy, 'wb') as f:
+            f.write(b'PREBUILT')
+        cache_path = os.path.join(self.cache_dir, 'test.mpy-6.3.mpy')
+        with open(cache_path, 'wb') as f:
+            f.write(b'CACHE')
+        self.mpy_cross.compiled[os.path.realpath(self.test_py)] = cache_path
+
+        self.conn.feed(_pack_str('/test.mpy'))
+        self.conn.feed(_pack_str('rb'))
+        self.handler._do_open()
+
+        # Should return fd >= 0
+        result = bytes(self.conn._written)
+        fd = struct.unpack('b', result[0:1])[0]
+        self.assertGreaterEqual(fd, 0)
+
+        # Read should return prebuilt content
+        self.conn._written.clear()
+        self.conn.feed(struct.pack('b', fd))
+        self.conn.feed(_pack_s32(1024))
+        self.handler._do_read()
+
+        result = bytes(self.conn._written)
+        size = struct.unpack('<i', result[0:4])[0]
+        data = result[4:4 + size]
+        self.assertEqual(data, b'PREBUILT')
+
+    def test_open_mpy_cache_fallback(self):
+        """open('test.mpy') uses cache when prebuilt doesn't exist"""
+        cache_path = os.path.join(self.cache_dir, 'test.mpy-6.3.mpy')
+        with open(cache_path, 'wb') as f:
+            f.write(b'CACHE')
+        self.mpy_cross.compiled[os.path.realpath(self.test_py)] = cache_path
+
+        self.conn.feed(_pack_str('/test.mpy'))
+        self.conn.feed(_pack_str('rb'))
+        self.handler._do_open()
+
+        # Should return fd >= 0
+        result = bytes(self.conn._written)
+        fd = struct.unpack('b', result[0:1])[0]
+        self.assertGreaterEqual(fd, 0)
+
+        # Read should return cache content
+        self.conn._written.clear()
+        self.conn.feed(struct.pack('b', fd))
+        self.conn.feed(_pack_s32(1024))
+        self.handler._do_read()
+
+        result = bytes(self.conn._written)
+        size = struct.unpack('<i', result[0:4])[0]
+        data = result[4:4 + size]
+        self.assertEqual(data, b'CACHE')
 
 
 if __name__ == '__main__':
