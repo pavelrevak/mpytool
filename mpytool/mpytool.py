@@ -940,23 +940,6 @@ class MpyTool():
                 self.verbose(f"RM: {path}", 1)
                 self._mpy.delete(path)
 
-    def _device_status(self):
-        """Return device CWD and sys.path as colored suffix string"""
-        try:
-            cwd = self._mpy.getcwd()
-            sys_path = self._mpy.get_sys_path()
-            path_str = ' '.join(f':{p}' for p in sys_path)
-            log = self._verbose_out
-            if log and log._color:
-                return (
-                    f"  {log._BOLD_CYAN}CWD:"
-                    f" {log._BOLD_YELLOW}{cwd}"
-                    f"  {log._BOLD_CYAN}PATH:"
-                    f" {log._BOLD_YELLOW}{path_str}{log._BOLD_GREEN}")
-            return f"  CWD: {cwd}  PATH: {path_str}"
-        except Exception:
-            return ''
-
     def cmd_monitor(self):
         self.verbose("MONITOR (Ctrl+C to stop)", 1)
         try:
@@ -976,19 +959,11 @@ class MpyTool():
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
             return
-        # Show device status only in verbose mode (level 2)
-        status_suffix = self._device_status() if self._verbose >= 2 else ''
-        if log and log._color:
-            msg = (
-                f"REPL {log._BOLD_MAGENTA}(Ctrl+] to exit)"
-                f"{log._BOLD_GREEN}{status_suffix}")
-        else:
-            msg = f"REPL (Ctrl+] to exit){status_suffix}"
+        msg = f"REPL (Ctrl+] to exit)"
         self.verbose(msg, 1)
         terminal = _terminal.Terminal(self._conn, self._log)
         terminal.run()
         self._log.info('Exiting..')
-
 
     def cmd_ota(self, firmware_path):
         """OTA firmware update from local .app-bin file"""
