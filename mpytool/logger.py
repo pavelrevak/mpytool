@@ -9,10 +9,10 @@ class SimpleColorLogger():
     _RESET = '\033[0m'
     _BOLD_RED = '\033[1;31m'
     _BOLD_YELLOW = '\033[1;33m'
-    _BOLD_MAGENTA = '\033[1;35m'
-    _BOLD_BLUE = '\033[1;34m'
     _BOLD_GREEN = '\033[1;32m'
     _BOLD_CYAN = '\033[1;36m'
+    _BOLD_BLUE = '\033[1;34m'
+    _BOLD_MAGENTA = '\033[1;35m'
     _CLEAR_LINE = '\033[K'
 
     # Color names for verbose()
