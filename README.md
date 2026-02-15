@@ -184,6 +184,9 @@ $ mpytool sleep 2            # sleep for 2 seconds (useful between commands)
 ### Serial terminal and monitor (general purpose)
 ```
 $ mpytool repl                       # auto-detect port, 115200 baud
+REPL (Ctrl+] to exit)
+
+$ mpytool -v repl                    # verbose: shows CWD and sys.path before REPL
 REPL (Ctrl+] to exit)  CWD: /  PATH: : :.frozen :/lib
 
 $ mpytool -p /dev/ttyUSB0 repl       # specify port
@@ -191,7 +194,7 @@ $ mpytool -b 9600 repl               # specify baudrate
 $ mpytool -p /dev/ttyUSB0 -b 9600 monitor   # monitor at 9600 baud
 ```
 
-The `repl` command displays current working directory (CWD) and `sys.path` before entering REPL, making it easy to see the device state after `mount`, `cd`, or `path` commands.
+The `repl` command with `-v` flag displays current working directory (CWD) and `sys.path` before entering REPL, making it easy to see the device state after `mount`, `cd`, or `path` commands.
 
 Both `repl` and `monitor` can be used as general-purpose serial tools - not just for MicroPython devices. Use them to interact with any serial device (Arduino, ESP with custom firmware, GPS modules, etc.). When only one serial port is detected, it is used automatically. Default baudrate is 115200.
 
@@ -212,11 +215,12 @@ $ mpytool run script.py -- monitor       # run script and capture output
 $ mpytool mount ./src                       # mount ./src as /remote, auto-start REPL
 Mounted ./src on /remote (readonly)
 Changed CWD to /remote
-REPL (Ctrl+] to exit)  CWD: /remote  PATH: : :.frozen :/lib
+REPL (Ctrl+] to exit)
 
-$ mpytool mount ./src :/app                 # mount as /app instead of /remote
+$ mpytool -v mount ./src :/app              # mount as /app instead of /remote (verbose)
 Mounted ./src on /app (readonly)
 Changed CWD to /app
+REPL (Ctrl+] to exit)  CWD: /app  PATH: : :.frozen :/lib
 
 $ mpytool mount ./src -- exec "import main" # mount and run code
 $ mpytool mount ./src -- monitor            # mount and monitor output

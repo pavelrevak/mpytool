@@ -976,12 +976,14 @@ class MpyTool():
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
             return
+        # Show device status only in verbose mode (level 2)
+        status_suffix = self._device_status() if self._verbose >= 2 else ''
         if log and log._color:
             msg = (
                 f"REPL {log._BOLD_MAGENTA}(Ctrl+] to exit)"
-                f"{log._BOLD_GREEN}{self._device_status()}")
+                f"{log._BOLD_GREEN}{status_suffix}")
         else:
-            msg = f"REPL (Ctrl+] to exit){self._device_status()}"
+            msg = f"REPL (Ctrl+] to exit){status_suffix}"
         self.verbose(msg, 1)
         terminal = _terminal.Terminal(self._conn, self._log)
         terminal.run()
