@@ -1610,6 +1610,12 @@ class TestMount(unittest.TestCase):
         os.makedirs(libdir)
         with open(os.path.join(libdir, 'libmod.py'), 'w') as f:
             f.write('LIB_VALUE = 99\n')
+        # Multi-line file for readline tests
+        with open(os.path.join(cls.LOCAL_DIR, 'lines.txt'), 'w') as f:
+            f.write('Line 1\nLine 2\nLine 3\nLine 4\n')
+        # Long line file for readline tests (longer than typical chunk size)
+        with open(os.path.join(cls.LOCAL_DIR, 'longline.txt'), 'w') as f:
+            f.write('X' * 5000 + '\nShort\n')
 
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
@@ -1863,6 +1869,24 @@ class TestMount(unittest.TestCase):
         result = self.mpy.comm.exec_eval(
             "repr(open('/remote/hello.txt').read())")
         self.assertEqual(result, 'Hello from mount test!')
+
+    def test_26_readline_multiple(self):
+        """Test readlines() returns all lines"""
+        result = self.mpy.comm.exec_eval(
+            "open('/remote/lines.txt').readlines()")
+        self.assertEqual(result, ['Line 1\n', 'Line 2\n', 'Line 3\n', 'Line 4\n'])
+
+    def test_27_readline_long_line(self):
+        """Test readline on line longer than chunk size"""
+        result = self.mpy.comm.exec_eval(
+            "len(open('/remote/longline.txt').readline())")
+        self.assertEqual(result, 5001)  # 5000 X's + newline
+
+    def test_28_file_iteration(self):
+        """Test for line in file: iteration"""
+        result = self.mpy.comm.exec_eval(
+            "[l for l in open('/remote/lines.txt')]")
+        self.assertEqual(result, ['Line 1\n', 'Line 2\n', 'Line 3\n', 'Line 4\n'])
 
 
 @requires_device

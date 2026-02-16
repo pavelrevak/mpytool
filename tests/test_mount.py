@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from mpytool.mount import (
     MountHandler, ConnIntercept,
     ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN, CMD_CLOSE, CMD_READ,
-    CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME, CMD_SEEK,
+    CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME, CMD_SEEK, CMD_READLINE,
     CMD_MIN, CMD_MAX,
 )
 
@@ -1907,6 +1907,125 @@ class TestMountHandlerWrite(unittest.TestCase):
         length = struct.unpack('<i', result[0:4])[0]
         data = result[4:4+length]
         self.assertEqual(data, b'FGH')
+
+    def test_readline_basic(self):
+        """readline() reads until newline"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'lines.txt')
+        with open(test_file, 'wb') as f:
+            f.write(b'Line 1\nLine 2\nLine 3\n')
+
+        # Open file
+        self.conn.feed(_pack_str('/lines.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+        self.assertGreaterEqual(fd, 0)
+
+        # Readline should return "Line 1\n"
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        line = result[4:4+length]
+        self.assertEqual(line, b'Line 1\n')
+
+    def test_readline_multiple(self):
+        """readline() reads consecutive lines"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'multi.txt')
+        with open(test_file, 'wb') as f:
+            f.write(b'First\nSecond\nThird\n')
+
+        # Open file
+        self.conn.feed(_pack_str('/multi.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+
+        # Read first line
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(result[4:4+length], b'First\n')
+
+        # Read second line
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(result[4:4+length], b'Second\n')
+
+        # Read third line
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(result[4:4+length], b'Third\n')
+
+    def test_readline_no_newline_at_eof(self):
+        """readline() at EOF returns empty"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'short.txt')
+        with open(test_file, 'wb') as f:
+            f.write(b'Last line')  # no trailing newline
+
+        # Open file
+        self.conn.feed(_pack_str('/short.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+
+        # Read line without newline
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(result[4:4+length], b'Last line')
+
+        # Read at EOF - should return empty
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(length, 0)
+
+    def test_readline_invalid_fd(self):
+        """readline() with invalid fd returns empty"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        # Readline with non-existent fd
+        self.conn.feed(struct.pack('b', 99))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(length, 0)
+
+    def test_readline_after_seek(self):
+        """readline() works correctly after seek"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'seeklines.txt')
+        with open(test_file, 'wb') as f:
+            f.write(b'AAA\nBBB\nCCC\n')
+
+        # Open file
+        self.conn.feed(_pack_str('/seeklines.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+
+        # Seek to position 4 (start of "BBB\n")
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', 4) + struct.pack('b', 0))
+        handler.dispatch(CMD_SEEK)
+        self.conn.get_written()
+
+        # Readline should return "BBB\n"
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_READLINE)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(result[4:4+length], b'BBB\n')
 
 
 if __name__ == '__main__':

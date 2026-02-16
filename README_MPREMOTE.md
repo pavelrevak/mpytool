@@ -141,11 +141,10 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Unsafe symlinks | ✗ | ✓ `--unsafe-links` |
 | VFS RENAME | ✓ | ✓ |
 | VFS SEEK | ✓ | ✓ |
-| VFS READLINE | ✓ SW impl | ✓ CMD |
+| VFS READLINE | ✓ | ✓ |
+| File iteration | ✓ | ✓ |
 | Iterative listdir | ✗ | ✓ |
-| Agent size | ✓ 4.0KB raw | ✗ 5.5KB compressed |
-
-**Note:** "SW impl" = software implementation in agent (uses `CMD_READ` + buffer), "CMD" = dedicated VFS command. Both provide the same functionality to user code.
+| Agent size | ✓ 4.2KB raw | ✗ 5.5KB compressed |
 
 ## Summary
 
@@ -158,8 +157,8 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 - Shell completion with remote path support
 - CWD and sys.path tracking across commands
 - No auto soft-reset (preserves device state between commands)
-- Smaller VFS agent (4.0KB vs 5.5KB) — 27% less RAM, faster mount
-- Minimalist design (blocking I/O, software readline, simpler code)
+- Smaller VFS agent (4.2KB vs 5.5KB) — 24% less RAM, faster mount
+- Minimalist design (blocking I/O, simpler code)
 
 **mpremote advantages:**
 - Package manager (mip) for micropython-lib

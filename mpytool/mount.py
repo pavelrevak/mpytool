@@ -13,8 +13,9 @@ Three-layer architecture:
 2. **Handler (PC)**: Handles VFS requests from device
    (MountHandler class)
    - Resolves paths within mount root (prevents path traversal)
-   - Services 10 VFS commands:
-     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE, RENAME, SEEK
+   - Services 11 VFS commands:
+     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE, RENAME, SEEK,
+     READLINE
    - Manages file descriptors and open file handles
    - Supports virtual submounts (ln command)
 
@@ -66,6 +67,7 @@ Device waits for PC response before continuing. This ensures:
 |     |         | (str)                 |                      |
 | 10  | SEEK    | fd (s8), offset (s32),| position (s32)       |
 |     |         | whence (s8)           |                      |
+| 11  | READLINE| fd (s8)               | length, data         |
 
 **Wire format:**
 - `s8`: signed 8-bit int (struct 'b')
@@ -164,9 +166,10 @@ CMD_MKDIR = 7
 CMD_REMOVE = 8
 CMD_RENAME = 9
 CMD_SEEK = 10
+CMD_READLINE = 11
 
 CMD_MIN = CMD_STAT
-CMD_MAX = CMD_SEEK
+CMD_MAX = CMD_READLINE
 
 # Prebuilt bytes for hot path
 _ESCAPE_BYTE = bytes([ESCAPE])
@@ -223,15 +226,16 @@ class _mt_F(io.IOBase):
   s._pos+=p;return p
  def readline(s):
   r=bytearray()
-  while True:
-   if s._rp>=s._rn:
-    s._refill()
-    if s._rn<=0:break
+  if s._rp<s._rn:
    i=s._rb.find(b'\\n',s._rp,s._rn)
    if i>=0:
-    r+=s._rb[s._rp:i+1];s._rp=i+1;break
+    r+=s._rb[s._rp:i+1];s._rp=i+1
+    s._pos+=len(r);return str(r,'utf8') if s.txt else bytes(r)
    r+=s._rb[s._rp:s._rn];s._rp=s._rn
-  s._pos+=len(r);return str(r,'utf8') if s.txt else bytes(r)
+  _mt_bg(11);_mt_w('b',s.fd)
+  n=_mt_r('<i')
+  if n>0:r+=_mt_si.read(n)
+  _mt_en();s._pos+=len(r);return str(r,'utf8') if s.txt else bytes(r)
  def read(s,n=-1):
   if n>0:
    b=bytearray(n);d=bytes(b[:s.readinto(b)])
@@ -243,6 +247,12 @@ class _mt_F(io.IOBase):
     p.append(bytes(b[:g]))
    d=b''.join(p)
   return str(d,'utf8') if s.txt else d
+ def __iter__(s):
+  while True:
+   l=s.readline()
+   if not l:break
+   yield l
+ def readlines(s):return list(s)
  def write(s,buf):
   b=buf.encode('utf8') if s.txt and isinstance(buf,str) else bytes(buf)
   _mt_bg(6);_mt_w('b',s.fd);_mt_w('<i',len(b))
@@ -386,6 +396,7 @@ class MountHandler:
             CMD_REMOVE: self._do_remove,
             CMD_RENAME: self._do_rename,
             CMD_SEEK: self._do_seek,
+            CMD_READLINE: self._do_readline,
         }
 
     def add_submount(self, subpath, local_dir):
@@ -757,6 +768,17 @@ class MountHandler:
             self._wr_s32(pos)
         except OSError as e:
             self._wr_s32(-e.errno)
+
+    def _do_readline(self):
+        fd = self._rd_s8()
+        if self._log:
+            self._log.info("MOUNT: READLINE: fd=%d", fd)
+        f = self._files.get(fd)
+        if f is None:
+            self._wr_s32(0)
+            return
+        line = f.readline()
+        self._wr_bytes(line if line else b'')
 
     def close_all(self):
         """Close all open file handles"""
