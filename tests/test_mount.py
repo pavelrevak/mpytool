@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from mpytool.mount import (
     MountHandler, ConnIntercept,
     ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN, CMD_CLOSE, CMD_READ,
-    CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME,
+    CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME, CMD_SEEK,
     CMD_MIN, CMD_MAX,
 )
 
@@ -1805,6 +1805,108 @@ class TestMountHandlerWrite(unittest.TestCase):
         self.assertTrue(os.path.exists(new_file))
         with open(new_file) as f:
             self.assertEqual(f.read(), 'old content')
+
+    def test_seek_absolute(self):
+        """seek() with SEEK_SET (whence=0) from beginning"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'seek_test.txt')
+        with open(test_file, 'w') as f:
+            f.write('0123456789')
+
+        # Open file
+        self.conn.feed(_pack_str('/seek_test.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+        self.assertGreaterEqual(fd, 0)
+
+        # Seek to position 5
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', 5) + struct.pack('b', 0))
+        handler.dispatch(CMD_SEEK)
+        result = self.conn.get_written()
+        pos = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(pos, 5)
+
+    def test_seek_relative(self):
+        """seek() with SEEK_CUR (whence=1) relative to current"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'seek_test.txt')
+        with open(test_file, 'w') as f:
+            f.write('0123456789')
+
+        # Open and read 3 bytes
+        self.conn.feed(_pack_str('/seek_test.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', 3))
+        handler.dispatch(CMD_READ)
+        self.conn.get_written()  # discard read result
+
+        # Seek +2 from current position (should be at 5)
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', 2) + struct.pack('b', 1))
+        handler.dispatch(CMD_SEEK)
+        result = self.conn.get_written()
+        pos = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(pos, 5)
+
+    def test_seek_from_end(self):
+        """seek() with SEEK_END (whence=2) from end"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'seek_test.txt')
+        with open(test_file, 'w') as f:
+            f.write('0123456789')
+
+        # Open file
+        self.conn.feed(_pack_str('/seek_test.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+
+        # Seek -3 from end (should be at position 7)
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', -3) + struct.pack('b', 2))
+        handler.dispatch(CMD_SEEK)
+        result = self.conn.get_written()
+        pos = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(pos, 7)
+
+    def test_seek_invalid_fd(self):
+        """seek() with invalid fd returns EBADF"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        # Seek with non-existent fd
+        self.conn.feed(struct.pack('b', 99) + struct.pack('<i', 0) + struct.pack('b', 0))
+        handler.dispatch(CMD_SEEK)
+        result = self.conn.get_written()
+        err = struct.unpack('<i', result[0:4])[0]
+        self.assertEqual(err, -errno.EBADF)
+
+    def test_seek_and_read(self):
+        """seek() changes read position correctly"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+        test_file = os.path.join(self.temp_dir, 'seek_test.txt')
+        with open(test_file, 'w') as f:
+            f.write('ABCDEFGHIJ')
+
+        # Open file
+        self.conn.feed(_pack_str('/seek_test.txt') + _pack_str('r'))
+        handler.dispatch(CMD_OPEN)
+        result = self.conn.get_written()
+        fd = struct.unpack('b', result[0:1])[0]
+
+        # Seek to position 5
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', 5) + struct.pack('b', 0))
+        handler.dispatch(CMD_SEEK)
+        self.conn.get_written()  # discard seek result
+
+        # Read 3 bytes (should get 'FGH')
+        self.conn.feed(struct.pack('b', fd) + struct.pack('<i', 3))
+        handler.dispatch(CMD_READ)
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        data = result[4:4+length]
+        self.assertEqual(data, b'FGH')
 
 
 if __name__ == '__main__':

@@ -2430,6 +2430,27 @@ class TestMountWrite(unittest.TestCase):
             content = f.read()
         self.assertEqual(content, 'Inside directory')
 
+    def test_14_seek(self):
+        """Seek within mounted file"""
+        # Create test file with known content
+        test_file = os.path.join(self.LOCAL_DIR, 'seek_test.txt')
+        with open(test_file, 'w') as f:
+            f.write('ABCDEFGHIJKLMNOP')
+
+        # Test seek operations
+        self.mpy.comm.exec(
+            "f = open('/remote/seek_test.txt', 'r')\n"
+            "f.seek(5)\n"  # SEEK_SET to position 5
+            "c1 = f.read(3)\n"
+            "f.seek(2, 1)\n"  # SEEK_CUR +2 (now at 10)
+            "c2 = f.read(3)\n"
+            "f.seek(-3, 2)\n"  # SEEK_END -3 (position 13)
+            "c3 = f.read(3)\n"
+            "f.close()"
+        )
+        result = self.mpy.comm.exec_eval("repr((c1, c2, c3))")
+        self.assertEqual(result, ('FGH', 'KLM', 'NOP'))
+
 
 @requires_device
 class TestMountReadonly(unittest.TestCase):

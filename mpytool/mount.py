@@ -3,18 +3,18 @@
 ## Architecture
 
 Three-layer architecture:
-1. **Agent (MicroPython)**: VFS driver on device (~3.5KB, 139 lines)
+1. **Agent (MicroPython)**: VFS driver on device (~4.0KB, 149 lines)
    - RemoteFS class implements VFS interface
      (mount, stat, ilistdir, open, chdir, mkdir, remove, rename)
    - _mt_F class implements file object
-     (read, write, readline, close, context manager)
+     (read, write, readline, seek, close, context manager)
    - Sends VFS requests via escape sequences on serial line
 
 2. **Handler (PC)**: Handles VFS requests from device
    (MountHandler class)
    - Resolves paths within mount root (prevents path traversal)
-   - Services 9 VFS commands:
-     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE, RENAME
+   - Services 10 VFS commands:
+     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE, RENAME, SEEK
    - Manages file descriptors and open file handles
    - Supports virtual submounts (ln command)
 
@@ -64,6 +64,8 @@ Device waits for PC response before continuing. This ensures:
 | 8   | REMOVE  | path, recursive (s8)  | errno (s8)           |
 | 9   | RENAME  | old_path, new_path    | errno (s8)           |
 |     |         | (str)                 |                      |
+| 10  | SEEK    | fd (s8), offset (s32),| position (s32)       |
+|     |         | whence (s8)           |                      |
 
 **Wire format:**
 - `s8`: signed 8-bit int (struct 'b')
@@ -134,7 +136,6 @@ When device soft resets (Ctrl+D):
 
 ## Performance
 
-**Agent size:** 3.5KB source (136 lines)
 **Chunk size:** Auto-detected 512B - 32KB based on device RAM
 **Overhead:** ~1 RTT per VFS operation (blocking protocol)
 **Optimal for:** Development, testing, prototyping
@@ -162,9 +163,10 @@ CMD_WRITE = 6
 CMD_MKDIR = 7
 CMD_REMOVE = 8
 CMD_RENAME = 9
+CMD_SEEK = 10
 
 CMD_MIN = CMD_STAT
-CMD_MAX = CMD_RENAME
+CMD_MAX = CMD_SEEK
 
 # Prebuilt bytes for hot path
 _ESCAPE_BYTE = bytes([ESCAPE])
@@ -194,7 +196,7 @@ def _mt_ws(v):
  if b:_mt_so.write(b)
 class _mt_F(io.IOBase):
  def __init__(s,fd,txt,mode):
-  s.fd=fd;s.txt=txt;s.mode=mode
+  s.fd=fd;s.txt=txt;s.mode=mode;s._pos=0
   if 'r' in mode or '+' in mode:
    s._rb=bytearray(CHUNK_SIZE)
    s._rn=0;s._rp=0
@@ -218,7 +220,7 @@ class _mt_F(io.IOBase):
    a=min(n-p,s._rn-s._rp)
    buf[p:p+a]=s._rb[s._rp:s._rp+a]
    s._rp+=a;p+=a
-  return p
+  s._pos+=p;return p
  def readline(s):
   r=bytearray()
   while True:
@@ -229,7 +231,7 @@ class _mt_F(io.IOBase):
    if i>=0:
     r+=s._rb[s._rp:i+1];s._rp=i+1;break
    r+=s._rb[s._rp:s._rn];s._rp=s._rn
-  return str(r,'utf8') if s.txt else bytes(r)
+  s._pos+=len(r);return str(r,'utf8') if s.txt else bytes(r)
  def read(s,n=-1):
   if n>0:
    b=bytearray(n);d=bytes(b[:s.readinto(b)])
@@ -246,11 +248,18 @@ class _mt_F(io.IOBase):
   _mt_bg(6);_mt_w('b',s.fd);_mt_w('<i',len(b))
   _mt_so.write(b);e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
-  return len(b)
+  s._pos+=len(b);return len(b)
  def ioctl(s,req,arg):
   if req==4:s.close()
   elif req==11:return CHUNK_SIZE
   return 0
+ def seek(s,offset,whence=0):
+  if whence==1:offset+=s._pos;whence=0
+  _mt_bg(10);_mt_w('b',s.fd);_mt_w('<i',offset);_mt_w('b',whence)
+  pos=_mt_r('<i');_mt_en()
+  if pos<0:raise OSError(-pos)
+  if s._rb:s._rp=s._rn=0
+  s._pos=pos;return pos
  def close(s):
   if s.fd>=0:
    _mt_bg(4);_mt_w('b',s.fd)
@@ -376,6 +385,7 @@ class MountHandler:
             CMD_MKDIR: self._do_mkdir,
             CMD_REMOVE: self._do_remove,
             CMD_RENAME: self._do_rename,
+            CMD_SEEK: self._do_seek,
         }
 
     def add_submount(self, subpath, local_dir):
@@ -730,6 +740,23 @@ class MountHandler:
             self._wr_s8(0)
         except OSError as e:
             self._wr_s8(-e.errno)
+
+    def _do_seek(self):
+        fd = self._rd_s8()
+        offset = self._rd_s32()
+        whence = self._rd_s8()
+        if self._log:
+            self._log.info(
+                "MOUNT: SEEK: fd=%d offset=%d whence=%d", fd, offset, whence)
+        f = self._files.get(fd)
+        if not f:
+            self._wr_s32(-_errno.EBADF)
+            return
+        try:
+            pos = f.seek(offset, whence)
+            self._wr_s32(pos)
+        except OSError as e:
+            self._wr_s32(-e.errno)
 
     def close_all(self):
         """Close all open file handles"""

@@ -258,8 +258,8 @@ import and execute files from the local directory without uploading
 them to flash. Changes to local files are immediately visible on
 the device.
 
-**Memory overhead:** The VFS agent uses ~3.5KB of RAM on the device
-(139 lines of MicroPython code injected during mount).
+**Memory overhead:** The VFS agent uses ~4KB of RAM on the device
+(142 lines of MicroPython code injected during mount).
 
 **By default, mounts are read-only.** Use `-w` / `--writable` flag
 to enable write support — the device can create, modify and delete
