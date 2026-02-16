@@ -293,24 +293,7 @@ instead — it's optimized for throughput.
 root. Symlinks are followed and checked. Write operations require
 explicit `-w` flag.
 
-#### Comparison with mpremote mount
-
-| Feature | mpytool | mpremote |
-|---------|---------|----------|
-| Read-only mount | ✅ Yes | ✅ Yes |
-| Read-write mount | ✅ Yes (`-w`) | ✅ Yes |
-| Custom mount point | ✅ Yes (any path) | ❌ No (fixed `/remote`) |
-| Multiple mounts | ✅ Yes | ❌ No (single mount) |
-| Virtual submounts | ✅ Yes (`ln` cmd) | ❌ No |
-| Transparent .mpy | ✅ Yes (`-m` flag) | ❌ No |
-| Soft reset remount | ✅ Yes | ✅ Yes |
-| Path protection | ✅ Yes (realpath) | ✅ Yes (realpath) |
-| Unsafe symlinks | ❌ No | ✅ Yes (`--unsafe-links`) |
-| VFS RENAME | ❌ No | ✅ Yes |
-| VFS SEEK | ❌ No | ✅ Yes |
-| VFS READLINE | ❌ No | ✅ Yes |
-| Iterative listdir | ❌ No | ✅ Yes |
-| Agent size | ~3.5KB | ~2.5KB (compressed) |
+See [Mount VFS Comparison](README_MPREMOTE.md#mount-vfs-comparison) for detailed comparison with mpremote.
 
 ### Link files into mounted VFS
 ```

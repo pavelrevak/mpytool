@@ -6,155 +6,156 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 
 | Command | mpytool | mpremote |
 |---------|---------|----------|
-| List files | `ls :/path` | `fs ls path` or `ls path` |
-| Tree view | `tree :/path` | `fs tree path` or `tree path` |
-| Print file | `cat :file` | `fs cat file` or `cat file` |
-| Copy files | `cp src :dst` | `fs cp src :dst` or `cp src :dst` |
-| Delete file | `rm :file` | `fs rm file` or `rm file` |
-| Delete dir | `rm :dir` | `fs rmdir dir` or `rmdir dir` |
-| Create dir | `mkdir :dir` | `fs mkdir dir` or `mkdir dir` |
-| Move/rename | `mv :src :dst` | - |
-| Touch file | - | `fs touch file` or `touch file` |
-| SHA256 hash | - | `fs sha256sum file` or `sha256sum file` |
-| Execute code | `exec "code"` | `exec "code"` |
-| Evaluate expr | - | `eval "expr"` |
-| Run script | `run script.py` | `run script.py` |
-| Enter REPL | `repl` | `repl` |
-| Monitor output | `monitor` | - (use `repl`) |
-| Soft reset | `reset` | `soft-reset` |
-| Machine reset | `reset --machine` | `reset` |
-| Hardware reset | `reset --rts` | - |
-| Bootloader | `reset --boot` | `bootloader` |
-| Device info | `info` | - (use `exec`) |
-| Disk usage | - | `df` |
-| Speed test | `speedtest` | - |
-| Mount VFS | `mount ./dir :/mp` | `mount ./dir` |
-| Unmount VFS | - (exit session) | `umount` |
-| Virtual submount | `ln ./src :/dst` | - |
-| Package install | - | `mip install pkg` |
-| RTC control | - | `rtc`, `rtc --set` |
-| ROMFS manage | - | `romfs query/build/deploy` |
-| Edit remote file | - | `edit :file` |
-| Flash read/write | `flash read/write/erase` | - |
-| OTA update | `ota firmware.bin` | - |
-| Print CWD | `pwd` | - (use `exec`) |
-| Change CWD | `cd :path` | - |
-| Manage sys.path | `path` | - |
-| Sleep | `sleep 2` (seconds) | `sleep 2000` (milliseconds) |
-| Connect device | Auto / `-p port` | `connect dev` |
-| Disconnect | - | `disconnect` |
-| Resume session | - | `resume` |
-| List ports | - | `connect list` or `devs` |
+| List files | ✓ `ls :/path` | ✓ `ls path` |
+| Tree view | ✓ `tree :/path` | ✓ `tree path` |
+| Print file | ✓ `cat :file` | ✓ `cat file` |
+| Copy files | ✓ `cp src :dst` | ✓ `cp src :dst` |
+| Delete file | ✓ `rm :file` | ✓ `rm file` |
+| Delete dir | ✓ `rm :dir` | ✓ `rmdir dir` |
+| Create dir | ✓ `mkdir :dir` | ✓ `mkdir dir` |
+| Move/rename | ✓ `mv :src :dst` | ✗ |
+| Touch file | ✗ | ✓ `touch file` |
+| SHA256 hash | ✗ | ✓ `sha256sum file` |
+| Execute code | ✓ `exec "code"` | ✓ `exec "code"` |
+| Evaluate expr | ✗ | ✓ `eval "expr"` |
+| Run script | ✓ `run script.py` | ✓ `run script.py` |
+| Enter REPL | ✓ `repl` | ✓ `repl` |
+| Monitor output | ✓ `monitor` | ✗ use `repl` |
+| Soft reset | ✓ `reset` | ✓ `soft-reset` |
+| Machine reset | ✓ `reset --machine` | ✓ `reset` |
+| Hardware reset | ✓ `reset --rts` | ✗ |
+| Bootloader | ✓ `reset --boot` | ✓ `bootloader` |
+| Device info | ✓ `info` | ✗ use `exec` |
+| Disk usage | ✓ `info` | ✓ `df` |
+| Speed test | ✓ `speedtest` | ✗ |
+| Mount VFS | ✓ `mount ./dir :/mp` | ✓ `mount ./dir` |
+| Unmount VFS | ✗ exit session | ✓ `umount` |
+| Virtual submount | ✓ `ln ./src :/dst` | ✗ |
+| Package install | ✗ | ✓ `mip install pkg` |
+| RTC control | ✗ | ✓ `rtc`, `rtc --set` |
+| ROMFS manage | ✗ | ✓ `romfs` |
+| Edit remote file | ✗ | ✓ `edit :file` |
+| Flash read/write | ✓ `flash r/w/erase` | ✗ |
+| OTA update | ✓ `ota firmware.bin` | ✗ |
+| Print CWD | ✓ `pwd` | ✗ use `exec` |
+| Change CWD | ✓ `cd :path` | ✗ |
+| Manage sys.path | ✓ `path` | ✗ |
+| Sleep | ✓ `sleep 2` (sec) | ✓ `sleep 2000` (ms) |
+| Connect device | ✓ auto / `-p` | ✓ `connect dev` |
+| Disconnect | ✗ | ✓ `disconnect` |
+| Resume session | ✗ not needed | ✓ `resume` |
+| List ports | ✓ auto | ✓ `devs` |
 
 ## Features
 
 | Feature | mpytool | mpremote |
 |---------|---------|----------|
 | **Connection** | | |
-| Auto-detect port | Yes | Yes |
-| TCP/socket connection | Yes (`-a ip:port`) | - |
-| Connect by serial ID | - | Yes (`id:serial`) |
-| Port shortcuts | - | Yes (`a0`, `u0`, `c0`) |
-| Multiple connections | - | Yes |
+| Auto-detect port | ✓ | ✓ |
+| TCP/socket connection | ✓ `-a ip:port` | ✗ |
+| Connect by serial ID | ✗ | ✓ `id:serial` |
+| Port shortcuts | ✗ | ✓ `a0`, `u0`, `c0` |
+| Multiple connections | ✗ | ✓ switching |
 | **File Transfer** | | |
-| Skip unchanged files | Yes (SHA256) | Yes (SHA256) |
-| Force upload | Yes (`-f`) | Yes (`-f`) |
-| Recursive copy | Automatic | With `-r` flag |
-| Compression | Auto (deflate) | - |
-| Chunk size | Auto-detect (512B-32KB) | Fixed |
-| Compile .py to .mpy | Yes (`-m` flag) | - |
-| Copy contents only | Yes (trailing `/`) | - |
+| Skip unchanged files | ✓ SHA256 | ✓ SHA256 |
+| Force upload | ✓ `-f` | ✓ `-f` |
+| Recursive copy | ✓ auto | ✓ `-r` flag |
+| Compression | ✓ deflate | ✗ |
+| Chunk size | ✓ auto 512B-32KB | ✗ 256B fixed |
+| Compile .py to .mpy | ✓ `-m` | ✗ |
+| Copy contents only | ✓ trailing `/` | ✗ |
 | **Output** | | |
-| Progress bar | Yes | Yes |
-| Verbose output | Yes (`-v`) | Yes (`-v`) |
-| Quiet mode | Yes (`-q`) | - |
-| Debug levels | Yes (`-d/-dd/-ddd`) | - |
-| Color output | Yes (NO_COLOR aware) | Yes |
+| Progress bar | ✓ | ✓ |
+| Verbose output | ✓ `-v` | ✓ `-v` |
+| Quiet mode | ✓ `-q` | ✗ |
+| Debug levels | ✓ `-d/-dd/-ddd` | ✗ |
+| Color output | ✓ NO_COLOR aware | ✓ |
 | **REPL** | | |
-| Session capture | - | Yes (`--capture`) |
-| Code injection | - | Yes (Ctrl-J) |
-| File injection | - | Yes (Ctrl-K) |
-| Escape non-printable | - | Yes (`-e`) |
-| Exit shortcut | Ctrl+] | Ctrl+] or Ctrl+X |
-| Show CWD/path on start | Yes (`-v`) | - |
+| Session capture | ✗ | ✓ `--capture` |
+| Code injection | ✗ | ✓ Ctrl-J |
+| File injection | ✗ | ✓ Ctrl-K |
+| Escape non-printable | ✗ | ✓ `-e` |
+| Exit shortcut | ✓ Ctrl+] | ✓ Ctrl+] / Ctrl+X |
+| Show CWD/path on start | ✗ | ✗ |
 | **Reset Options** | | |
-| Soft reset | Yes | Yes |
-| Machine reset | Yes | Yes |
-| Raw REPL reset | Yes (`--raw`) | - |
-| Hardware reset (RTS) | Yes (`--rts`) | - |
-| DTR bootloader (ESP32) | Yes (`--dtr-boot`) | - |
+| Soft reset | ✓ | ✓ |
+| Machine reset | ✓ | ✓ |
+| Raw REPL reset | ✓ `--raw` | ✗ |
+| Hardware reset (RTS) | ✓ `--rts` | ✗ |
+| DTR bootloader (ESP32) | ✓ `--dtr-boot` | ✗ |
 | **Mount VFS** | | |
-| Read-only mount | Yes | Yes |
-| Read-write mount | Yes (`-w`) | Yes (default) |
-| Custom mount point | Yes (any path) | - (`/remote` only) |
-| Multiple mounts | Yes | - |
-| Virtual submounts | Yes (`ln` command) | - |
-| Transparent .mpy | Yes (`-m` flag) | - |
-| Soft reset remount | Yes | Yes |
-| CWD restore after reset | Yes | - |
-| Unsafe symlinks | - | Yes (`-l`) |
+| Read-only mount | ✓ default | ✗ |
+| Read-write mount | ✓ `-w` | ✓ always |
+| Custom mount point | ✓ any path | ✗ `/remote` only |
+| Multiple mounts | ✓ | ✗ |
+| Virtual submounts | ✓ `ln` command | ✗ |
+| Transparent .mpy | ✓ `-m` | ✗ |
+| Soft reset remount | ✓ | ✓ |
+| CWD restore after reset | ✓ | ✗ |
+| Unsafe symlinks | ✗ | ✓ `-l` |
 | **Advanced** | | |
-| Flash operations | Yes (RP2, ESP32) | - |
-| OTA firmware update | Yes (ESP32) | - |
-| Package manager | - | Yes (mip) |
-| RTC control | - | Yes |
-| ROMFS support | - | Yes |
+| Flash operations | ✓ RP2, ESP32 | ✗ |
+| OTA firmware update | ✓ ESP32 | ✗ |
+| Package manager | ✗ | ✓ mip |
+| RTC control | ✗ | ✓ |
+| ROMFS support | ✗ | ✓ |
 | **Usability** | | |
-| Shell completion | Yes (ZSH + Bash) | - |
-| Remote path completion | Yes | - |
-| User config file | - | Yes (`config.py`) |
-| Custom aliases | - | Yes |
-| Command separator | `--` | `+` |
-| Default (no command) | Error message | Enter REPL |
-| CWD tracking | Yes (`cd`, `pwd`) | - |
-| sys.path control | Yes (`path`) | - |
-| Python API | Yes (documented) | Planned |
-| Raw-paste mode | Yes | Yes |
+| Shell completion | ✓ ZSH + Bash | ✗ |
+| Remote path completion | ✓ | ✗ |
+| User config file | ✗ | ✓ `config.py` |
+| Custom aliases | ✗ | ✓ |
+| Command separator | ✓ `--` | ✓ `+` |
+| Default (no command) | ✓ info | ✓ REPL |
+| CWD tracking | ✓ `cd`, `pwd` | ✗ |
+| sys.path control | ✓ `path` | ✗ |
+| Python API | ✓ documented | ✗ planned |
+| Raw-paste mode | ✓ | ✓ |
 | **Platform Support** | | |
-| Linux | Yes | Yes |
-| macOS | Yes | Yes |
-| Windows | Yes | Yes |
+| Linux | ✓ | ✓ |
+| macOS | ✓ | ✓ |
+| Windows | ✓ | ✓ |
 
 ## Path Syntax
 
 | Syntax | mpytool | mpremote |
 |--------|---------|----------|
-| Device path prefix | `:` required | `:` optional |
-| Current directory | `:` | `.` or empty |
-| Root directory | `:/` | `/` |
-| Relative path | `:path` | `path` |
-| Absolute path | `:/path` | `/path` |
-| Copy contents only | `src/` (trailing slash) | Not supported |
+| Device path prefix | ✓ `:` required | ✓ `:` optional |
+| Current directory | ✓ `:` | ✓ `.` or empty |
+| Root directory | ✓ `:/` | ✓ `/` |
+| Relative path | ✓ `:path` | ✓ `path` |
+| Absolute path | ✓ `:/path` | ✓ `/path` |
+| Copy contents only | ✓ `src/` trailing slash | ✗ |
 
 ## Mount VFS Comparison
 
 | Feature | mpytool | mpremote |
 |---------|---------|----------|
-| Read-only mount | Yes | Yes |
-| Read-write mount | Yes (`-w`) | Yes |
-| Custom mount point | Yes (any path) | No (fixed `/remote`) |
-| Multiple mounts | Yes | No (single mount) |
-| Virtual submounts | Yes (`ln` cmd) | No |
-| Transparent .mpy | Yes (`-m` flag) | No |
-| Soft reset remount | Yes | Yes |
-| Path protection | Yes (realpath) | Yes (realpath) |
-| Unsafe symlinks | No | Yes (`--unsafe-links`) |
-| VFS RENAME | No | Yes |
-| VFS SEEK | No | Yes |
-| VFS READLINE | No | Yes |
-| Iterative listdir | No | Yes |
-| Agent size | ~3.5KB | ~2.5KB (compressed) |
+| Read-only mount | ✓ default | ✗ |
+| Read-write mount | ✓ `-w` | ✓ always |
+| Custom mount point | ✓ any path | ✗ `/remote` only |
+| Multiple mounts | ✓ | ✗ single mount |
+| Virtual submounts | ✓ `ln` cmd | ✗ |
+| Transparent .mpy | ✓ `-m` | ✗ |
+| Soft reset remount | ✓ | ✓ |
+| Path protection | ✓ realpath | ✓ realpath |
+| Unsafe symlinks | ✗ | ✓ `--unsafe-links` |
+| VFS RENAME | ✗ | ✓ |
+| VFS SEEK | ✗ | ✓ |
+| VFS READLINE | ✗ | ✓ |
+| Iterative listdir | ✗ | ✓ |
+| Agent size | ✗ ~3.5KB | ✓ ~2.5KB compressed |
 
 ## Summary
 
 **mpytool advantages:**
+- Faster file transfers (2-5x) — deflate compression
 - TCP/socket connection for network devices
-- Automatic compression and chunk size optimization
 - `.mpy` compilation during upload and mount
 - Flash operations and OTA updates (RP2, ESP32)
-- Flexible mount options (custom paths, multiple mounts, submounts)
+- Flexible mount options (custom paths, multiple mounts, submounts, read-only)
 - Shell completion with remote path support
 - CWD and sys.path tracking across commands
+- No auto soft-reset (preserves device state between commands)
 
 **mpremote advantages:**
 - Package manager (mip) for micropython-lib
