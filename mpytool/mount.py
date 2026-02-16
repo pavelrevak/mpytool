@@ -747,7 +747,7 @@ class MountHandler:
             self._wr_s8(-_errno.EACCES)
             return
         try:
-            _os.rename(old_local, new_local)
+            _os.replace(old_local, new_local)
             self._wr_s8(0)
         except OSError as e:
             self._wr_s8(-e.errno)
