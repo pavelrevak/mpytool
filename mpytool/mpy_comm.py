@@ -1,5 +1,7 @@
 """MicroPython tool: MPY communication"""
 
+import time as _time
+
 import mpytool.conn as _conn
 
 # REPL control characters
@@ -212,23 +214,101 @@ class MpyComm():
         result = self.exec(f'print({command})', timeout)
         return eval(result)
 
-    def exec_raw_paste(self, command, timeout=5):
-        """Execute command using raw-paste mode with flow control.
+    def _scan_for_rawpaste_header(self, first_byte, second_byte, timeout):
+        """Scan buffer for raw-paste header pattern (for slow UART devices).
 
-        Raw-paste mode compiles code as it receives it, using less RAM
-        and providing better reliability for large code transfers.
+        Returns:
+            tuple: (header, status) bytes
+        Raises:
+            MpyError if pattern not found
+        """
+        if self._log:
+            self._log.warning(
+                "Raw-paste header mismatch (got %d) - scanning", first_byte)
+
+        scanned = bytearray([first_byte, second_byte])
+        max_scan = 50
+
+        while len(scanned) < max_scan:
+            # Look for R\x01 or R\x00 pattern
+            for pattern in [b'R\x01', b'R\x00']:
+                idx = scanned.find(pattern)
+                if idx != -1:
+                    if self._log:
+                        self._log.info(
+                            "Found header at offset %d (discarded %d garbage bytes)",
+                            idx, idx)
+                    return ord('R'), scanned[idx + 1]
+
+            try:
+                scanned.extend(self._conn.read_bytes(1, timeout=0.2))
+            except _conn.Timeout:
+                break
+
+        raise MpyError(
+            f"Raw-paste header not found in {len(scanned)} bytes: "
+            f"{bytes(scanned[:20])!r}...")
+
+    def _read_rawpaste_window_size(self, timeout):
+        """Read raw-paste window size from device."""
+        window_bytes = self._conn.read_bytes(2, timeout)
+        window_size = int.from_bytes(window_bytes, 'little')
+        if self._log:
+            self._log.info("Raw-paste window size: %d", window_size)
+        return window_size
+
+    def _send_data_with_flow_control(self, data, window_size, timeout):
+        """Send data with flow control (returns early if device aborts)."""
+        remaining_window = window_size
+        offset = 0
+
+        while offset < len(data):
+            if remaining_window == 0 or self._conn._has_data(0):
+                flow_byte = self._conn.read_bytes(1, timeout)
+                if flow_byte == RAW_PASTE_ACK:
+                    remaining_window += window_size
+                elif flow_byte == CTRL_D:
+                    self._conn.write(CTRL_D)
+                    return  # Device aborted (syntax error during compilation)
+
+            if remaining_window > 0:
+                chunk_size = min(remaining_window, len(data) - offset)
+                self._conn.write(data[offset:offset + chunk_size])
+                offset += chunk_size
+                remaining_window -= chunk_size
+
+        self._conn.write(CTRL_D)
+
+    def _wait_for_paste_complete(self, timeout):
+        """Consume remaining ACKs and wait for CTRL_D echo."""
+        while True:
+            byte = self._conn.read_bytes(1, timeout)
+            if byte == CTRL_D:
+                break
+
+    def _read_execution_result(self, command, timeout):
+        """Read and parse execution result."""
+        result = self._conn.read_until(CTRL_D, timeout)
+        if result and self._log:
+            self._log.info('RES: %s', bytes(result))
+        err = self._conn.read_until(CTRL_D + b'>', timeout)
+        if err:
+            raise CmdError(command.decode('utf-8', errors='replace'), result, err)
+        return result
+
+    def exec_raw_paste(self, command, timeout=5):
+        """Execute code via raw-paste mode (flow-controlled, less RAM).
 
         Arguments:
-            command: command to execute (str or bytes)
-            timeout: maximum waiting time for result,
-                0 = submit only (send code, don't wait for output)
+            command: code to execute (str or bytes)
+            timeout: max wait time (0 = submit only, don't wait for output)
 
         Returns:
             command STDOUT result
 
         Raises:
-            CmdError when command returns error
-            MpyError when raw-paste mode is not supported
+            CmdError: command execution error
+            MpyError: raw-paste not supported
         """
         send_timeout = 5 if timeout == 0 else timeout
         self.enter_raw_repl()
@@ -241,10 +321,12 @@ class MpyComm():
 
         self._conn.write(RAW_PASTE_ENTER)
 
-        # Read response: 'R' + status (0=not supported, 1=supported)
         header, status = self._conn.read_bytes(2, send_timeout)
+
+        # Scan for pattern if garbage in buffer (slow UART)
         if header != ord('R'):
-            raise MpyError(f"Unexpected raw-paste header: {header!r}")
+            header, status = self._scan_for_rawpaste_header(
+                header, status, send_timeout)
 
         if status == 0:
             self._raw_paste_supported = False
@@ -255,53 +337,15 @@ class MpyComm():
 
         self._raw_paste_supported = True
 
-        # Read window size (16-bit little-endian)
-        window_bytes = self._conn.read_bytes(2, send_timeout)
-        window_size = int.from_bytes(window_bytes, 'little')
-        if self._log:
-            self._log.info("Raw-paste window size: %d", window_size)
-
-        # Send data with flow control
-        remaining_window = window_size
-        offset = 0
-
-        while offset < len(command):
-            # Check for incoming flow control byte (non-blocking)
-            if remaining_window == 0 or self._conn._has_data(0):
-                flow_byte = self._conn.read_bytes(1, send_timeout)
-                if flow_byte == RAW_PASTE_ACK:
-                    remaining_window += window_size
-                elif flow_byte == CTRL_D:
-                    # Device wants to abort - syntax error during compilation
-                    self._conn.write(CTRL_D)
-                    break
-
-            # Send data up to remaining window size
-            if remaining_window > 0:
-                chunk_size = min(remaining_window, len(command) - offset)
-                self._conn.write(command[offset:offset + chunk_size])
-                offset += chunk_size
-                remaining_window -= chunk_size
-
-        self._conn.write(CTRL_D)
-
-        # Consume remaining ACKs and wait for CTRL_D echo
-        while True:
-            byte = self._conn.read_bytes(1, send_timeout)
-            if byte == CTRL_D:
-                break
+        window_size = self._read_rawpaste_window_size(send_timeout)
+        self._send_data_with_flow_control(command, window_size, send_timeout)
+        self._wait_for_paste_complete(send_timeout)
 
         if timeout == 0:
             self._repl_mode = False
             return b''
 
-        result = self._conn.read_until(CTRL_D, timeout)
-        if result and self._log:
-            self._log.info('RES: %s', bytes(result))
-        err = self._conn.read_until(CTRL_D + b'>', timeout)
-        if err:
-            raise CmdError(command.decode('utf-8', errors='replace'), result, err)
-        return result
+        return self._read_execution_result(command, timeout)
 
     def try_raw_paste(self, command, timeout=5):
         """Try raw-paste mode, fall back to regular exec if not supported.
