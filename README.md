@@ -29,6 +29,8 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 - **Shell completion** - ZSH and Bash with remote path completion
 - **Network support** - connect over TCP
 
+See [README_MPREMOTE.md](README_MPREMOTE.md) for detailed comparison with mpremote.
+
 ## Installation
 
 ```
