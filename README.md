@@ -259,7 +259,7 @@ them to flash. Changes to local files are immediately visible on
 the device.
 
 **Memory overhead:** The VFS agent uses ~3.5KB of RAM on the device
-(136 lines of MicroPython code injected during mount).
+(139 lines of MicroPython code injected during mount).
 
 **By default, mounts are read-only.** Use `-w` / `--writable` flag
 to enable write support — the device can create, modify and delete

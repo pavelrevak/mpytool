@@ -2390,6 +2390,46 @@ class TestMountWrite(unittest.TestCase):
             content = f.read()
         self.assertEqual(content, 'Line 1\nLine 2\nLine 3\n')
 
+    def test_12_rename_file(self):
+        """Rename file via writable mount"""
+        # Create file to rename
+        test_file = os.path.join(self.LOCAL_DIR, 'old_name.txt')
+        with open(test_file, 'w') as f:
+            f.write('Content to preserve')
+        # Rename via mount
+        self.mpy.comm.exec(
+            "import uos\n"
+            "uos.rename('/remote/old_name.txt', '/remote/new_name.txt')")
+        # Verify old file gone, new file exists with same content
+        self.assertFalse(os.path.exists(test_file))
+        new_file = os.path.join(self.LOCAL_DIR, 'new_name.txt')
+        self.assertTrue(os.path.exists(new_file))
+        with open(new_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, 'Content to preserve')
+
+    def test_13_rename_directory(self):
+        """Rename directory via writable mount"""
+        # Create directory to rename
+        old_dir = os.path.join(self.LOCAL_DIR, 'old_dir')
+        os.makedirs(old_dir)
+        test_file = os.path.join(old_dir, 'file.txt')
+        with open(test_file, 'w') as f:
+            f.write('Inside directory')
+        # Rename via mount
+        self.mpy.comm.exec(
+            "import uos\n"
+            "uos.rename('/remote/old_dir', '/remote/new_dir')")
+        # Verify old dir gone, new dir exists with contents
+        self.assertFalse(os.path.exists(old_dir))
+        new_dir = os.path.join(self.LOCAL_DIR, 'new_dir')
+        self.assertTrue(os.path.exists(new_dir))
+        new_file = os.path.join(new_dir, 'file.txt')
+        self.assertTrue(os.path.exists(new_file))
+        with open(new_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, 'Inside directory')
+
 
 @requires_device
 class TestMountReadonly(unittest.TestCase):
@@ -2463,6 +2503,14 @@ class TestMountReadonly(unittest.TestCase):
         from mpytool.mpy_comm import CmdError
         with self.assertRaises(CmdError) as ctx:
             self.mpy.comm.exec("__import__('os').remove('/remote/test.txt')")
+        self.assertIn('OSError', ctx.exception.error)
+
+    def test_05_rename_fails(self):
+        """rename on readonly mount raises OSError"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.mpy.comm.exec(
+                "__import__('os').rename('/remote/test.txt', '/remote/new.txt')")
         self.assertIn('OSError', ctx.exception.error)
 
 

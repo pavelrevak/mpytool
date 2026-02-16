@@ -139,11 +139,13 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Soft reset remount | ✓ | ✓ |
 | Path protection | ✓ realpath | ✓ realpath |
 | Unsafe symlinks | ✗ | ✓ `--unsafe-links` |
-| VFS RENAME | ✗ | ✓ |
+| VFS RENAME | ✓ | ✓ |
 | VFS SEEK | ✗ | ✓ |
-| VFS READLINE | ✗ | ✓ |
+| VFS READLINE | ✓ SW impl | ✓ CMD |
 | Iterative listdir | ✗ | ✓ |
 | Agent size | ✗ ~3.5KB | ✓ ~2.5KB compressed |
+
+**Note:** "SW impl" = software implementation in agent (uses `CMD_READ` + buffer), "CMD" = dedicated VFS command. Both provide the same functionality to user code.
 
 ## Summary
 
@@ -162,6 +164,6 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 - RTC and ROMFS support
 - REPL session capture and code/file injection
 - User config file and custom aliases
-- More VFS operations (SEEK, READLINE, RENAME, iterative listdir)
+- More VFS operations (SEEK, iterative listdir)
 - Connect by device serial ID
 - Smaller VFS agent size

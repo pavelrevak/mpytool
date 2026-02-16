@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from mpytool.mount import (
     MountHandler, ConnIntercept,
     ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN, CMD_CLOSE, CMD_READ,
-    CMD_WRITE, CMD_MKDIR, CMD_REMOVE,
+    CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME,
     CMD_MIN, CMD_MAX,
 )
 
@@ -1717,6 +1717,94 @@ class TestMountHandlerWrite(unittest.TestCase):
         result = self.conn.get_written()
         err = struct.unpack('b', result[0:1])[0]
         self.assertNotEqual(err, 0)  # Should fail
+
+    def test_rename_file(self):
+        """rename() renames file"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        old_file = os.path.join(self.temp_dir, 'old.txt')
+        new_file = os.path.join(self.temp_dir, 'new.txt')
+        with open(old_file, 'w') as f:
+            f.write('content')
+
+        self.conn.feed(_pack_str('/old.txt') + _pack_str('/new.txt'))
+        handler.dispatch(CMD_RENAME)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify old file gone, new file exists with same content
+        self.assertFalse(os.path.exists(old_file))
+        self.assertTrue(os.path.exists(new_file))
+        with open(new_file) as f:
+            self.assertEqual(f.read(), 'content')
+
+    def test_rename_directory(self):
+        """rename() renames directory"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        old_dir = os.path.join(self.temp_dir, 'olddir')
+        new_dir = os.path.join(self.temp_dir, 'newdir')
+        os.makedirs(old_dir)
+        test_file = os.path.join(old_dir, 'file.txt')
+        with open(test_file, 'w') as f:
+            f.write('data')
+
+        self.conn.feed(_pack_str('/olddir') + _pack_str('/newdir'))
+        handler.dispatch(CMD_RENAME)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify old dir gone, new dir exists with contents
+        self.assertFalse(os.path.exists(old_dir))
+        self.assertTrue(os.path.exists(new_dir))
+        self.assertTrue(os.path.exists(os.path.join(new_dir, 'file.txt')))
+
+    def test_rename_nonexistent(self):
+        """rename() on nonexistent path returns error"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        self.conn.feed(_pack_str('/nonexistent') + _pack_str('/new'))
+        handler.dispatch(CMD_RENAME)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertNotEqual(err, 0)  # Should fail
+
+    def test_rename_readonly_handler(self):
+        """rename() with readonly handler returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/old') + _pack_str('/new'))
+        handler.dispatch(CMD_RENAME)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.EROFS)
+
+    def test_rename_overwrite_file(self):
+        """rename() overwrites existing file"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        old_file = os.path.join(self.temp_dir, 'old.txt')
+        new_file = os.path.join(self.temp_dir, 'new.txt')
+        with open(old_file, 'w') as f:
+            f.write('old content')
+        with open(new_file, 'w') as f:
+            f.write('will be replaced')
+
+        self.conn.feed(_pack_str('/old.txt') + _pack_str('/new.txt'))
+        handler.dispatch(CMD_RENAME)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify old file replaced
+        self.assertFalse(os.path.exists(old_file))
+        self.assertTrue(os.path.exists(new_file))
+        with open(new_file) as f:
+            self.assertEqual(f.read(), 'old content')
 
 
 if __name__ == '__main__':

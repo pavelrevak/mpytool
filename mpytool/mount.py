@@ -3,9 +3,9 @@
 ## Architecture
 
 Three-layer architecture:
-1. **Agent (MicroPython)**: VFS driver on device (~3.5KB, 136 lines)
+1. **Agent (MicroPython)**: VFS driver on device (~3.5KB, 139 lines)
    - RemoteFS class implements VFS interface
-     (mount, stat, ilistdir, open, chdir, mkdir, remove)
+     (mount, stat, ilistdir, open, chdir, mkdir, remove, rename)
    - _mt_F class implements file object
      (read, write, readline, close, context manager)
    - Sends VFS requests via escape sequences on serial line
@@ -13,8 +13,8 @@ Three-layer architecture:
 2. **Handler (PC)**: Handles VFS requests from device
    (MountHandler class)
    - Resolves paths within mount root (prevents path traversal)
-   - Services 8 VFS commands:
-     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE
+   - Services 9 VFS commands:
+     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE, RENAME
    - Manages file descriptors and open file handles
    - Supports virtual submounts (ln command)
 
@@ -62,6 +62,8 @@ Device waits for PC response before continuing. This ensures:
 | 6   | WRITE   | fd, length, data      | errno (s8)           |
 | 7   | MKDIR   | path (str)            | errno (s8)           |
 | 8   | REMOVE  | path, recursive (s8)  | errno (s8)           |
+| 9   | RENAME  | old_path, new_path    | errno (s8)           |
+|     |         | (str)                 |                      |
 
 **Wire format:**
 - `s8`: signed 8-bit int (struct 'b')
@@ -159,9 +161,10 @@ CMD_READ = 5
 CMD_WRITE = 6
 CMD_MKDIR = 7
 CMD_REMOVE = 8
+CMD_RENAME = 9
 
 CMD_MIN = CMD_STAT
-CMD_MAX = CMD_REMOVE
+CMD_MAX = CMD_RENAME
 
 # Prebuilt bytes for hot path
 _ESCAPE_BYTE = bytes([ESCAPE])
@@ -304,6 +307,10 @@ class RemoteFS:
   _mt_bg(8,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
   e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
+ def rename(s,old,new):
+  _mt_bg(9,s.mid);_mt_ws(s._abs(old));_mt_ws(s._abs(new))
+  e=_mt_r('b');_mt_en()
+  if e<0:raise OSError(-e)
 def _mt_mount(mp='/remote',mid=0):
  try:os.umount(mp)
  except:pass
@@ -368,6 +375,7 @@ class MountHandler:
             CMD_WRITE: self._do_write,
             CMD_MKDIR: self._do_mkdir,
             CMD_REMOVE: self._do_remove,
+            CMD_RENAME: self._do_rename,
         }
 
     def add_submount(self, subpath, local_dir):
@@ -699,6 +707,26 @@ class MountHandler:
                     _os.rmdir(local)
                 else:
                     _os.remove(local)
+            self._wr_s8(0)
+        except OSError as e:
+            self._wr_s8(-e.errno)
+
+    def _do_rename(self):
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
+        old_path = self._rd_str()
+        new_path = self._rd_str()
+        if self._log:
+            self._log.info(
+                "MOUNT: RENAME: '%s' -> '%s'", old_path, new_path)
+        old_local = self._resolve_path(old_path)
+        new_local = self._resolve_path(new_path)
+        if old_local is None or new_local is None:
+            self._wr_s8(-_errno.EACCES)
+            return
+        try:
+            _os.rename(old_local, new_local)
             self._wr_s8(0)
         except OSError as e:
             self._wr_s8(-e.errno)
