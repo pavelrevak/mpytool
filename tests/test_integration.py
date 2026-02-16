@@ -1617,7 +1617,13 @@ class TestMount(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import gc
         import shutil
+        try:
+            cls.handler.close_all()
+        except Exception:
+            pass
+        gc.collect()  # Force cleanup of handlers on Windows
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
@@ -1903,7 +1909,13 @@ class TestMountLn(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import gc
         import shutil
+        try:
+            cls.handler.close_all()
+        except Exception:
+            pass
+        gc.collect()  # Force cleanup of handlers on Windows
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
@@ -2061,7 +2073,13 @@ class TestMountMpyCross(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import gc
         import shutil
+        try:
+            cls.handler.close_all()
+        except Exception:
+            pass
+        gc.collect()  # Force cleanup of handlers on Windows
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
@@ -2197,7 +2215,13 @@ class TestMountWrite(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import gc
         import shutil
+        try:
+            cls.handler.close_all()
+        except Exception:
+            pass
+        gc.collect()  # Force cleanup of handlers on Windows
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
@@ -2389,7 +2413,13 @@ class TestMountReadonly(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import gc
         import shutil
+        try:
+            cls.handler.close_all()
+        except Exception:
+            pass
+        gc.collect()  # Force cleanup of handlers on Windows
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
