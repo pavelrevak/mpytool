@@ -389,19 +389,25 @@ _mpytool() {
                     [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
                 mount)
-                    # -m flag + 1 local dir + optional :mount_point, -- for chaining
-                    # Check if -m flag already present
-                    local has_m=0
+                    # -m and -w flags + 1 local dir + optional :mount_point, -- for chaining
+                    # Check if flags already present
+                    local has_m=0 has_w=0
                     for w in "${words[cmd_start+1,-1]}"; do
                         [[ "$w" == "-m" || "$w" == "--mpy" ]] && has_m=1
+                        [[ "$w" == "-w" || "$w" == "--writable" || "$w" == "--write" ]] && has_w=1
                     done
-                    # Offer -m flag first
-                    if [[ $has_m -eq 0 && "$words[CURRENT]" != :* ]]; then
-                        local -a mount_flags=(
+                    # Offer flags first
+                    if [[ "$words[CURRENT]" != :* ]]; then
+                        local -a mount_flags=()
+                        [[ $has_m -eq 0 ]] && mount_flags+=(
                             '-m:compile .py to .mpy on-demand'
                             '--mpy:compile .py to .mpy on-demand'
                         )
-                        _describe -t flags 'mount flag' mount_flags
+                        [[ $has_w -eq 0 ]] && mount_flags+=(
+                            '-w:mount as read-write'
+                            '--writable:mount as read-write'
+                        )
+                        [[ ${#mount_flags} -gt 0 ]] && _describe -t flags 'mount flag' mount_flags
                     fi
                     # Then local dir and mount point
                     if [[ "$words[CURRENT]" == :* ]]; then

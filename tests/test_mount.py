@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from mpytool.mount import (
     MountHandler, ConnIntercept,
     ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN, CMD_CLOSE, CMD_READ,
+    CMD_WRITE, CMD_MKDIR, CMD_REMOVE,
     CMD_MIN, CMD_MAX,
 )
 
@@ -482,8 +483,8 @@ class TestConnIntercept(unittest.TestCase):
         self.mock_conn.write.assert_called_once_with(bytes([ESCAPE]))
         # Handler dispatched
         self.mock_handler.dispatch.assert_called_once_with(CMD_STAT)
-        # No output (VFS command consumed)
-        self.assertIsNone(result)
+        # No REPL output (VFS command consumed), but returns b'' to signal processing occurred
+        self.assertEqual(result, b'')
 
     def test_mixed_data(self):
         """VFS command embedded in REPL output"""
@@ -509,7 +510,7 @@ class TestConnIntercept(unittest.TestCase):
         intercept = self._make_intercept()
         self.mock_conn._read_available.return_value = bytes([ESCAPE, CMD_STAT])
         result = intercept._read_available()
-        self.assertIsNone(result)
+        self.assertEqual(result, b'')  # Got new data, no REPL output
         self.assertEqual(intercept._pending, bytes([ESCAPE, CMD_STAT]))
 
     def test_pending_completed_next_read(self):
@@ -719,7 +720,8 @@ class TestMountDispatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.tool._dispatch_mount([d], is_last_group=False)
             self.tool._mpy.mount.assert_called_once_with(
-                d, '/remote', log=self.tool._log, mpy_cross=None)
+                d, '/remote', log=self.tool._log,
+                writable=False, mpy_cross=None)
 
     def test_mount_custom_mountpoint(self):
         """mount with custom mount point"""
@@ -727,7 +729,8 @@ class TestMountDispatch(unittest.TestCase):
             self.tool._dispatch_mount(
                 [d, ':/app'], is_last_group=False)
             self.tool._mpy.mount.assert_called_once_with(
-                d, '/app', log=self.tool._log, mpy_cross=None)
+                d, '/app', log=self.tool._log,
+                writable=False, mpy_cross=None)
 
     def test_mount_in_commands(self):
         """mount is in _COMMANDS set"""
@@ -870,7 +873,7 @@ class TestConnInterceptMultiHandler(unittest.TestCase):
         handler0.dispatch.assert_not_called()
         # ACK not sent either (no handler)
         mock_conn.write.assert_not_called()
-        self.assertIsNone(result)
+        self.assertEqual(result, b'')  # Got new data, no REPL output
 
     def test_mixed_mids_in_stream(self):
         """Multiple commands with different mids in one read"""
@@ -1400,6 +1403,316 @@ class TestMountHandlerMpyCross(unittest.TestCase):
         size = struct.unpack('<i', result[0:4])[0]
         data = result[4:4 + size]
         self.assertEqual(data, b'CACHE')
+
+
+class TestMountHandlerWrite(unittest.TestCase):
+    """Tests for MountHandler write support (Phase 3)"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.conn = MockConnForHandler()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_open_readonly_without_writable(self):
+        """open() read-only file without writable flag works"""
+        with open(os.path.join(self.temp_dir, 'test.txt'), 'w') as f:
+            f.write('hello')
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/test.txt') + _pack_str('rb'))
+        handler.dispatch(CMD_OPEN)
+
+        data = self.conn.get_written()
+        fd = struct.unpack('b', data[0:1])[0]
+        self.assertGreaterEqual(fd, 0)  # OK
+
+    def test_open_write_without_writable(self):
+        """open() write mode without writable flag returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/test.txt') + _pack_str('wb'))
+        handler.dispatch(CMD_OPEN)
+
+        data = self.conn.get_written()
+        fd = struct.unpack('b', data[0:1])[0]
+        self.assertEqual(fd, -errno.EROFS)
+
+    def test_open_append_without_writable(self):
+        """open() append mode without writable flag returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/test.txt') + _pack_str('ab'))
+        handler.dispatch(CMD_OPEN)
+
+        data = self.conn.get_written()
+        fd = struct.unpack('b', data[0:1])[0]
+        self.assertEqual(fd, -errno.EROFS)
+
+    def test_open_readwrite_without_writable(self):
+        """open() r+ mode without writable flag returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/test.txt') + _pack_str('r+b'))
+        handler.dispatch(CMD_OPEN)
+
+        data = self.conn.get_written()
+        fd = struct.unpack('b', data[0:1])[0]
+        self.assertEqual(fd, -errno.EROFS)
+
+    def test_open_write_with_writable(self):
+        """open() write mode with writable flag works"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        self.conn.feed(_pack_str('/test.txt') + _pack_str('wb'))
+        handler.dispatch(CMD_OPEN)
+
+        data = self.conn.get_written()
+        fd = struct.unpack('b', data[0:1])[0]
+        self.assertGreaterEqual(fd, 0)  # OK
+
+    def test_write_data(self):
+        """write() writes data to fd"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        # Open for write
+        self.conn.feed(_pack_str('/test.txt') + _pack_str('wb'))
+        handler.dispatch(CMD_OPEN)
+        fd = struct.unpack('b', self.conn.get_written()[0:1])[0]
+
+        # Write data
+        test_data = b'Hello World!\n'
+        self.conn.feed(struct.pack('b', fd) + _pack_s32(len(test_data)) + test_data)
+        handler.dispatch(CMD_WRITE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Close
+        handler.close_all()
+
+        # Verify file content
+        with open(os.path.join(self.temp_dir, 'test.txt'), 'rb') as f:
+            content = f.read()
+        self.assertEqual(content, test_data)
+
+    def test_write_invalid_fd(self):
+        """write() with invalid fd returns EBADF"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        self.conn.feed(struct.pack('b', 99) + _pack_s32(10) + b'0123456789')
+        handler.dispatch(CMD_WRITE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.EBADF)
+
+    def test_write_readonly_handler(self):
+        """write() with readonly handler returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(struct.pack('b', 0) + _pack_s32(5) + b'hello')
+        handler.dispatch(CMD_WRITE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.EROFS)
+
+    def test_full_write_cycle(self):
+        """Full cycle: open write, write, close, read back"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        # Open for write
+        self.conn.feed(_pack_str('/data.bin') + _pack_str('wb'))
+        handler.dispatch(CMD_OPEN)
+        fd = struct.unpack('b', self.conn.get_written()[0:1])[0]
+
+        # Write data
+        test_data = b'Binary\x00Data\xff'
+        self.conn.feed(struct.pack('b', fd) + _pack_s32(len(test_data)) + test_data)
+        handler.dispatch(CMD_WRITE)
+        self.conn.get_written()  # discard result
+
+        # Close
+        self.conn.feed(struct.pack('b', fd))
+        handler.dispatch(CMD_CLOSE)
+
+        # Open for read
+        self.conn.feed(_pack_str('/data.bin') + _pack_str('rb'))
+        handler.dispatch(CMD_OPEN)
+        fd2 = struct.unpack('b', self.conn.get_written()[0:1])[0]
+
+        # Read back
+        self.conn.feed(struct.pack('b', fd2) + _pack_s32(1024))
+        handler.dispatch(CMD_READ)
+
+        result = self.conn.get_written()
+        length = struct.unpack('<i', result[0:4])[0]
+        content = result[4:4 + length]
+        self.assertEqual(content, test_data)
+
+    def test_mkdir_creates_directory(self):
+        """mkdir() creates directory"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        self.conn.feed(_pack_str('/newdir'))
+        handler.dispatch(CMD_MKDIR)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify directory exists
+        self.assertTrue(os.path.isdir(os.path.join(self.temp_dir, 'newdir')))
+
+    def test_mkdir_exist_ok(self):
+        """mkdir() on existing directory succeeds (exist_ok=True)"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        os.makedirs(os.path.join(self.temp_dir, 'existing'))
+
+        self.conn.feed(_pack_str('/existing'))
+        handler.dispatch(CMD_MKDIR)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+    def test_mkdir_creates_parents(self):
+        """mkdir() creates parent directories"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        self.conn.feed(_pack_str('/a/b/c'))
+        handler.dispatch(CMD_MKDIR)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify all directories exist
+        self.assertTrue(os.path.isdir(os.path.join(self.temp_dir, 'a', 'b', 'c')))
+
+    def test_mkdir_readonly_handler(self):
+        """mkdir() with readonly handler returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/newdir'))
+        handler.dispatch(CMD_MKDIR)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.EROFS)
+
+    def test_remove_file(self):
+        """remove() deletes file (recursive=0)"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        test_file = os.path.join(self.temp_dir, 'file.txt')
+        with open(test_file, 'w') as f:
+            f.write('test')
+
+        self.conn.feed(_pack_str('/file.txt') + struct.pack('b', 0))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify file deleted
+        self.assertFalse(os.path.exists(test_file))
+
+    def test_remove_empty_dir(self):
+        """remove() deletes empty directory (recursive=0)"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        test_dir = os.path.join(self.temp_dir, 'emptydir')
+        os.makedirs(test_dir)
+
+        self.conn.feed(_pack_str('/emptydir') + struct.pack('b', 0))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify dir deleted
+        self.assertFalse(os.path.exists(test_dir))
+
+    def test_remove_nonempty_dir_nonrecursive(self):
+        """remove() on non-empty dir with recursive=0 fails"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        test_dir = os.path.join(self.temp_dir, 'nonempty')
+        os.makedirs(test_dir)
+        with open(os.path.join(test_dir, 'file.txt'), 'w') as f:
+            f.write('content')
+
+        self.conn.feed(_pack_str('/nonempty') + struct.pack('b', 0))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertNotEqual(err, 0)  # Should fail
+
+        # Verify dir still exists
+        self.assertTrue(os.path.exists(test_dir))
+
+    def test_remove_dir_recursive(self):
+        """remove() deletes directory recursively (recursive=1)"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        test_dir = os.path.join(self.temp_dir, 'tree')
+        os.makedirs(os.path.join(test_dir, 'sub'))
+        with open(os.path.join(test_dir, 'file1.txt'), 'w') as f:
+            f.write('a')
+        with open(os.path.join(test_dir, 'sub', 'file2.txt'), 'w') as f:
+            f.write('b')
+
+        self.conn.feed(_pack_str('/tree') + struct.pack('b', 1))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify entire tree deleted
+        self.assertFalse(os.path.exists(test_dir))
+
+    def test_remove_file_recursive(self):
+        """remove() on file with recursive=1 works"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+        test_file = os.path.join(self.temp_dir, 'file.txt')
+        with open(test_file, 'w') as f:
+            f.write('test')
+
+        self.conn.feed(_pack_str('/file.txt') + struct.pack('b', 1))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, 0)  # OK
+
+        # Verify file deleted
+        self.assertFalse(os.path.exists(test_file))
+
+    def test_remove_readonly_handler(self):
+        """remove() with readonly handler returns EROFS"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=False)
+
+        self.conn.feed(_pack_str('/file.txt') + struct.pack('b', 0))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertEqual(err, -errno.EROFS)
+
+    def test_remove_nonexistent(self):
+        """remove() on nonexistent path returns error"""
+        handler = MountHandler(self.conn, self.temp_dir, writable=True)
+
+        self.conn.feed(_pack_str('/nonexistent') + struct.pack('b', 0))
+        handler.dispatch(CMD_REMOVE)
+
+        result = self.conn.get_written()
+        err = struct.unpack('b', result[0:1])[0]
+        self.assertNotEqual(err, 0)  # Should fail
 
 
 if __name__ == '__main__':

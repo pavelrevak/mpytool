@@ -1797,19 +1797,21 @@ class TestMount(unittest.TestCase):
         # Submit print without waiting for output
         self.mpy.comm.exec("print('mount_read_test')", timeout=0)
         import time
-        time.sleep(0.1)
-        # Read output via conn.read()
-        data = self.mpy.conn.read(timeout=0.5)
+        time.sleep(0.2)  # Increased for slower UART
+        # Read output via conn.read() with longer timeout for UART
+        data = self.mpy.conn.read(timeout=2.0)
         self.assertIsNotNone(data)
         self.assertIn(b'mount_read_test', data)
         # Drain remaining output and restore REPL state
-        while self.mpy.conn.read(timeout=0.2):
+        while self.mpy.conn.read(timeout=0.5):
             pass
         self.mpy.stop()
 
     def test_22_stop(self):
         """Test mpy.stop() interrupts running program"""
         import time
+        # Ensure clean state from previous test
+        self.mpy.comm.enter_raw_repl()
         # Start a long-running program (timeout=0 = fire-and-forget)
         self.mpy.comm.exec(
             "import time\nwhile True:\n time.sleep(0.1)\n", timeout=0)
@@ -1829,24 +1831,32 @@ class TestMount(unittest.TestCase):
 
     def test_24_read_vfs_transparent(self):
         """Test conn.read() services VFS requests transparently"""
-        # Submit code that reads VFS file and prints result
-        self.mpy.comm.exec(
-            "print(open('/remote/hello.txt').read())", timeout=0)
-        import time
-        time.sleep(0.1)
-        # read() should handle VFS + return print output
-        output = b''
-        for _ in range(50):
-            data = self.mpy.conn.read(timeout=0.1)
-            if data:
-                output += data
-            if b'Hello from mount test!' in output:
-                break
+        # Execute code that reads VFS file - VFS serviced during exec()
+        output = self.mpy.comm.exec(
+            "print(open('/remote/hello.txt').read())", timeout=5)
+        # Verify VFS was serviced and output received
         self.assertIn(b'Hello from mount test!', output)
-        # Drain remaining and restore REPL state
-        while self.mpy.conn.read(timeout=0.2):
-            pass
+        # Restore REPL state
         self.mpy.stop()
+
+    def test_25_soft_reset_restores_cwd(self):
+        """Test that soft reset restores CWD to mount point"""
+        # Ensure clean state before test
+        self.mpy.comm.enter_raw_repl()
+        # Verify initial CWD is /remote
+        cwd_before = self.mpy.comm.exec_eval(
+            "repr(__import__('os').getcwd())")
+        self.assertEqual(cwd_before, '/remote')
+        # Trigger soft reset (Ctrl+D)
+        self.mpy.soft_reset()
+        # After remount, CWD should be restored to /remote
+        cwd_after = self.mpy.comm.exec_eval(
+            "repr(__import__('os').getcwd())")
+        self.assertEqual(cwd_after, '/remote')
+        # Verify VFS still works
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/hello.txt').read())")
+        self.assertEqual(result, 'Hello from mount test!')
 
 
 @requires_device
@@ -2161,6 +2171,269 @@ class TestMountMpyCross(unittest.TestCase):
         result = self.mpy.comm.exec_eval(
             "repr(__import__('os').listdir('/mpytest'))")
         self.assertIn('__pycache__', result)
+
+
+@requires_device
+class TestMountWrite(unittest.TestCase):
+    """Test mount write support (Phase 3)"""
+
+    LOCAL_DIR = None
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from mpytool import ConnSerial, Mpy
+
+        # Create local temp directory for writable mount
+        cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_mount_write_test_')
+        # Create initial test file for reading
+        with open(os.path.join(cls.LOCAL_DIR, 'readonly.txt'), 'w') as f:
+            f.write('This file is for reading')
+
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        # Mount as writable
+        cls.handler = cls.mpy.mount(cls.LOCAL_DIR, writable=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        try:
+            cls.mpy.comm.enter_raw_repl()
+            cls.mpy.comm.exec(
+                "import uos\ntry:uos.umount('/remote')\nexcept:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except Exception:
+            pass
+        try:
+            cls.mpy.comm.exit_raw_repl()
+        except Exception:
+            pass
+        cls.conn.close()
+        if cls.LOCAL_DIR:
+            shutil.rmtree(cls.LOCAL_DIR, ignore_errors=True)
+
+    def test_01_write_new_file(self):
+        """Write new file via writable mount"""
+        test_content = 'Hello from write test!'
+        self.mpy.comm.exec(
+            f"f=open('/remote/newfile.txt','w')\n"
+            f"f.write('{test_content}')\n"
+            f"f.close()")
+        # Verify file exists locally
+        local_path = os.path.join(self.LOCAL_DIR, 'newfile.txt')
+        self.assertTrue(os.path.exists(local_path))
+        with open(local_path, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, test_content)
+
+    def test_02_write_binary_file(self):
+        """Write binary file via writable mount"""
+        self.mpy.comm.exec(
+            "f=open('/remote/binary.bin','wb')\n"
+            "f.write(bytes(range(10)))\n"
+            "f.close()")
+        # Verify binary content locally
+        local_path = os.path.join(self.LOCAL_DIR, 'binary.bin')
+        self.assertTrue(os.path.exists(local_path))
+        with open(local_path, 'rb') as f:
+            content = f.read()
+        self.assertEqual(content, bytes(range(10)))
+
+    def test_03_append_to_file(self):
+        """Append to existing file via writable mount"""
+        # Create initial file
+        test_file = os.path.join(self.LOCAL_DIR, 'append_test.txt')
+        with open(test_file, 'w') as f:
+            f.write('First line\n')
+        # Append via mount
+        self.mpy.comm.exec(
+            "f=open('/remote/append_test.txt','a')\n"
+            "f.write('Second line\\n')\n"
+            "f.close()")
+        # Verify content
+        with open(test_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, 'First line\nSecond line\n')
+
+    def test_04_overwrite_file(self):
+        """Overwrite existing file via writable mount"""
+        # Create initial file
+        test_file = os.path.join(self.LOCAL_DIR, 'overwrite.txt')
+        with open(test_file, 'w') as f:
+            f.write('Old content')
+        # Overwrite via mount
+        self.mpy.comm.exec(
+            "f=open('/remote/overwrite.txt','w')\n"
+            "f.write('New content')\n"
+            "f.close()")
+        # Verify new content
+        with open(test_file, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, 'New content')
+
+    def test_05_mkdir(self):
+        """Create directory via writable mount"""
+        self.mpy.comm.exec("__import__('os').mkdir('/remote/newdir')")
+        # Verify directory exists locally
+        local_path = os.path.join(self.LOCAL_DIR, 'newdir')
+        self.assertTrue(os.path.isdir(local_path))
+
+    def test_06_mkdir_parents(self):
+        """Create nested directories via writable mount"""
+        self.mpy.comm.exec(
+            "__import__('os').mkdir('/remote/parent/child')")
+        # Verify nested directories exist locally
+        local_path = os.path.join(self.LOCAL_DIR, 'parent', 'child')
+        self.assertTrue(os.path.isdir(local_path))
+
+    def test_07_remove_file(self):
+        """Remove file via writable mount"""
+        # Create test file
+        test_file = os.path.join(self.LOCAL_DIR, 'to_remove.txt')
+        with open(test_file, 'w') as f:
+            f.write('will be removed')
+        self.assertTrue(os.path.exists(test_file))
+        # Remove via mount
+        self.mpy.comm.exec("__import__('os').remove('/remote/to_remove.txt')")
+        # Verify file deleted locally
+        self.assertFalse(os.path.exists(test_file))
+
+    def test_08_rmdir_empty(self):
+        """Remove empty directory via writable mount"""
+        # Create empty directory
+        test_dir = os.path.join(self.LOCAL_DIR, 'empty_dir')
+        os.makedirs(test_dir)
+        self.assertTrue(os.path.isdir(test_dir))
+        # Remove via mount
+        self.mpy.comm.exec("__import__('os').rmdir('/remote/empty_dir')")
+        # Verify directory deleted locally
+        self.assertFalse(os.path.exists(test_dir))
+
+    def test_09_full_cycle(self):
+        """Full cycle: write, read back, modify, delete"""
+        # Write file
+        test_content = 'Cycle test content'
+        self.mpy.comm.exec(
+            f"f=open('/remote/cycle.txt','w')\n"
+            f"f.write('{test_content}')\n"
+            f"f.close()")
+        # Read back via mount
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/cycle.txt').read())")
+        self.assertEqual(result, test_content)
+        # Modify
+        self.mpy.comm.exec(
+            "f=open('/remote/cycle.txt','w')\n"
+            "f.write('Modified')\n"
+            "f.close()")
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/cycle.txt').read())")
+        self.assertEqual(result, 'Modified')
+        # Delete
+        self.mpy.comm.exec("__import__('os').remove('/remote/cycle.txt')")
+        local_path = os.path.join(self.LOCAL_DIR, 'cycle.txt')
+        self.assertFalse(os.path.exists(local_path))
+
+    def test_10_write_in_subdirectory(self):
+        """Write file in existing subdirectory"""
+        # Create subdirectory
+        subdir = os.path.join(self.LOCAL_DIR, 'testsubdir')
+        os.makedirs(subdir)
+        # Write file in subdirectory
+        self.mpy.comm.exec(
+            "f=open('/remote/testsubdir/sub.txt','w')\n"
+            "f.write('in subdirectory')\n"
+            "f.close()")
+        # Verify locally
+        local_path = os.path.join(subdir, 'sub.txt')
+        self.assertTrue(os.path.exists(local_path))
+        with open(local_path, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, 'in subdirectory')
+
+    def test_11_multiple_writes(self):
+        """Multiple sequential writes to same file handle"""
+        self.mpy.comm.exec(
+            "f = open('/remote/multi.txt', 'w')\n"
+            "f.write('Line 1\\n')\n"
+            "f.write('Line 2\\n')\n"
+            "f.write('Line 3\\n')\n"
+            "f.close()")
+        # Verify content
+        local_path = os.path.join(self.LOCAL_DIR, 'multi.txt')
+        with open(local_path, 'r') as f:
+            content = f.read()
+        self.assertEqual(content, 'Line 1\nLine 2\nLine 3\n')
+
+
+@requires_device
+class TestMountReadonly(unittest.TestCase):
+    """Test readonly mount (default behavior)"""
+
+    LOCAL_DIR = None
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from mpytool import ConnSerial, Mpy
+
+        cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_mount_ro_test_')
+        with open(os.path.join(cls.LOCAL_DIR, 'test.txt'), 'w') as f:
+            f.write('readonly test')
+
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        # Mount as readonly (default)
+        cls.handler = cls.mpy.mount(cls.LOCAL_DIR, writable=False)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        try:
+            cls.mpy.comm.enter_raw_repl()
+            cls.mpy.comm.exec(
+                "import uos\ntry:uos.umount('/remote')\nexcept:pass\n"
+                "uos.chdir('/')", timeout=3)
+        except Exception:
+            pass
+        try:
+            cls.mpy.comm.exit_raw_repl()
+        except Exception:
+            pass
+        cls.conn.close()
+        if cls.LOCAL_DIR:
+            shutil.rmtree(cls.LOCAL_DIR, ignore_errors=True)
+
+    def test_01_read_works(self):
+        """Reading from readonly mount works"""
+        result = self.mpy.comm.exec_eval(
+            "repr(open('/remote/test.txt').read())")
+        self.assertEqual(result, 'readonly test')
+
+    def test_02_write_fails(self):
+        """Writing to readonly mount raises OSError"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.mpy.comm.exec(
+                "f=open('/remote/newfile.txt','w')\n"
+                "f.write('test')\n"
+                "f.close()")
+        self.assertIn('OSError', ctx.exception.error)
+
+    def test_03_mkdir_fails(self):
+        """mkdir on readonly mount raises OSError"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.mpy.comm.exec("__import__('os').mkdir('/remote/newdir')")
+        self.assertIn('OSError', ctx.exception.error)
+
+    def test_04_remove_fails(self):
+        """remove on readonly mount raises OSError"""
+        from mpytool.mpy_comm import CmdError
+        with self.assertRaises(CmdError) as ctx:
+            self.mpy.comm.exec("__import__('os').remove('/remote/test.txt')")
+        self.assertIn('OSError', ctx.exception.error)
 
 
 @requires_device

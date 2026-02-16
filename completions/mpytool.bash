@@ -316,15 +316,19 @@ _mpytool() {
             [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
         mount)
-            # mount [-m] local_dir [:mount_point], -- for chaining
-            # Check if -m flag already present
-            local has_m=0
+            # mount [-m] [-w] local_dir [:mount_point], -- for chaining
+            # Check if flags already present
+            local has_m=0 has_w=0
             for w in "${COMP_WORDS[@]:cmd_start+1}"; do
                 [[ "$w" == "-m" || "$w" == "--mpy" ]] && has_m=1
+                [[ "$w" == "-w" || "$w" == "--writable" || "$w" == "--write" ]] && has_w=1
             done
-            # Offer -m flag first
-            if [[ $has_m -eq 0 && ( "$cur" == -* || -z "$cur" ) ]]; then
-                COMPREPLY=($(compgen -W "-m --mpy" -- "$cur"))
+            # Offer flags first
+            if [[ "$cur" == -* || -z "$cur" ]]; then
+                local flags=""
+                [[ $has_m -eq 0 ]] && flags="$flags -m --mpy"
+                [[ $has_w -eq 0 ]] && flags="$flags -w --writable"
+                [[ -n "$flags" ]] && COMPREPLY=($(compgen -W "$flags" -- "$cur"))
             fi
             # Local dir and mount point
             if [[ "$cur" == :* ]]; then

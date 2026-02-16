@@ -6,16 +6,26 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 
 ## Features
 
-- **Fast file transfers** - optimized chunked transfer with automatic compression
-- **Skip unchanged files** - compares size + SHA256 hash, re-upload in <1s
-- **Auto-detect serial port** - no need to specify `-p` when only one device connected
-- **Robust REPL handling** - works reliably with USB-UART bridges (CP2102, CH340)
-- **Multiple reset options** - soft, MCU, hardware (RTS), bootloader entry
-- **General-purpose serial terminal** - `repl` and `monitor` work with any serial device
-- **Mount local directory** - readonly VFS mount for development without uploading to flash
-- **Virtual symlinks** - `ln` links individual files/directories into mounted VFS
+- **Fast file transfers** - optimized chunked transfer with
+  automatic compression
+- **Skip unchanged files** - compares size + SHA256 hash,
+  re-upload in <1s
+- **Auto-detect serial port** - no need to specify `-p` when only
+  one device connected
+- **Robust REPL handling** - works reliably with USB-UART bridges
+  (CP2102, CH340)
+- **Multiple reset options** - soft, MCU, hardware (RTS),
+  bootloader entry
+- **General-purpose serial terminal** - `repl` and `monitor` work
+  with any serial device
+- **Mount local directory** - VFS mount (read-only or read-write)
+  for development without uploading to flash, with transparent
+  `.mpy` compilation and auto-remount after soft reset
+- **Virtual submounts** - `ln` links files/directories into
+  mounted VFS (PC-side only, no device changes)
 - **Python API** - suitable for IDE integration and automation
-- **Raw-paste mode** - flow-controlled code execution with reduced RAM usage (API)
+- **Raw-paste mode** - flow-controlled code execution with reduced
+  RAM usage (API)
 - **Shell completion** - ZSH and Bash with remote path completion
 - **Network support** - connect over TCP
 
@@ -227,6 +237,12 @@ Mounted ./src on /app (readonly, .mpy compilation)
 Changed CWD to /app
 >>> import foo                              # imports /app/foo.mpy (compiled from ./src/foo.py)
 
+$ mpytool mount -w ./workspace :/work       # mount as read-write (can create/modify/delete files)
+Mounted ./workspace on /work (read-write)
+Changed CWD to /work
+>>> f = open('/work/test.txt', 'w'); f.write('hello'); f.close()  # creates local file
+>>> import os; os.mkdir('/work/newdir')     # creates local directory
+
 $ mpytool mount ./src -- exec "import main" # mount and run code
 $ mpytool mount ./src -- monitor            # mount and monitor output
 $ mpytool mount ./app :/app -- mount ./lib :/lib -- repl  # multiple mounts (CWD = /app)
@@ -235,13 +251,64 @@ Changed CWD to /app
 Mounted ./lib on /lib (readonly)
 ```
 
-Mounts a local directory on the device as a readonly VFS. The device can read, import and execute files from the local directory without uploading them to flash. Changes to local files are immediately visible on the device.
+Mounts a local directory on the device as a VFS. The device can read,
+import and execute files from the local directory without uploading
+them to flash. Changes to local files are immediately visible on
+the device.
 
-**`-m` / `--mpy` flag:** Enables transparent `.mpy` compilation. When the device imports a module, the `.py` file is automatically compiled to `.mpy` bytecode on-demand and served from cache (`__pycache__/`). Benefits: faster imports, less RAM usage, support for `@native`/`@viper` code with `-march`. Boot files (`boot.py`, `main.py`) and empty files remain as `.py`. If compilation fails, automatically falls back to `.py`. Prebuilt `.mpy` files have priority over cache.
+**Memory overhead:** The VFS agent uses ~3.5KB of RAM on the device
+(136 lines of MicroPython code injected during mount).
 
-The first mount automatically changes CWD to the mount point (mpremote compatibility). Subsequent mounts do not change CWD. Use `cd` command to change working directory manually if needed. Multiple independent (non-nested) mounts are supported.
+**By default, mounts are read-only.** Use `-w` / `--writable` flag
+to enable write support — the device can create, modify and delete
+files in the mounted directory. All changes are written directly to
+the local filesystem.
 
-After mount, mpytool automatically enters REPL (unless `monitor` or `repl` follows). In REPL you can import modules from the mounted directory, Ctrl+D triggers soft reset with automatic re-mount.
+**`-m` / `--mpy` flag:** Enables transparent `.mpy` compilation.
+When the device imports a module, the `.py` file is automatically
+compiled to `.mpy` bytecode on-demand and served from cache
+(`__pycache__/`). Benefits: faster imports, less RAM usage, support
+for `@native`/`@viper` code with `-march`. Boot files (`boot.py`,
+`main.py`) and empty files remain as `.py`. If compilation fails,
+automatically falls back to `.py`. Prebuilt `.mpy` files have
+priority over cache.
+
+The first mount automatically changes CWD to the mount point (mpremote
+compatibility). Subsequent mounts do not change CWD. Use `cd` command
+to change working directory manually if needed. Multiple independent
+(non-nested) mounts are supported.
+
+After mount, mpytool automatically enters REPL (unless `monitor` or
+`repl` follows). In REPL you can import modules from the mounted
+directory, Ctrl+D triggers soft reset with automatic re-mount and CWD
+restoration to the mount point.
+
+**Best for:** Development, testing, prototyping, debugging. For bulk
+file transfers (uploading/downloading many files), use `cp` command
+instead — it's optimized for throughput.
+
+**Security:** Paths are validated to prevent traversal outside mount
+root. Symlinks are followed and checked. Write operations require
+explicit `-w` flag.
+
+#### Comparison with mpremote mount
+
+| Feature | mpytool | mpremote |
+|---------|---------|----------|
+| Read-only mount | ✅ Yes | ✅ Yes |
+| Read-write mount | ✅ Yes (`-w`) | ✅ Yes |
+| Custom mount point | ✅ Yes (any path) | ❌ No (fixed `/remote`) |
+| Multiple mounts | ✅ Yes | ❌ No (single mount) |
+| Virtual submounts | ✅ Yes (`ln` cmd) | ❌ No |
+| Transparent .mpy | ✅ Yes (`-m` flag) | ❌ No |
+| Soft reset remount | ✅ Yes | ✅ Yes |
+| Path protection | ✅ Yes (realpath) | ✅ Yes (realpath) |
+| Unsafe symlinks | ❌ No | ✅ Yes (`--unsafe-links`) |
+| VFS RENAME | ❌ No | ✅ Yes |
+| VFS SEEK | ❌ No | ✅ Yes |
+| VFS READLINE | ❌ No | ✅ Yes |
+| Iterative listdir | ❌ No | ✅ Yes |
+| Agent size | ~3.5KB | ~2.5KB (compressed) |
 
 ### Link files into mounted VFS
 ```

@@ -1,10 +1,148 @@
 """MicroPython tool: mount local directory on device as VFS
 
-Phase 1: readonly mount with STAT, LISTDIR, OPEN, CLOSE, READ commands.
+## Architecture
+
+Three-layer architecture:
+1. **Agent (MicroPython)**: VFS driver on device (~3.5KB, 136 lines)
+   - RemoteFS class implements VFS interface
+     (mount, stat, ilistdir, open, chdir, mkdir, remove)
+   - _mt_F class implements file object
+     (read, write, readline, close, context manager)
+   - Sends VFS requests via escape sequences on serial line
+
+2. **Handler (PC)**: Handles VFS requests from device
+   (MountHandler class)
+   - Resolves paths within mount root (prevents path traversal)
+   - Services 8 VFS commands:
+     STAT, LISTDIR, OPEN, CLOSE, READ, WRITE, MKDIR, REMOVE
+   - Manages file descriptors and open file handles
+   - Supports virtual submounts (ln command)
+
+3. **Intercept (PC)**: Transparent proxy on serial connection
+   (ConnIntercept class)
+   - Intercepts escape sequences (0x18) and dispatches to handler
+   - Passes through all other data (REPL I/O)
+   - Detects soft reboot and triggers remount
+
+## Communication Protocol
+
+Escape-based protocol runs transparently alongside REPL I/O:
+
+**Escape byte:** 0x18 (CAN/Ctrl+X)
+- Chosen because not used in raw REPL protocol
+
+**Protocol flow:**
+1. Device → PC: `\x18 CMD MID`
+   (escape + command byte + mount ID byte)
+2. Device blocks: waits for ACK
+   (`while _mt_si.read(1)[0]!=_mt_E:pass`)
+3. PC → Device: ACK `\x18` (unblocks device)
+4. Device → PC: Parameters (path, mode, fd, data, ...)
+   - Format depends on command
+5. PC → Device: Response (error code or data)
+   - Format depends on command
+6. Device: Processes response, returns to Python code
+
+**Why synchronous?**
+Device waits for PC response before continuing. This ensures:
+- Deterministic flow (no race conditions)
+- Error propagation (PC can signal errors to device)
+- Flow control (PC controls data transfer pace)
+
+## VFS Commands
+
+| CMD | Name    | Device → PC Params    | PC → Device Response |
+|-----|---------|-----------------------|----------------------|
+| 1   | STAT    | path (str)            | errno, mode, size,   |
+|     |         |                       | mtime                |
+| 2   | LISTDIR | path (str)            | count, entries       |
+| 3   | OPEN    | path, mode (str)      | fd (s8)              |
+| 4   | CLOSE   | fd (s8)               | errno (s8)           |
+| 5   | READ    | fd, count (s32)       | length, data         |
+| 6   | WRITE   | fd, length, data      | errno (s8)           |
+| 7   | MKDIR   | path (str)            | errno (s8)           |
+| 8   | REMOVE  | path, recursive (s8)  | errno (s8)           |
+
+**Wire format:**
+- `s8`: signed 8-bit int (struct 'b')
+- `s32`: signed 32-bit int little-endian (struct '<i')
+- `u32`: unsigned 32-bit int little-endian (struct '<I')
+- `str`: length (s32) + utf-8 bytes
+- `bytes`: length (s32) + raw bytes
+
+**Error codes:** Negative errno values
+(e.g., -2 = ENOENT, -13 = EACCES, -30 = EROFS)
+
+## Example Session
+
+```
+# Device executes: open('/remote/test.txt').read()
+
+1. Device sends: \x18 \x01 \x00        # CMD_STAT (1), mid=0
+2. Device blocks waiting for ACK
+3. PC sends: \x18                      # ACK
+4. Device sends: "\x0e\x00\x00\x00/remote/test.txt"
+   # path length + path
+5. PC responds: \x00 \x00\x80\x00\x00 \x0c\x00\x00\x00 ...
+   # OK, S_IFREG, size=12
+6. Device unblocks, proceeds to OPEN
+
+7. Device sends: \x18 \x03 \x00        # CMD_OPEN (3), mid=0
+8. PC sends: \x18                      # ACK
+9. Device sends: path + mode 'r'
+10. PC responds: \x00                  # fd=0
+11. Device unblocks, creates _mt_F(fd=0)
+
+12. Device sends: \x18 \x05 \x00       # CMD_READ (5), mid=0
+13. PC sends: \x18                     # ACK
+14. Device sends: \x00 \xff\xff\xff\xff  # fd=0, count=-1 (read all)
+15. PC responds: \x0c\x00\x00\x00 + data  # length=12, data bytes
+16. Device reads data, unblocks
+
+17. Device sends: \x18 \x04 \x00       # CMD_CLOSE (4), mid=0
+18. PC sends: \x18                     # ACK
+19. Device sends: \x00                 # fd=0
+20. PC responds: \x00                  # errno=0 (OK)
+21. Device unblocks, fd closed
+```
+
+## Soft Reboot Handling
+
+When device soft resets (Ctrl+D):
+1. ConnIntercept detects "soft reboot" marker in output stream
+2. Sets `_needs_remount = True` flag
+3. Waits for REPL prompt ">>> "
+4. Calls `remount_fn()` callback
+5. `_do_remount_all()` re-injects agent, re-mounts all VFS,
+   restores CWD
+6. User can continue working seamlessly
+
+## Security
+
+**Path traversal protection:**
+- All paths resolved via `os.path.realpath()`
+- Validated that resolved path starts with mount root
+- Symlinks are followed and validated
+- Invalid paths return EACCES error
+
+**Write protection:**
+- Default: readonly mount (writable=False)
+- Write operations return EROFS when readonly
+- Requires explicit `-w` flag to enable writes
+
+## Performance
+
+**Agent size:** 3.5KB source (136 lines)
+**Chunk size:** Auto-detected 512B - 32KB based on device RAM
+**Overhead:** ~1 RTT per VFS operation (blocking protocol)
+**Optimal for:** Development, testing, prototyping
+**Not optimal for:** High-throughput file I/O
+(use cp/get/put for bulk transfers)
 """
 
 import errno as _errno
 import os as _os
+import shutil as _shutil
 import struct as _struct
 
 from mpytool.conn import Conn
@@ -18,15 +156,16 @@ CMD_LISTDIR = 2
 CMD_OPEN = 3
 CMD_CLOSE = 4
 CMD_READ = 5
+CMD_WRITE = 6
+CMD_MKDIR = 7
+CMD_REMOVE = 8
 
-# Valid command range for readonly mode
 CMD_MIN = CMD_STAT
-CMD_MAX = CMD_READ
+CMD_MAX = CMD_REMOVE
 
 # Prebuilt bytes for hot path
 _ESCAPE_BYTE = bytes([ESCAPE])
 
-# Soft reboot detection
 _SOFT_REBOOT = b'soft reboot'
 _REPL_PROMPT = b'>>> '
 
@@ -50,11 +189,13 @@ def _mt_rs():
 def _mt_ws(v):
  b=v.encode();_mt_w('<i',len(b))
  if b:_mt_so.write(b)
-class _mt_RF(io.IOBase):
- def __init__(s,fd,txt):
-  s.fd=fd;s.txt=txt
-  s._rb=bytearray(CHUNK_SIZE)
-  s._rn=0;s._rp=0
+class _mt_F(io.IOBase):
+ def __init__(s,fd,txt,mode):
+  s.fd=fd;s.txt=txt;s.mode=mode
+  if 'r' in mode or '+' in mode:
+   s._rb=bytearray(CHUNK_SIZE)
+   s._rn=0;s._rp=0
+  else:s._rb=None
  def _refill(s):
   _mt_bg(5);_mt_w('b',s.fd);_mt_w('<i',CHUNK_SIZE)
   n=_mt_r('<i')
@@ -65,6 +206,7 @@ class _mt_RF(io.IOBase):
     if r:p+=r
   _mt_en();s._rn=n;s._rp=0
  def readinto(s,buf):
+  if s._rb is None:raise OSError(9)
   n=len(buf);p=0
   while p<n:
    if s._rp>=s._rn:
@@ -96,15 +238,25 @@ class _mt_RF(io.IOBase):
     p.append(bytes(b[:g]))
    d=b''.join(p)
   return str(d,'utf8') if s.txt else d
+ def write(s,buf):
+  b=buf.encode('utf8') if s.txt and isinstance(buf,str) else bytes(buf)
+  _mt_bg(6);_mt_w('b',s.fd);_mt_w('<i',len(b))
+  _mt_so.write(b);e=_mt_r('b');_mt_en()
+  if e<0:raise OSError(-e)
+  return len(b)
  def ioctl(s,req,arg):
   if req==4:s.close()
   elif req==11:return CHUNK_SIZE
   return 0
  def close(s):
   if s.fd>=0:
-   _mt_bg(4);_mt_w('b',s.fd);_mt_en()
+   _mt_bg(4);_mt_w('b',s.fd)
+   e=_mt_r('b');_mt_en()
+   if e<0:raise OSError(-e)
    s.fd=-1
-class _mt_FS:
+ def __enter__(s):return s
+ def __exit__(s,*_):s.close()
+class RemoteFS:
  def __init__(s,mid=0):
   s.mid=mid;s._cwd='/'
  def mount(s,ro,mkfs):pass
@@ -139,21 +291,69 @@ class _mt_FS:
   _mt_bg(3,s.mid);_mt_ws(s._abs(p));_mt_ws(mode)
   fd=_mt_r('b');_mt_en()
   if fd<0:raise OSError(-fd)
-  return _mt_RF(fd,'b' not in mode)
+  return _mt_F(fd,'b' not in mode,mode)
+ def mkdir(s,p):
+  _mt_bg(7,s.mid);_mt_ws(s._abs(p))
+  e=_mt_r('b');_mt_en()
+  if e<0:raise OSError(-e)
+ def remove(s,p):
+  _mt_bg(8,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
+  e=_mt_r('b');_mt_en()
+  if e<0:raise OSError(-e)
+ def rmdir(s,p):
+  _mt_bg(8,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
+  e=_mt_r('b');_mt_en()
+  if e<0:raise OSError(-e)
 def _mt_mount(mp='/remote',mid=0):
  try:os.umount(mp)
  except:pass
- os.mount(_mt_FS(mid=mid),mp)
+ os.mount(RemoteFS(mid=mid),mp)
 """
+
+
+class _VFSReader:
+    """Temporary reader for VFS handler.
+
+    Reads from buffer first, then underlying conn.
+
+    When ConnIntercept detects a VFS command, it has already read
+    data from serial port into its buffer. This reader allows the
+    handler to read VFS parameters from that buffer first, and only
+    read from underlying connection if buffer is exhausted.
+    """
+
+    def __init__(self, data, offset, underlying_conn):
+        self._data = data
+        self._offset = offset
+        self._conn = underlying_conn
+
+    def read_bytes(self, n, timeout=None):
+        """Read n bytes from buffer + underlying connection"""
+        result = bytearray()
+        available = len(self._data) - self._offset
+        if available > 0:
+            chunk = min(n, available)
+            result.extend(self._data[self._offset:self._offset + chunk])
+            self._offset += chunk
+            n -= chunk
+        if n > 0:
+            result.extend(self._conn.read_bytes(n, timeout))
+        return bytes(result)
+
+    def write(self, data):
+        """Write directly to underlying connection"""
+        return self._conn.write(data)
 
 
 class MountHandler:
     """PC-side handler for VFS requests from device"""
 
-    def __init__(self, conn, root, log=None, mpy_cross=None):
+    def __init__(
+            self, conn, root, log=None, writable=False, mpy_cross=None):
         self._conn = conn
         self._root = _os.path.realpath(root)
         self._log = log
+        self._writable = writable
         self._mpy_cross = mpy_cross
         self._files = {}
         self._next_fd = 0
@@ -165,13 +365,14 @@ class MountHandler:
             CMD_OPEN: self._do_open,
             CMD_CLOSE: self._do_close,
             CMD_READ: self._do_read,
+            CMD_WRITE: self._do_write,
+            CMD_MKDIR: self._do_mkdir,
+            CMD_REMOVE: self._do_remove,
         }
 
     def add_submount(self, subpath, local_dir):
         """Add virtual submount — subpath is relative to VFS root"""
         self._submounts[subpath] = _os.path.realpath(local_dir)
-
-    # -- read/write primitives --
 
     def _rd_s8(self):
         return _struct.unpack('b', self._conn.read_bytes(1))[0]
@@ -184,6 +385,12 @@ class MountHandler:
         if n <= 0:
             return ''
         return self._conn.read_bytes(n).decode('utf-8')
+
+    def _rd_bytes(self):
+        n = self._rd_s32()
+        if n <= 0:
+            return b''
+        return self._conn.read_bytes(n)
 
     def _wr_s8(self, val):
         self._conn.write(_struct.pack('b', val))
@@ -206,8 +413,6 @@ class MountHandler:
         self._wr_u32(st.st_size)
         self._wr_u32(int(st.st_mtime))
 
-    # -- path security --
-
     def _resolve_path(self, path):
         """Resolve path within mount root or submount, prevent traversal"""
         path = path.lstrip('/')
@@ -222,13 +427,10 @@ class MountHandler:
                 if not full.startswith(local_dir):
                     return None
                 return full
-        # Default: resolve in root
         full = _os.path.realpath(_os.path.join(self._root, path))
         if not full.startswith(self._root):
             return None
         return full
-
-    # -- command handlers --
 
     def dispatch(self, cmd):
         """Dispatch VFS command from device"""
@@ -270,7 +472,6 @@ class MountHandler:
                 if st.st_size == 0:
                     self._send_stat(st)
                     return
-                # Try compile (lazy on-demand)
                 cache_path = self._mpy_cross.compile(local)
                 if cache_path:
                     # Compilation OK → redirect to .mpy
@@ -304,7 +505,6 @@ class MountHandler:
                         return
                     except OSError:
                         pass
-            # Not found
             self._wr_s8(-_errno.ENOENT)
             return
 
@@ -341,7 +541,6 @@ class MountHandler:
             real_dir = True
         except OSError:
             pass  # Virtual intermediate dir — may have submount entries
-        # Inject virtual entries for submounts
         prefix = path.lstrip('/').rstrip('/')
         existing = {name for name, _ in entries}
         for subpath in self._submounts:
@@ -380,6 +579,10 @@ class MountHandler:
             self._wr_s8(-_errno.EACCES)
             return
 
+        if ('w' in mode or 'a' in mode or '+' in mode) and not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
+
         # .mpy file with -m mode: redirect to prebuilt or cache
         if path.endswith('.mpy') and self._mpy_cross:
             py_path = path[:-4] + '.py'
@@ -416,9 +619,14 @@ class MountHandler:
             self._log.info("MOUNT: CLOSE: fd=%d", fd)
         f = self._files.pop(fd, None)
         if f:
-            f.close()
-            self._free_fds.append(fd)
-        # No response (fire-and-forget)
+            try:
+                f.close()
+                self._free_fds.append(fd)
+                self._wr_s8(0)  # success
+            except OSError as e:
+                self._wr_s8(-e.errno)
+        else:
+            self._wr_s8(-_errno.EBADF)  # invalid fd
 
     def _do_read(self):
         fd = self._rd_s8()
@@ -432,6 +640,69 @@ class MountHandler:
         data = f.read(n)
         self._wr_bytes(data if data else b'')
 
+    def _do_write(self):
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
+        fd = self._rd_s8()
+        data = self._rd_bytes()
+        if self._log:
+            self._log.info("MOUNT: WRITE: fd=%d n=%d", fd, len(data))
+        f = self._files.get(fd)
+        if f is None:
+            self._wr_s8(-_errno.EBADF)
+            return
+        try:
+            f.write(data)
+            self._wr_s8(0)
+        except OSError as e:
+            self._wr_s8(-e.errno)
+
+    def _do_mkdir(self):
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
+        path = self._rd_str()
+        if self._log:
+            self._log.info("MOUNT: MKDIR: '%s'", path)
+        local = self._resolve_path(path)
+        if local is None:
+            self._wr_s8(-_errno.EACCES)
+            return
+        try:
+            _os.makedirs(local, exist_ok=True)
+            self._wr_s8(0)
+        except OSError as e:
+            self._wr_s8(-e.errno)
+
+    def _do_remove(self):
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
+        path = self._rd_str()
+        recursive = self._rd_s8()
+        if self._log:
+            self._log.info(
+                "MOUNT: REMOVE: '%s' recursive=%d", path, recursive)
+        local = self._resolve_path(path)
+        if local is None:
+            self._wr_s8(-_errno.EACCES)
+            return
+        try:
+            if recursive:
+                if _os.path.isdir(local):
+                    _shutil.rmtree(local)
+                else:
+                    _os.remove(local)
+            else:
+                if _os.path.isdir(local):
+                    _os.rmdir(local)
+                else:
+                    _os.remove(local)
+            self._wr_s8(0)
+        except OSError as e:
+            self._wr_s8(-e.errno)
+
     def close_all(self):
         """Close all open file handles"""
         for f in self._files.values():
@@ -442,6 +713,10 @@ class MountHandler:
         self._files.clear()
         self._next_fd = 0
         self._free_fds.clear()
+
+    def __del__(self):
+        """Cleanup: close all files on destruction"""
+        self.close_all()
 
 
 class ConnIntercept(Conn):
@@ -459,7 +734,6 @@ class ConnIntercept(Conn):
         self._remount_fn = remount_fn
         self._pending = b''
         self._busy = False
-        # Soft reboot detection
         self._reboot_buf = b''
         self._needs_remount = False
 
@@ -480,6 +754,68 @@ class ConnIntercept(Conn):
             return True
         return self._conn._has_data(timeout)
 
+    def _handle_vfs_command(self, data, i, cmd, mid):
+        """Handle VFS command. Returns new position or None to break parsing.
+        """
+        handler = self._handlers.get(mid)
+        if not handler:
+            # No handler for this MID — skip escape sequence
+            return i + 3
+
+        # Process VFS command
+        self._busy = True
+        try:
+            self._conn.write(_ESCAPE_BYTE)
+            # Create buffered reader for VFS parameters
+            # (parameters may already be in our data buffer)
+            reader = _VFSReader(data, i + 3, self._conn)
+            # Temporarily replace handler's connection
+            orig_conn = handler._conn
+            handler._conn = reader
+            try:
+                handler.dispatch(cmd)
+            finally:
+                handler._conn = orig_conn
+            # Update parse position to skip consumed VFS data
+            # If handler read beyond our buffer, stop parsing
+            # (remaining data will be in underlying conn's buffer)
+            new_i = reader._offset
+            if new_i > len(data):
+                return None  # Signal break
+            return new_i
+        finally:
+            self._busy = False
+
+    def _process_escape_sequences(self, data, got_new_data):
+        """Parse data, intercept VFS commands, return REPL output."""
+        out = bytearray()
+        i = 0
+        while i < len(data):
+            if data[i] == ESCAPE:
+                # Need at least 2 more bytes (CMD + MID)
+                if i + 2 >= len(data):
+                    # Partial escape — save and wait for more data
+                    self._pending = bytes(data[i:])
+                    break
+
+                cmd = data[i + 1]
+                mid = data[i + 2]
+
+                # Valid VFS command?
+                if CMD_MIN <= cmd <= CMD_MAX:
+                    new_i = self._handle_vfs_command(data, i, cmd, mid)
+                    if new_i is None:
+                        break  # Handler consumed beyond buffer
+                    i = new_i
+                    continue
+                # Invalid command — fall through to append byte
+
+            # Default: append byte and advance
+            out.append(data[i])
+            i += 1
+
+        return bytes(out) if out else (b'' if got_new_data else None)
+
     def _read_available(self):
         raw = self._conn._read_available()
         if raw:
@@ -491,43 +827,15 @@ class ConnIntercept(Conn):
         else:
             return None
 
+        got_new_data = bool(raw)
+
         # Fast path: no escape byte
         if ESCAPE not in data:
             self._check_reboot(data)
             return data
 
-        # Slow path: parse byte by byte
-        out = bytearray()
-        i = 0
-        while i < len(data):
-            if data[i] == ESCAPE:
-                # Need at least 2 more bytes (CMD + MID)
-                if i + 2 >= len(data):
-                    # Partial escape — save and wait for more data
-                    self._pending = bytes(data[i:])
-                    break
-                cmd = data[i + 1]
-                mid = data[i + 2]
-                if CMD_MIN <= cmd <= CMD_MAX:
-                    # Valid VFS command — send ACK and dispatch
-                    handler = self._handlers.get(mid)
-                    if handler:
-                        self._busy = True
-                        try:
-                            self._conn.write(_ESCAPE_BYTE)
-                            handler.dispatch(cmd)
-                        finally:
-                            self._busy = False
-                    i += 3
-                else:
-                    # Not a valid VFS command — pass through
-                    out.append(data[i])
-                    i += 1
-            else:
-                out.append(data[i])
-                i += 1
-
-        result = bytes(out) if out else None
+        # Slow path: parse and intercept VFS commands
+        result = self._process_escape_sequences(data, got_new_data)
         if result:
             self._check_reboot(result)
         return result

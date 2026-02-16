@@ -640,18 +640,19 @@ mpy.memory()
 
 ### Mount
 
-#### mount(local_path, mount_point='/remote', log=None, mpy_cross=None)
+#### mount(local_path, mount_point='/remote', log=None, writable=False, mpy_cross=None)
 
-Mount a local directory on device as readonly VFS.
+Mount a local directory on device as VFS (read-only by default).
 
 ```python
-mpy.mount(local_path, mount_point='/remote', log=None, mpy_cross=None)
+mpy.mount(local_path, mount_point='/remote', log=None, writable=False, mpy_cross=None)
 ```
 
 **Parameters:**
 - `local_path` (str): Local directory to mount
 - `mount_point` (str): Device mount point, default `/remote`
 - `log`: Optional logger instance
+- `writable` (bool): Mount as read-write (default: `False`, readonly)
 - `mpy_cross`: Optional `MpyCross` instance for transparent `.mpy` compilation
 
 **Returns:**
@@ -659,10 +660,14 @@ mpy.mount(local_path, mount_point='/remote', log=None, mpy_cross=None)
 
 The device can then read, import and execute files from the local directory
 without uploading to flash. A MicroPython agent is injected into the device
-that forwards filesystem requests (stat, listdir, open, read, close) to the
-PC over the serial link. The connection is wrapped in a transparent proxy
-(`ConnIntercept`) that intercepts VFS protocol messages while passing REPL
-I/O through.
+that forwards filesystem requests (stat, listdir, open, read, close, and
+optionally write, mkdir, remove) to the PC over the serial link. The connection
+is wrapped in a transparent proxy (`ConnIntercept`) that intercepts VFS protocol
+messages while passing REPL I/O through.
+
+**Write support:** If `writable=True`, the device can create, modify and delete
+files in the mounted directory. All changes are written directly to the local
+filesystem. Write operations are disabled by default (readonly mount) for safety.
 
 **Transparent .mpy compilation:** If `mpy_cross` is provided, `.py` files are
 automatically compiled to `.mpy` bytecode on-demand when imported by the device.
@@ -676,7 +681,7 @@ directory after mount. Multiple independent (non-nested) mounts are supported.
 After calling `mount()`, use `mpy.comm.exit_raw_repl()` to enter friendly
 REPL, or use the CLI `mount` command which handles this automatically.
 
-Soft reset (Ctrl+D) triggers automatic re-mount.
+Soft reset (Ctrl+D) triggers automatic re-mount and restores CWD to the first mount point.
 
 **Example:**
 ```python
@@ -685,6 +690,11 @@ Soft reset (Ctrl+D) triggers automatic re-mount.
 >>> mpy.comm.exit_raw_repl()
 # Device can now: import module  (from ./src/module.py)
 #                 open('/remote/data.txt').read()
+
+# With write support:
+>>> handler = mpy.mount('./workspace', writable=True)
+>>> mpy.comm.exec("f = open('/remote/test.txt', 'w'); f.write('hello'); f.close()")
+# Creates ./workspace/test.txt locally
 
 # With .mpy compilation:
 >>> from mpytool.mpy_cross import MpyCross

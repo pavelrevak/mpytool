@@ -1537,13 +1537,14 @@ def _mt_pfind(label):
 
     def mount(
             self, local_path, mount_point='/remote', log=None,
-            mpy_cross=None):
-        """Mount local directory on device as readonly VFS
+            writable=False, mpy_cross=None):
+        """Mount local directory on device as VFS
 
         Arguments:
             local_path: local directory to mount
             mount_point: device mount point (default: /remote)
             log: logger instance
+            writable: mount as read-write (default: False, readonly)
             mpy_cross: MpyCross instance for transparent .mpy serving
 
         Returns:
@@ -1601,14 +1602,13 @@ def _mt_pfind(label):
                 'CHUNK_SIZE', str(chunk_size))
             self._mount_agent_code = agent_code
 
-            # Inject agent and mount VFS
             self._mpy_comm.exec(agent_code, timeout=10)
             self._mpy_comm.exec(
                 f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
 
-            # Create handler and connection intercept
             handler = MountHandler(
-                self._conn, local_path, log=log, mpy_cross=mpy_cross)
+                self._conn, local_path, log=log, writable=writable,
+                mpy_cross=mpy_cross)
             intercept = ConnIntercept(
                 self._conn, {mid: handler},
                 remount_fn=self._do_remount_all, log=log)
@@ -1634,7 +1634,7 @@ def _mt_pfind(label):
             # Create handler and add to existing intercept
             handler = MountHandler(
                 self._intercept._conn, local_path, log=log,
-                mpy_cross=mpy_cross)
+                writable=writable, mpy_cross=mpy_cross)
             self._intercept.add_handler(mid, handler)
 
         self._mounts.append((mid, mount_point, local_path, handler))
@@ -1657,5 +1657,12 @@ def _mt_pfind(label):
             mp_escaped = _escape_path(mount_point)
             self._mpy_comm.exec(
                 f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
+        # Restore CWD to first mount point (mpremote compatibility)
+        if self._mounts:
+            first_mount = self._mounts[0]
+            if first_mount[0] is not None:  # Not a submount
+                mp_escaped = _escape_path(first_mount[1])
+                self._mpy_comm.exec(
+                    f"__import__('uos').chdir('{mp_escaped}')", timeout=3)
         self._mpy_comm.exit_raw_repl()
 

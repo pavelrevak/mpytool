@@ -1217,8 +1217,6 @@ class MpyTool():
                 raise _mpytool.MpyError(
                     "DTR boot not available (serial only)")
 
-    # -- dispatch methods for process_commands() --
-
     def _dispatch_ls(self, commands, is_last_group):
         dir_name = ':'
         if commands:
@@ -1477,19 +1475,24 @@ class MpyTool():
                     f" ({used_pct:.0f}% used)")
 
     def _parse_mount_flags(self, commands):
-        """Parse mount flags and return (mpy_cross, filtered_commands)"""
+        """Parse mount flags and return (writable, mpy_cross, filtered_commands)"""
         mpy_cross = None
+        writable = False
         filtered_commands = []
         for cmd in commands:
             if cmd == '--mpy':
                 mpy_cross = True
+            elif cmd in ('--writable', '--write'):
+                writable = True
             elif (cmd.startswith('-') and not cmd.startswith('--')
                     and len(cmd) > 1):
-                # Handle combined short flags like -m
+                # Handle combined short flags like -m, -w, -mw
                 flags = cmd[1:]
                 if 'm' in flags:
                     mpy_cross = True
-                remaining = flags.replace('m', '')
+                if 'w' in flags:
+                    writable = True
+                remaining = flags.replace('m', '').replace('w', '')
                 if remaining:
                     filtered_commands.append('-' + remaining)
             else:
@@ -1500,7 +1503,7 @@ class MpyTool():
             mpy_cross.init(self._mpy.platform())
             if not mpy_cross.active:
                 mpy_cross = None
-        return mpy_cross, filtered_commands
+        return writable, mpy_cross, filtered_commands
 
     def _parse_mount_pairs(self, commands):
         """Parse mount directory/point pairs from commands"""
@@ -1529,29 +1532,25 @@ class MpyTool():
         if not commands:
             self._list_mounts()
             return
-        # Parse flags
-        mpy_cross, commands[:] = self._parse_mount_flags(commands)
-        # Parse mount pairs
+        writable, mpy_cross, commands[:] = self._parse_mount_flags(commands)
         pairs = self._parse_mount_pairs(commands)
         # Determine first mount point for auto-chdir
         first_mount_point = None
         if not self._mpy._mounts:
             first_mount_point = pairs[0][1]
-        # Execute mounts
         for local_path, mount_point in pairs:
             if self._mpy.is_submount(mount_point):
                 raise ParamsError(
                     f"nested mount '{mount_point}' is not allowed")
             self._mpy.mount(
                 local_path, mount_point, log=self._log,
-                mpy_cross=mpy_cross)
-            mode = "readonly"
+                writable=writable, mpy_cross=mpy_cross)
+            mode = "read-write" if writable else "readonly"
             if mpy_cross:
                 mode += ", .mpy compilation"
             self.verbose(
                 f"Mounted {local_path} on {mount_point} ({mode})",
                 color='green')
-        # Update connection and CWD
         self._conn = self._mpy.conn
         if first_mount_point:
             self._mpy.chdir(first_mount_point)
@@ -1563,7 +1562,6 @@ class MpyTool():
     def _dispatch_ln(self, commands, is_last_group):
         if len(commands) < 2:
             raise ParamsError('ln requires source(s) and destination')
-        # Last arg is dst (must have : prefix with absolute path)
         args = list(commands)
         commands.clear()
         dst_arg = args[-1]
@@ -1576,7 +1574,6 @@ class MpyTool():
             raise ParamsError(
                 'ln destination must be absolute path (e.g. :/lib/)')
         dst_is_dir = dst_path.endswith('/')
-        # Multiple sources or source with trailing / require directory dst
         has_contents = any(
             s.endswith('/') or s.endswith(_os.sep)
             for s in src_args)
@@ -1588,7 +1585,6 @@ class MpyTool():
             raise ParamsError(
                 'contents source (trailing /) requires directory'
                 ' destination (trailing /)')
-        # Find parent mount (longest matching mount_point)
         best_mp = None
         dst_norm = dst_path.rstrip('/')
         for p_mid, p_mp, _, _ in self._mpy._mounts:
@@ -1633,8 +1629,6 @@ class MpyTool():
             return
         for name, size in entries:
             print(name + '/' if size is None else name)
-
-    # -- command dispatching --
 
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd', 'path',
@@ -1688,7 +1682,7 @@ Commands (: prefix = device path, :/ = root, : = CWD):
   flash write [{label}] {file}  write file to flash/partition
   flash erase [{label}] [--full]  erase flash/partition
   ota {firmware.app-bin}        OTA update (ESP32)
-  mount [-m] {dir} [:{mount_point}]  mount local dir (-m compile .mpy)
+  mount [-m] [-w] {dir} [:{mount_point}]  mount local dir (-m compile .mpy, -w writable)
   ln {src} [...] {:path}        link local file/dir into mounted VFS
   speedtest                     serial link speed test
   sleep {seconds}               pause between commands
