@@ -1084,6 +1084,8 @@ class TestLnDispatch(unittest.TestCase):
         os.makedirs(self.temp_sub)
 
     def tearDown(self):
+        import gc
+        gc.collect()  # Force cleanup of handlers on Windows
         shutil.rmtree(self.temp_dir)
 
     def test_ln_dir(self):
@@ -1413,6 +1415,8 @@ class TestMountHandlerWrite(unittest.TestCase):
         self.conn = MockConnForHandler()
 
     def tearDown(self):
+        import gc
+        gc.collect()  # Force cleanup of handlers on Windows
         shutil.rmtree(self.temp_dir)
 
     def test_open_readonly_without_writable(self):
