@@ -21,10 +21,13 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Run script | 🟢 `run script.py` | 🟢 `run script.py` |
 | Enter REPL | 🟢 `repl` | 🟢 `repl` |
 | Monitor output | 🟢 `monitor` | 🔴 use `repl` |
+| Stop program | 🟢 `stop` | 🔴 use Ctrl-C in repl |
 | Soft reset | 🟢 `reset` | 🟢 `soft-reset` |
 | Machine reset | 🟢 `reset --machine` | 🟢 `reset` |
+| Raw REPL reset | 🟢 `reset --raw` | 🔴 |
 | Hardware reset | 🟢 `reset --rts` | 🔴 |
 | Bootloader | 🟢 `reset --boot` | 🟢 `bootloader` |
+| DTR bootloader | 🟢 `reset --dtr-boot` | 🔴 |
 | Device info | 🟢 `info` | 🔴 use `exec` |
 | Disk usage | 🟢 `info` | 🟢 `df` |
 | Speed test | 🟢 `speedtest` | 🔴 |
@@ -56,13 +59,15 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Connect by serial ID | 🔴 | 🟢 `id:serial` |
 | Port shortcuts | 🔴 | 🟢 `a0`, `u0`, `c0` |
 | Multiple connections | 🔴 | 🟢 switching |
+| Custom baud rate | 🟢 `-b` | 🟢 `baud:RATE` |
 | **File Transfer** | | |
 | Skip unchanged files | 🟢 SHA256 | 🟢 SHA256 |
 | Force upload | 🟢 `-f` | 🟢 `-f` |
 | Recursive copy | 🟢 auto | 🟢 `-r` flag |
-| Compression | 🟢 deflate | 🔴 |
-| Chunk size | 🟢 auto 512B-32KB | 🔴 256B fixed |
+| Compression | 🟢 deflate `-z/-Z` | 🔴 |
+| Chunk size | 🟢 auto/-c 512B-32KB | 🔴 256B fixed |
 | Compile .py to .mpy | 🟢 `-m` | 🔴 |
+| Exclude patterns | 🟢 `-e` | 🔴 |
 | **Output** | | |
 | Progress bar | 🟢 | 🟢 |
 | Verbose output | 🟢 `-v` | 🟢 `-v` |
@@ -76,18 +81,6 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Escape non-printable | 🔴 | 🟢 `-e` |
 | Exit shortcut | 🟢 Ctrl+] | 🟢 Ctrl+] / Ctrl+X |
 | Show CWD/path on start | 🔴 | 🔴 |
-| **Reset Options** | | |
-| Soft reset | 🟢 | 🟢 |
-| Machine reset | 🟢 | 🟢 |
-| Raw REPL reset | 🟢 `--raw` | 🔴 |
-| Hardware reset (RTS) | 🟢 `--rts` | 🔴 |
-| DTR bootloader (ESP32) | 🟢 `--dtr-boot` | 🔴 |
-| **Advanced** | | |
-| Flash operations | 🟢 RP2, ESP32 | 🔴 |
-| OTA firmware update | 🟢 ESP32 | 🔴 |
-| Package manager | 🔴 | 🟢 mip |
-| RTC control | 🔴 | 🟢 |
-| ROMFS support | 🔴 | 🟢 |
 | **Usability** | | |
 | Shell completion | 🟢 ZSH + Bash | 🔴 |
 | Remote path completion | 🟢 | 🔴 |

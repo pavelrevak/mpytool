@@ -4,7 +4,6 @@ import argparse as _argparse
 import fnmatch as _fnmatch
 import importlib.metadata as _metadata
 import os as _os
-import sys as _sys
 import time as _time
 
 import mpytool as _mpytool
@@ -208,8 +207,6 @@ def _build_subparsers():
     run = _CmdParser(prog='run',
         description='Run local Python file on device.')
     run.add_argument('file', metavar='local_file', help='local .py file')
-    run.add_argument('-m', '--monitor', action='store_true',
-        help='monitor output after execution')
 
     # sleep: pause
     sleep = _CmdParser(prog='sleep',
@@ -348,21 +345,6 @@ class MpyTool():
                 return True
         return False
 
-    def _collect_flags(self, commands):
-        """Collect flag arguments from commands list.
-
-        Pops flags (starting with -) from commands until a non-flag is found.
-        Handles -t VALUE style arguments.
-        """
-        flags = []
-        while commands and commands[0].startswith('-'):
-            flags.append(commands.pop(0))
-            # Handle -t/--timeout VALUE style
-            if flags[-1] in ('-t', '--timeout') and commands:
-                if not commands[0].startswith('-'):
-                    flags.append(commands.pop(0))
-        return flags
-
     @property
     def _is_tty(self):
         if self._verbose_out is None:
@@ -478,22 +460,18 @@ class MpyTool():
         """Move/rename files on device"""
         if len(args) < 2:
             raise ParamsError('mv requires source and destination')
-        sources = list(args[:-1])
-        dest = args[-1]
-        dest_path = _parse_device_path(dest, 'mv destination')
-        for src in sources:
-            _parse_device_path(src, 'mv source')  # validate only
+        dest_path = _parse_device_path(args[-1], 'mv destination')
+        src_paths = [_parse_device_path(src, 'mv source') for src in args[:-1]]
         # ':' = CWD (empty string), ':/' = root
         dest_is_dir = (
             dest_path == '' or dest_path == '/'
             or dest_path.endswith('/'))
-        if len(sources) > 1 and not dest_is_dir:
+        if len(src_paths) > 1 and not dest_is_dir:
             raise ParamsError(
                 'multiple sources require destination directory '
                 '(ending with /)')
         self.mpy.import_module('os')
-        for src in sources:
-            src_path = _parse_device_path(src, 'mv')
+        for src_path in src_paths:
             stat = self.mpy.stat(src_path)
             if stat is None:
                 raise ParamsError(f'Source not found on device: {src_path}')
@@ -546,17 +524,14 @@ class MpyTool():
         except KeyboardInterrupt:
             self.verbose('', level=0, overwrite=True)  # newline after ^C
         except (_mpytool.ConnError, OSError) as err:
-            if self._log:
-                self._log.error(err)
+            self._log.error(err)
 
     def cmd_repl(self):
         self.mpy.comm.exit_raw_repl()
-        log = self._verbose_out
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
             return
-        msg = f"REPL (Ctrl+] to exit)"
-        self.verbose(msg, 1)
+        self.verbose("REPL (Ctrl+] to exit)", 1)
         terminal = _terminal.Terminal(self.conn, self._log)
         terminal.run()
         self._log.info('Exiting..')
@@ -889,7 +864,7 @@ class MpyTool():
         self.print_tree(tree)
 
     def _dispatch_cat(self, commands, is_last_group):
-        args = _SUBPARSERS['cat'].parse_args(list(commands))
+        args = _SUBPARSERS['cat'].parse_args(commands)
         commands.clear()
         for file_name in args.paths:
             path = _parse_device_path(file_name, 'cat')
@@ -898,7 +873,7 @@ class MpyTool():
             print(data.decode('utf-8'))
 
     def _dispatch_mkdir(self, commands, is_last_group):
-        args = _SUBPARSERS['mkdir'].parse_args(list(commands))
+        args = _SUBPARSERS['mkdir'].parse_args(commands)
         commands.clear()
         for dir_name in args.paths:
             path = _parse_device_path(dir_name, 'mkdir')
@@ -906,25 +881,23 @@ class MpyTool():
             self.mpy.mkdir(path)
 
     def _dispatch_rm(self, commands, is_last_group):
-        args = _SUBPARSERS['rm'].parse_args(list(commands))
+        args = _SUBPARSERS['rm'].parse_args(commands)
         commands.clear()
         self.cmd_rm(*args.paths)
 
     def _dispatch_pwd(self, commands, is_last_group):
-        flags = self._collect_flags(commands)
-        _SUBPARSERS['pwd'].parse_args(flags)
+        _, commands[:] = _SUBPARSERS['pwd'].parse_known_args(commands)
         cwd = self.mpy.getcwd()
         print(cwd)
 
     def _dispatch_cd(self, commands, is_last_group):
-        args = _SUBPARSERS['cd'].parse_args(commands[:1])
-        del commands[:1]
+        args = _SUBPARSERS['cd'].parse_args([commands.pop(0)])
         path = _parse_device_path(args.path, 'cd')
         self.verbose(f"CD: {path}", 2)
         self.mpy.chdir(path)
 
     def _dispatch_path(self, commands, is_last_group):
-        args = _SUBPARSERS['path'].parse_args(list(commands))
+        args = _SUBPARSERS['path'].parse_args(commands)
         commands.clear()
         mode = args.mode or 'replace'
         # No arguments = show current path
@@ -949,14 +922,12 @@ class MpyTool():
             self.verbose(f"PATH removed {len(parsed_paths)} entries", 1)
 
     def _dispatch_stop(self, commands, is_last_group):
-        flags = self._collect_flags(commands)
-        _SUBPARSERS['stop'].parse_args(flags)
+        _, commands[:] = _SUBPARSERS['stop'].parse_known_args(commands)
         self.mpy.stop()
         self.verbose("STOP", 1)
 
     def _dispatch_reset(self, commands, is_last_group):
-        cmd_args = self._collect_flags(commands)
-        args = _SUBPARSERS['reset'].parse_args(cmd_args)
+        args, commands[:] = _SUBPARSERS['reset'].parse_known_args(commands)
         mode = args.mode or 'soft'
         if args.timeout and mode not in ('machine', 'rts'):
             raise ParamsError('--timeout only with --machine or --rts')
@@ -965,44 +936,36 @@ class MpyTool():
         self.cmd_reset(mode=mode, reconnect=reconnect, timeout=args.timeout)
 
     def _dispatch_monitor(self, commands, is_last_group):
-        flags = self._collect_flags(commands)
-        _SUBPARSERS['monitor'].parse_args(flags)
+        _, commands[:] = _SUBPARSERS['monitor'].parse_known_args(commands)
         self.cmd_monitor()
-        commands.clear()
 
     def _dispatch_repl(self, commands, is_last_group):
-        flags = self._collect_flags(commands)
-        _SUBPARSERS['repl'].parse_args(flags)
+        _, commands[:] = _SUBPARSERS['repl'].parse_known_args(commands)
         self.cmd_repl()
-        commands.clear()
 
     def _dispatch_exec(self, commands, is_last_group):
-        args = _SUBPARSERS['exec'].parse_args(commands[:1])
-        del commands[:1]
+        args = _SUBPARSERS['exec'].parse_args([commands.pop(0)])
         self.verbose(f"EXEC: {args.code}", 1)
         result = self.mpy.comm.exec(args.code)
         if result:
             print(result.decode('utf-8', 'backslashreplace'), end='')
 
     def _dispatch_run(self, commands, is_last_group):
-        args = _SUBPARSERS['run'].parse_args(list(commands))
-        commands.clear()
+        arg_list = [commands.pop(0)] if commands else []
+        args = _SUBPARSERS['run'].parse_args(arg_list)
         if not _os.path.isfile(args.file):
             raise ParamsError(f"file not found: {args.file}")
         with open(args.file, 'rb') as f:
             code = f.read()
         self.verbose(f"RUN: {args.file} ({len(code)} bytes)", 1)
         self.mpy.comm.try_raw_paste(code, timeout=0)
-        if args.monitor:
-            self.cmd_monitor()
 
     def _dispatch_info(self, commands, is_last_group):
-        flags = self._collect_flags(commands)
-        _SUBPARSERS['info'].parse_args(flags)
+        _, commands[:] = _SUBPARSERS['info'].parse_known_args(commands)
         self.cmd_info()
 
     def _dispatch_flash(self, commands, is_last_group):
-        args = _SUBPARSERS['flash'].parse_args(list(commands))
+        args = _SUBPARSERS['flash'].parse_args(commands)
         commands.clear()
         if args.operation == 'read':
             if len(args.args) == 1:
@@ -1024,22 +987,20 @@ class MpyTool():
             self.cmd_flash()
 
     def _dispatch_ota(self, commands, is_last_group):
-        args = _SUBPARSERS['ota'].parse_args(commands[:1])
-        del commands[:1]
+        args = _SUBPARSERS['ota'].parse_args([commands.pop(0)])
         self.cmd_ota(args.firmware)
 
     def _dispatch_sleep(self, commands, is_last_group):
-        args = _SUBPARSERS['sleep'].parse_args(commands[:1])
-        del commands[:1]
+        args = _SUBPARSERS['sleep'].parse_args([commands.pop(0)])
         self.verbose(f"SLEEP {args.seconds}s", 1)
         _time.sleep(args.seconds)
 
     def _dispatch_cp(self, commands, is_last_group):
-        self.cmd_cp(list(commands))
+        self.cmd_cp(commands)
         commands.clear()
 
     def _dispatch_mv(self, commands, is_last_group):
-        args = _SUBPARSERS['mv'].parse_args(list(commands))
+        args = _SUBPARSERS['mv'].parse_args(commands)
         commands.clear()
         if len(args.paths) < 2:
             raise ParamsError('mv requires source and destination')
@@ -1091,7 +1052,7 @@ class MpyTool():
         if not commands:
             self._list_mounts()
             return
-        args = _SUBPARSERS['mount'].parse_args(list(commands))
+        args = _SUBPARSERS['mount'].parse_args(commands)
         commands.clear()
         # Initialize mpy-cross if requested
         mpy_cross = None
@@ -1127,7 +1088,7 @@ class MpyTool():
                 color='cyan')
 
     def _dispatch_ln(self, commands, is_last_group):
-        args = _SUBPARSERS['ln'].parse_args(list(commands))
+        args = _SUBPARSERS['ln'].parse_args(commands)
         commands.clear()
         if len(args.paths) < 2:
             raise ParamsError('ln requires source(s) and destination')
@@ -1182,8 +1143,7 @@ class MpyTool():
                 color='green')
 
     def _dispatch_speedtest(self, commands, is_last_group):
-        flags = self._collect_flags(commands)
-        _SUBPARSERS['speedtest'].parse_args(flags)
+        _, commands[:] = _SUBPARSERS['speedtest'].parse_known_args(commands)
         from mpytool.speedtest import speedtest
         self.verbose("SPEEDTEST", 1)
         speedtest(self.mpy.comm, self._log)
