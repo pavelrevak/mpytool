@@ -644,10 +644,20 @@ class TestSkipUnchangedFiles(unittest.TestCase):
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
+        from mpytool.cmd_cp import CopyCommand
+        from mpytool.logger import SimpleColorLogger
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn, force=False)
-        cls.tool_force = MpyTool(cls.conn, force=True)
+        cls.log = SimpleColorLogger()
+        # Create CopyCommand instances for testing
+        cls.copy_cmd = CopyCommand(
+            cls.mpy, cls.log,
+            lambda *a, **kw: None, lambda: False, lambda: 1)
+        cls.copy_cmd_force = CopyCommand(
+            cls.mpy, cls.log,
+            lambda *a, **kw: None, lambda: False, lambda: 1)
+        cls.copy_cmd_force._force = True
         # Setup test directory
         cls.mpy.mkdir(cls.TEST_DIR)
 
@@ -671,14 +681,14 @@ class TestSkipUnchangedFiles(unittest.TestCase):
     def test_02_file_needs_update_same(self):
         """Test _file_needs_update returns False for identical file"""
         self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
-        needs_update = self.tool._file_needs_update(self.TEST_CONTENT, self.TEST_FILE)
+        needs_update = self.copy_cmd._file_needs_update(self.TEST_CONTENT, self.TEST_FILE)
         self.assertFalse(needs_update)
 
     def test_03_file_needs_update_different_size(self):
         """Test _file_needs_update returns True for different size"""
         self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
         different_content = b"different"
-        needs_update = self.tool._file_needs_update(different_content, self.TEST_FILE)
+        needs_update = self.copy_cmd._file_needs_update(different_content, self.TEST_FILE)
         self.assertTrue(needs_update)
 
     def test_04_file_needs_update_different_content(self):
@@ -686,19 +696,19 @@ class TestSkipUnchangedFiles(unittest.TestCase):
         self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
         # Same length, different content
         different_content = b"X" * len(self.TEST_CONTENT)
-        needs_update = self.tool._file_needs_update(different_content, self.TEST_FILE)
+        needs_update = self.copy_cmd._file_needs_update(different_content, self.TEST_FILE)
         self.assertTrue(needs_update)
 
     def test_05_file_needs_update_nonexistent(self):
         """Test _file_needs_update returns True for nonexistent file"""
-        needs_update = self.tool._file_needs_update(b"test", self.TEST_DIR + "/nonexistent.txt")
+        needs_update = self.copy_cmd._file_needs_update(b"test", self.TEST_DIR + "/nonexistent.txt")
         self.assertTrue(needs_update)
 
     def test_06_force_flag(self):
         """Test force flag bypasses check"""
         self.mpy.put(self.TEST_CONTENT, self.TEST_FILE)
         # With force=True, should always return True
-        needs_update = self.tool_force._file_needs_update(self.TEST_CONTENT, self.TEST_FILE)
+        needs_update = self.copy_cmd_force._file_needs_update(self.TEST_CONTENT, self.TEST_FILE)
         self.assertTrue(needs_update)
 
 
