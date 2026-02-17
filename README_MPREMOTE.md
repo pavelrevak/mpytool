@@ -36,7 +36,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | ROMFS manage | ✗ | ✓ `romfs` |
 | Edit remote file | ✗ | ✓ `edit :file` |
 | Flash read/write | ✓ `flash r/w/erase` | ✗ |
-| OTA update | ✓ `ota firmware.bin` | ✗ |
+| OTA update | ✓ `ota firmware.app-bin` | ✗ |
 | Print CWD | ✓ `pwd` | ✗ use `exec` |
 | Change CWD | ✓ `cd :path` | ✗ |
 | Manage sys.path | ✓ `path` | ✗ |
@@ -63,7 +63,6 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Compression | ✓ deflate | ✗ |
 | Chunk size | ✓ auto 512B-32KB | ✗ 256B fixed |
 | Compile .py to .mpy | ✓ `-m` | ✗ |
-| Copy contents only | ✓ trailing `/` | ✗ |
 | **Output** | | |
 | Progress bar | ✓ | ✓ |
 | Verbose output | ✓ `-v` | ✓ `-v` |
@@ -83,16 +82,6 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Raw REPL reset | ✓ `--raw` | ✗ |
 | Hardware reset (RTS) | ✓ `--rts` | ✗ |
 | DTR bootloader (ESP32) | ✓ `--dtr-boot` | ✗ |
-| **Mount VFS** | | |
-| Read-only mount | ✓ default | ✗ |
-| Read-write mount | ✓ `-w` | ✓ always |
-| Custom mount point | ✓ any path | ✗ `/remote` only |
-| Multiple mounts | ✓ | ✗ |
-| Virtual submounts | ✓ `ln` command | ✗ |
-| Transparent .mpy | ✓ `-m` | ✗ |
-| Soft reset remount | ✓ | ✓ |
-| CWD restore after reset | ✓ | ✗ |
-| Unsafe symlinks | ✗ | ✓ `-l` |
 | **Advanced** | | |
 | Flash operations | ✓ RP2, ESP32 | ✗ |
 | OTA firmware update | ✓ ESP32 | ✗ |
@@ -137,6 +126,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Virtual submounts | ✓ `ln` cmd | ✗ |
 | Transparent .mpy | ✓ `-m` | ✗ |
 | Soft reset remount | ✓ | ✓ |
+| CWD restore after remount | ✓ | ✓ |
 | Path protection | ✓ realpath | ✓ realpath |
 | Unsafe symlinks | ✗ | ✓ `--unsafe-links` |
 | VFS RENAME | ✓ | ✓ |
