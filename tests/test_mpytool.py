@@ -1050,6 +1050,311 @@ class TestTreeCommand(unittest.TestCase):
             self.tool.process_commands(['tree', '/lib'])
 
 
+@patch('sys.stdout', new_callable=io.StringIO)
+class TestPathsCommand(unittest.TestCase):
+    """Tests for _paths helper command (shell completion)"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None, force=True)
+        self.tool._mpy = Mock()
+        self.tool._log = Mock()
+
+    def test_paths_cwd_default(self, mock_stdout):
+        """'_paths' without args -> list CWD"""
+        self.tool._mpy.ls.return_value = [('file.py', 100)]
+        self.tool.process_commands(['_paths'])
+        self.tool._mpy.ls.assert_called_with('')
+
+    def test_paths_cwd(self, mock_stdout):
+        """'_paths :' -> list CWD"""
+        self.tool._mpy.ls.return_value = [('file.py', 100)]
+        self.tool.process_commands(['_paths', ':'])
+        self.tool._mpy.ls.assert_called_with('')
+
+    def test_paths_root(self, mock_stdout):
+        """'_paths :/' -> list root"""
+        self.tool._mpy.ls.return_value = [('boot.py', 100)]
+        self.tool.process_commands(['_paths', ':/'])
+        self.tool._mpy.ls.assert_called_with('/')
+
+    def test_paths_absolute(self, mock_stdout):
+        """'_paths :/lib' -> list /lib"""
+        self.tool._mpy.ls.return_value = [('module.py', 100)]
+        self.tool.process_commands(['_paths', ':/lib'])
+        self.tool._mpy.ls.assert_called_with('/lib')
+
+    def test_paths_relative(self, mock_stdout):
+        """'_paths :lib' -> list lib (relative to CWD)"""
+        self.tool._mpy.ls.return_value = [('module.py', 100)]
+        self.tool.process_commands(['_paths', ':lib'])
+        self.tool._mpy.ls.assert_called_with('lib')
+
+    def test_paths_output_files(self, mock_stdout):
+        """Files are printed without trailing slash"""
+        self.tool._mpy.ls.return_value = [('a.py', 100), ('b.txt', 50)]
+        self.tool.process_commands(['_paths', ':'])
+        output = mock_stdout.getvalue()
+        self.assertIn('a.py\n', output)
+        self.assertIn('b.txt\n', output)
+        self.assertNotIn('a.py/', output)
+
+    def test_paths_output_dirs(self, mock_stdout):
+        """Directories are printed with trailing slash"""
+        self.tool._mpy.ls.return_value = [('lib', None), ('src', None)]
+        self.tool.process_commands(['_paths', ':'])
+        output = mock_stdout.getvalue()
+        self.assertIn('lib/\n', output)
+        self.assertIn('src/\n', output)
+
+    def test_paths_output_mixed(self, mock_stdout):
+        """Mixed files and directories"""
+        self.tool._mpy.ls.return_value = [
+            ('main.py', 100),
+            ('lib', None),
+            ('boot.py', 50),
+            ('drivers', None),
+        ]
+        self.tool.process_commands(['_paths', ':'])
+        output = mock_stdout.getvalue()
+        self.assertEqual(output, 'main.py\nlib/\nboot.py\ndrivers/\n')
+
+    def test_paths_nonexistent_silent(self, mock_stdout):
+        """Non-existent path returns silently (no exception)"""
+        from mpytool import DirNotFound
+        self.tool._mpy.ls.side_effect = DirNotFound('/no/such/path')
+        # Should not raise - silently returns for shell completion
+        self.tool.process_commands(['_paths', ':/no/such/path'])
+        self.assertEqual(mock_stdout.getvalue(), '')
+
+    def test_paths_error_silent(self, mock_stdout):
+        """Other MpyError returns silently"""
+        from mpytool import MpyError
+        self.tool._mpy.ls.side_effect = MpyError('connection error')
+        # Should not raise - silently returns for shell completion
+        self.tool.process_commands(['_paths', ':'])
+        self.assertEqual(mock_stdout.getvalue(), '')
+
+    def test_paths_without_prefix_invalid(self, mock_stdout):
+        """'_paths /lib' -> INVALID (missing : prefix)"""
+        with self.assertRaises(ParamsError):
+            self.tool.process_commands(['_paths', '/lib'])
+
+
+@patch('sys.stdout', new_callable=io.StringIO)
+class TestPortsCommand(unittest.TestCase):
+    """Tests for _ports helper command (shell completion)"""
+
+    def setUp(self):
+        # _ports doesn't need a connection - use None
+        self.tool = MpyTool(conn=None, verbose=None)
+        self.tool._log = Mock()
+
+    @patch('mpytool.utils.detect_serial_ports')
+    def test_ports_lists_detected(self, mock_detect, mock_stdout):
+        """_ports lists all detected serial ports"""
+        mock_detect.return_value = ['/dev/cu.usbmodem1101', '/dev/cu.usbmodem1103']
+        self.tool.process_commands(['_ports'])
+        output = mock_stdout.getvalue()
+        self.assertEqual(output, '/dev/cu.usbmodem1101\n/dev/cu.usbmodem1103\n')
+
+    @patch('mpytool.utils.detect_serial_ports')
+    def test_ports_empty(self, mock_detect, mock_stdout):
+        """_ports with no ports available"""
+        mock_detect.return_value = []
+        self.tool.process_commands(['_ports'])
+        self.assertEqual(mock_stdout.getvalue(), '')
+
+    @patch('mpytool.utils.detect_serial_ports')
+    def test_ports_single(self, mock_detect, mock_stdout):
+        """_ports with single port"""
+        mock_detect.return_value = ['/dev/ttyACM0']
+        self.tool.process_commands(['_ports'])
+        self.assertEqual(mock_stdout.getvalue(), '/dev/ttyACM0\n')
+
+    @patch('mpytool.utils.detect_serial_ports')
+    def test_ports_no_connection_needed(self, mock_detect, mock_stdout):
+        """_ports works without device connection"""
+        mock_detect.return_value = ['/dev/cu.usbmodem1101']
+        # Create tool without any connection
+        tool = MpyTool(conn=None, verbose=None)
+        tool._log = Mock()
+        # Should work without accessing mpy/conn
+        tool.process_commands(['_ports'])
+        self.assertEqual(mock_stdout.getvalue(), '/dev/cu.usbmodem1101\n')
+
+
+@patch('sys.stdout', new_callable=io.StringIO)
+class TestCommandsCommand(unittest.TestCase):
+    """Tests for _commands helper command (shell completion)"""
+
+    def setUp(self):
+        # _commands doesn't need a connection - use None
+        self.tool = MpyTool(conn=None, verbose=None)
+        self.tool._log = Mock()
+
+    def test_commands_lists_all(self, mock_stdout):
+        """_commands lists all public commands"""
+        self.tool.process_commands(['_commands'])
+        output = mock_stdout.getvalue()
+        # Check format is name:description
+        self.assertIn('ls:', output)
+        self.assertIn('cp:', output)
+        self.assertIn('reset:', output)
+        self.assertIn('mount:', output)
+
+    def test_commands_format(self, mock_stdout):
+        """_commands output is name:description format"""
+        self.tool.process_commands(['_commands'])
+        lines = mock_stdout.getvalue().strip().split('\n')
+        for line in lines:
+            self.assertIn(':', line)
+            name, desc = line.split(':', 1)
+            self.assertTrue(len(name) > 0)
+            self.assertTrue(len(desc) > 0)
+
+    def test_commands_no_hidden(self, mock_stdout):
+        """_commands does not list hidden commands"""
+        self.tool.process_commands(['_commands'])
+        output = mock_stdout.getvalue()
+        # Hidden commands start with _
+        self.assertNotIn('_paths:', output)
+        self.assertNotIn('_ports:', output)
+        self.assertNotIn('_commands:', output)
+
+    def test_commands_no_connection_needed(self, mock_stdout):
+        """_commands works without device connection"""
+        tool = MpyTool(conn=None, verbose=None)
+        tool._log = Mock()
+        # Should work without accessing mpy/conn
+        tool.process_commands(['_commands'])
+        self.assertIn('ls:', mock_stdout.getvalue())
+
+
+@patch('sys.stdout', new_callable=io.StringIO)
+class TestOptionsCommand(unittest.TestCase):
+    """Tests for _options helper command (shell completion)"""
+
+    def setUp(self):
+        self.tool = MpyTool(conn=None, verbose=None)
+        self.tool._log = Mock()
+
+    def test_options_reset(self, mock_stdout):
+        """_options reset lists reset options"""
+        self.tool.process_commands(['_options', 'reset'])
+        output = mock_stdout.getvalue()
+        self.assertIn('--machine:', output)
+        self.assertIn('--rts:', output)
+        self.assertIn('--boot:', output)
+
+    def test_options_mount(self, mock_stdout):
+        """_options mount lists mount options"""
+        self.tool.process_commands(['_options', 'mount'])
+        output = mock_stdout.getvalue()
+        self.assertIn('--mpy:', output)
+        self.assertIn('--writable:', output)
+
+    def test_options_cp(self, mock_stdout):
+        """_options cp lists cp options"""
+        self.tool.process_commands(['_options', 'cp'])
+        output = mock_stdout.getvalue()
+        self.assertIn('--force:', output)
+        self.assertIn('--mpy:', output)
+        self.assertIn('--compress:', output)
+
+    def test_options_no_help(self, mock_stdout):
+        """_options does not include --help"""
+        self.tool.process_commands(['_options', 'reset'])
+        self.assertNotIn('--help:', mock_stdout.getvalue())
+
+    def test_options_unknown_command(self, mock_stdout):
+        """_options with unknown command returns empty"""
+        self.tool.process_commands(['_options', 'unknown'])
+        self.assertEqual(mock_stdout.getvalue(), '')
+
+    def test_options_global(self, mock_stdout):
+        """_options without command returns global options"""
+        self.tool.process_commands(['_options'])
+        output = mock_stdout.getvalue()
+        self.assertIn('--port:', output)
+        self.assertIn('--verbose:', output)
+        self.assertIn('--force:', output)
+        self.assertNotIn('--help:', output)
+        self.assertNotIn('--version:', output)
+
+    def test_options_format(self, mock_stdout):
+        """_options output is option:description:argtype format"""
+        self.tool.process_commands(['_options', 'reset'])
+        lines = mock_stdout.getvalue().strip().split('\n')
+        for line in lines:
+            parts = line.split(':')
+            self.assertTrue(len(parts) >= 2)  # At least option:description
+            self.assertTrue(parts[0].startswith('--'))
+
+    def test_options_argtype_flag(self, mock_stdout):
+        """_options shows empty argtype for flags"""
+        self.tool.process_commands(['_options'])
+        output = mock_stdout.getvalue()
+        # --verbose is a flag (store_true), should have empty argtype
+        self.assertIn('--verbose:verbose output:', output)
+
+    def test_options_argtype_value(self, mock_stdout):
+        """_options shows argtype for options with values"""
+        self.tool.process_commands(['_options'])
+        output = mock_stdout.getvalue()
+        # --port takes a value, should have 'port' argtype
+        self.assertIn('--port:serial port:port', output)
+        # --baud takes a value
+        self.assertIn('--baud:baud rate:baud', output)
+
+
+@patch('sys.stdout', new_callable=io.StringIO)
+class TestArgsCommand(unittest.TestCase):
+    """Tests for _args helper command (shell completion)"""
+
+    def setUp(self):
+        self.tool = MpyTool(conn=None, verbose=None)
+        self.tool._log = Mock()
+
+    def test_args_ls(self, mock_stdout):
+        """_args ls shows optional remote argument"""
+        self.tool.process_commands(['_args', 'ls'])
+        output = mock_stdout.getvalue()
+        self.assertIn('remote:?:', output)
+
+    def test_args_cat(self, mock_stdout):
+        """_args cat shows one-or-more remote arguments"""
+        self.tool.process_commands(['_args', 'cat'])
+        output = mock_stdout.getvalue()
+        self.assertIn('remote:+:', output)
+
+    def test_args_run(self, mock_stdout):
+        """_args run shows exactly-one local_file argument"""
+        self.tool.process_commands(['_args', 'run'])
+        output = mock_stdout.getvalue()
+        self.assertIn('local_file:1:', output)
+
+    def test_args_cp(self, mock_stdout):
+        """_args cp shows zero-or-more local_or_remote arguments"""
+        self.tool.process_commands(['_args', 'cp'])
+        output = mock_stdout.getvalue()
+        self.assertIn('local_or_remote:*:', output)
+
+    def test_args_unknown_command(self, mock_stdout):
+        """_args with unknown command returns empty"""
+        self.tool.process_commands(['_args', 'unknown'])
+        self.assertEqual(mock_stdout.getvalue(), '')
+
+    def test_args_format(self, mock_stdout):
+        """_args output is type:nargs:description format"""
+        self.tool.process_commands(['_args', 'ls'])
+        lines = mock_stdout.getvalue().strip().split('\n')
+        for line in lines:
+            parts = line.split(':', 2)  # Split into max 3 parts
+            self.assertEqual(len(parts), 3)
+            self.assertIn(parts[1], ['1', '?', '+', '*'])
+
+
 class TestRunCommand(unittest.TestCase):
     """Tests for run command"""
 
@@ -1071,7 +1376,7 @@ class TestRunCommand(unittest.TestCase):
         """'run' without file -> ParamsError"""
         with self.assertRaises(ParamsError) as ctx:
             self.tool.process_commands(['run'])
-        self.assertIn('missing', str(ctx.exception).lower())
+        self.assertIn('file', str(ctx.exception).lower())
 
     def test_run_file_not_found(self):
         """'run nonexistent.py' -> ParamsError"""
@@ -1440,7 +1745,7 @@ class TestPathCommand(unittest.TestCase):
         commands = ['-x', ':/lib']
         with self.assertRaises(ParamsError) as ctx:
             self.tool._dispatch_path(commands, False)
-        self.assertIn('unknown', str(ctx.exception).lower())
+        self.assertIn('-x', str(ctx.exception))
 
 
 if __name__ == "__main__":

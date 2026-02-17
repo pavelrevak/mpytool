@@ -7,26 +7,55 @@ _MPYTOOL_CACHE_TIME="/tmp/mpytool_completion_cache_time"
 _MPYTOOL_CACHE_PORT="/tmp/mpytool_completion_cache_port"
 _MPYTOOL_CACHE_DIR="/tmp/mpytool_completion_cache_dir"
 
-_mpytool_commands="ls tree cat cp mv mkdir rm pwd cd path stop monitor repl exec run reset info flash ota mount ln sleep speedtest"
+_mpytool_get_commands() {
+    # Get commands dynamically from mpytool (extract name before :)
+    mpytool _commands 2>/dev/null | cut -d: -f1 | tr '\n' ' '
+}
 
-_mpytool_detect_ports() {
-    # Detect serial ports based on platform (same logic as mpytool)
-    local -a ports=()
-    case "$(uname)" in
-        Darwin)
-            # macOS: use cu.* (call-up) instead of tty.*
-            for p in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/cu.usb*; do
-                [[ -e "$p" ]] && ports+=("$p")
-            done
+_mpytool_get_options() {
+    # Get options for a command dynamically (extract option before :)
+    # $1 = command name (empty = global options)
+    mpytool _options "$1" 2>/dev/null | cut -d: -f1 | tr '\n' ' '
+}
+
+_mpytool_get_args() {
+    # Get argument info for a command: type:nargs:description
+    # $1 = command name
+    mpytool _args "$1" 2>/dev/null
+}
+
+_mpytool_complete_argtype() {
+    # Complete based on argument type
+    # $1 = argtype, $2 = current word
+    local argtype="$1" cur="$2"
+    case "$argtype" in
+        port)
+            COMPREPLY=($(compgen -W "$(_mpytool_detect_ports)" -- "$cur"))
             ;;
-        Linux)
-            for p in /dev/ttyACM* /dev/ttyUSB*; do
-                [[ -e "$p" ]] && ports+=("$p")
-            done
+        baud)
+            COMPREPLY=($(compgen -W "9600 19200 38400 57600 115200 230400 460800 921600" -- "$cur"))
+            ;;
+        path|paths|exclude)
+            # Local files/directories
+            COMPREPLY=($(compgen -f -- "$cur"))
+            ;;
+        file)
+            # Local files only
+            COMPREPLY=($(compgen -f -- "$cur"))
+            ;;
+        dir)
+            # Local directories only
+            COMPREPLY=($(compgen -d -- "$cur"))
+            ;;
+        address|code|seconds|size|timeout|*)
+            # No completion for these types
             ;;
     esac
-    # Print sorted unique ports
-    printf '%s\n' "${ports[@]}" | sort -u
+}
+
+_mpytool_detect_ports() {
+    # Use mpytool _ports for consistent detection across all platforms
+    mpytool _ports 2>/dev/null
 }
 
 _mpytool_get_port() {
@@ -120,7 +149,7 @@ _mpytool() {
 
     # Handle options
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-V --version -p --port -a --address -b --baud -d --debug -v --verbose -q --quiet -f --force -e --exclude-dir" -- "$cur"))
+        COMPREPLY=($(compgen -W "-V --version $(_mpytool_get_options)" -- "$cur"))
         return
     fi
 
@@ -145,7 +174,7 @@ _mpytool() {
 
     # At command position
     if [[ $COMP_CWORD -eq $cmd_start ]]; then
-        COMPREPLY=($(compgen -W "$_mpytool_commands" -- "$cur"))
+        COMPREPLY=($(compgen -W "$(_mpytool_get_commands)" -- "$cur"))
         return
     fi
 
@@ -205,17 +234,7 @@ _mpytool() {
             ;;
         path)
             # path [-f|-a|-d] [paths...]
-            # Check if flags already present
-            local has_flag=0
-            for w in "${COMP_WORDS[@]:cmd_start+1}"; do
-                case "$w" in
-                    -f|--first|-a|--append|-d|--delete) has_flag=1 ;;
-                esac
-            done
-            # Offer flags first
-            if [[ $has_flag -eq 0 && ( "$cur" == -* || -z "$cur" ) ]]; then
-                COMPREPLY=($(compgen -W "-f --first -a --append -d --delete" -- "$cur"))
-            fi
+            COMPREPLY=($(compgen -W "$(_mpytool_get_options path)" -- "$cur"))
             # Remote paths (: prefix)
             if [[ "$cur" == :* ]]; then
                 _mpytool_complete_remote "$cur"
@@ -266,17 +285,7 @@ _mpytool() {
             ;;
         reset)
             # Reset flags or --
-            local has_mode=0
-            for w in "${COMP_WORDS[@]:cmd_start+1}"; do
-                case "$w" in
-                    --machine|--rts|--raw|--boot|--dtr-boot) has_mode=1 ;;
-                esac
-            done
-            if [[ $has_mode -eq 0 ]]; then
-                COMPREPLY=($(compgen -W "--machine --rts --raw --boot --dtr-boot -t --" -- "$cur"))
-            else
-                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
-            fi
+            COMPREPLY=($(compgen -W "$(_mpytool_get_options reset) --" -- "$cur"))
             ;;
         stop|info)
             # No arguments, -- immediately
@@ -317,19 +326,7 @@ _mpytool() {
             ;;
         mount)
             # mount [-m] [-w] local_dir [:mount_point], -- for chaining
-            # Check if flags already present
-            local has_m=0 has_w=0
-            for w in "${COMP_WORDS[@]:cmd_start+1}"; do
-                [[ "$w" == "-m" || "$w" == "--mpy" ]] && has_m=1
-                [[ "$w" == "-w" || "$w" == "--writable" || "$w" == "--write" ]] && has_w=1
-            done
-            # Offer flags first
-            if [[ "$cur" == -* || -z "$cur" ]]; then
-                local flags=""
-                [[ $has_m -eq 0 ]] && flags="$flags -m --mpy"
-                [[ $has_w -eq 0 ]] && flags="$flags -w --writable"
-                [[ -n "$flags" ]] && COMPREPLY=($(compgen -W "$flags" -- "$cur"))
-            fi
+            COMPREPLY=($(compgen -W "$(_mpytool_get_options mount)" -- "$cur"))
             # Local dir and mount point
             if [[ "$cur" == :* ]]; then
                 COMPREPLY+=($(compgen -W ":" -- "$cur"))
@@ -365,10 +362,10 @@ _mpytool() {
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             ;;
         --)
-            COMPREPLY=($(compgen -W "$_mpytool_commands" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(_mpytool_get_commands)" -- "$cur"))
             ;;
         *)
-            COMPREPLY=($(compgen -W "$_mpytool_commands" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(_mpytool_get_commands)" -- "$cur"))
             ;;
     esac
 }

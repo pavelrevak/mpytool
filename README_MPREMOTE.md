@@ -38,8 +38,8 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Flash read/write | ✓ `flash r/w/erase` | ✗ |
 | OTA update | ✓ `ota firmware.app-bin` | ✗ |
 | Print CWD | ✓ `pwd` | ✗ use `exec` |
-| Change CWD | ✓ `cd :path` | ✗ |
-| Manage sys.path | ✓ `path` | ✗ |
+| Change CWD | ✓ `cd :path` | ✗ use `exec` |
+| Manage sys.path | ✓ `path` | ✗ use `exec` |
 | Sleep | ✓ `sleep 2` (sec) | ✓ `sleep 2000` (ms) |
 | Connect device | ✓ auto / `-p` | ✓ `connect dev` |
 | Disconnect | ✗ | ✓ `disconnect` |

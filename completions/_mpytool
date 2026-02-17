@@ -8,52 +8,23 @@ typeset -gA _mpytool_cache
 typeset -gA _mpytool_cache_time
 
 _mpytool_commands() {
-    local -a commands=(
-        'ls:list files on device'
-        'tree:show directory tree'
-        'cat:print file content (: prefix for device path)'
-        'cp:copy files (: prefix for device paths)'
-        'mv:move/rename files on device (: prefix)'
-        'mkdir:create directory (: prefix for device path)'
-        'rm:delete files/directories (: prefix for device path)'
-        'pwd:print current working directory'
-        'cd:change current working directory (: prefix)'
-        'path:manage sys.path (-f prepend, -a append, -d delete)'
-        'stop:stop running program (Ctrl-C)'
-        'monitor:monitor device output (Ctrl+C to exit)'
-        'repl:interactive REPL session'
-        'exec:execute Python code on device'
-        'run:run local Python file on device'
-        'reset:reset device (soft/machine/rts/raw/boot/dtr-boot)'
-        'info:show device information'
-        'flash:flash/partition operations (list, read, write, erase)'
-        'ota:OTA firmware update (ESP32)'
-        'mount:mount local directory on device (readonly)'
-        'ln:link local file/dir into mounted VFS'
-        'sleep:sleep for specified seconds'
-        'speedtest:serial link speed test'
-    )
+    # Get commands dynamically from mpytool
+    local -a commands
+    commands=(${(f)"$(mpytool _commands 2>/dev/null)"})
     _describe -t commands 'mpytool command' commands
 }
 
+_mpytool_options() {
+    # Get options for a command dynamically from mpytool
+    # $1 = command name
+    local -a options
+    options=(${(f)"$(mpytool _options "$1" 2>/dev/null)"})
+    [[ ${#options[@]} -gt 0 ]] && _describe -t options "$1 option" options
+}
+
 _mpytool_detect_ports() {
-    # Detect serial ports based on platform (same logic as mpytool)
-    local -a ports=()
-    case "$(uname)" in
-        Darwin)
-            # macOS: use cu.* (call-up) instead of tty.*
-            for p in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/cu.usb*; do
-                [[ -e "$p" ]] && ports+=("$p")
-            done
-            ;;
-        Linux)
-            for p in /dev/ttyACM* /dev/ttyUSB*; do
-                [[ -e "$p" ]] && ports+=("$p")
-            done
-            ;;
-    esac
-    # Remove duplicates and sort
-    echo "${(u)ports[@]}" | tr ' ' '\n' | sort -u
+    # Use mpytool _ports for consistent detection across all platforms
+    mpytool _ports 2>/dev/null
 }
 
 _mpytool_ports() {
@@ -252,25 +223,7 @@ _mpytool() {
                     ;;
                 path)
                     # path [-f|-a|-d] [paths...]
-                    # Check if flags already present
-                    local has_flag=0
-                    for w in "${words[cmd_start+1,-1]}"; do
-                        case "$w" in
-                            -f|--first|-a|--append|-d|--delete) has_flag=1 ;;
-                        esac
-                    done
-                    # Offer flags first
-                    if [[ $has_flag -eq 0 ]]; then
-                        local -a path_flags=(
-                            '-f:prepend to sys.path (remove duplicates)'
-                            '--first:prepend to sys.path (remove duplicates)'
-                            '-a:append to sys.path (remove duplicates)'
-                            '--append:append to sys.path (remove duplicates)'
-                            '-d:delete from sys.path'
-                            '--delete:delete from sys.path'
-                        )
-                        _describe -t flags 'path flag' path_flags
-                    fi
+                    _mpytool_options path
                     # Remote paths (: prefix)
                     if [[ "$words[CURRENT]" == :* ]]; then
                         _mpytool_complete_remote
@@ -321,23 +274,7 @@ _mpytool() {
                     ;;
                 reset)
                     # Reset flags or --
-                    local -a reset_flags=(
-                        '--machine:machine.reset() with reconnect'
-                        '--rts:hardware reset via DTR/RTS signal'
-                        '--raw:soft reset in raw REPL'
-                        '--boot:enter bootloader (machine.bootloader)'
-                        '--dtr-boot:bootloader via DTR/RTS (ESP32)'
-                        '-t:reconnect timeout in seconds'
-                    )
-                    local has_mode=0
-                    for w in "${words[cmd_start+1,-1]}"; do
-                        case "$w" in
-                            --machine|--rts|--raw|--boot|--dtr-boot) has_mode=1 ;;
-                        esac
-                    done
-                    if [[ $has_mode -eq 0 ]]; then
-                        _describe -t flags 'reset flag' reset_flags
-                    fi
+                    _mpytool_options reset
                     compadd -- '--'
                     ;;
                 stop|info)
@@ -390,33 +327,14 @@ _mpytool() {
                     ;;
                 mount)
                     # -m and -w flags + 1 local dir + optional :mount_point, -- for chaining
-                    # Check if flags already present
-                    local has_m=0 has_w=0
-                    for w in "${words[cmd_start+1,-1]}"; do
-                        [[ "$w" == "-m" || "$w" == "--mpy" ]] && has_m=1
-                        [[ "$w" == "-w" || "$w" == "--writable" || "$w" == "--write" ]] && has_w=1
-                    done
-                    # Offer flags first
-                    if [[ "$words[CURRENT]" != :* ]]; then
-                        local -a mount_flags=()
-                        [[ $has_m -eq 0 ]] && mount_flags+=(
-                            '-m:compile .py to .mpy on-demand'
-                            '--mpy:compile .py to .mpy on-demand'
-                        )
-                        [[ $has_w -eq 0 ]] && mount_flags+=(
-                            '-w:mount as read-write'
-                            '--writable:mount as read-write'
-                        )
-                        [[ ${#mount_flags} -gt 0 ]] && _describe -t flags 'mount flag' mount_flags
-                    fi
+                    _mpytool_options mount
                     # Then local dir and mount point
                     if [[ "$words[CURRENT]" == :* ]]; then
                         compadd -S '' ':'
-                        compadd -- '--'
                     else
                         _files -/
-                        compadd -- '--'
                     fi
+                    compadd -- '--'
                     ;;
                 ln)
                     # n local sources + 1 remote dest (: prefix, absolute path)
