@@ -29,7 +29,7 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 - **Shell completion** - ZSH and Bash with remote path completion
 - **Network support** - connect over TCP
 
-See [README_MPREMOTE.md](README_MPREMOTE.md) for detailed comparison with mpremote.
+See [README_mpremote.md](README_mpremote.md) for detailed comparison with mpremote.
 
 ## Installation
 
@@ -293,7 +293,7 @@ instead — it's optimized for throughput.
 root. Symlinks are followed and checked. Write operations require
 explicit `-w` flag.
 
-See [Mount VFS Comparison](README_MPREMOTE.md#mount-vfs-comparison) for detailed comparison with mpremote.
+See [Mount VFS Comparison](README_mpremote.md#mount-vfs-comparison) for detailed comparison with mpremote.
 
 ### Link files into mounted VFS
 ```
