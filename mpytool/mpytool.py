@@ -83,198 +83,77 @@ class _CmdParser(_argparse.ArgumentParser):
         raise ParamsError(f'{self.prog}: {message}')
 
 
-def _build_subparsers():
-    # cp: copy files
-    cp = _CmdParser(
-        prog='cp',
-        description='Copy files between local and device.')
-    cp.add_argument('-f', '--force', action='store_true',
-        help='overwrite without checking')
-    cp.add_argument('-m', '--mpy', action='store_true',
-        help='compile .py to .mpy')
-    cp.add_argument('-z', '--compress', action='store_true',
-        help='force compression')
-    cp.add_argument(
-        '-Z', '--no-compress', dest='no_compress', action='store_true',
-        help='disable compression')
-    cp.add_argument(
-        'paths', nargs='*', metavar='local_or_remote',
-        help='source(s) and dest (: prefix for device)')
-
-    # reset: device reset
-    reset = _CmdParser(
-        prog='reset',
-        description='Reset the device. Default: soft reset (Ctrl-D).')
-    reset_mode = reset.add_mutually_exclusive_group()
-    reset_mode.add_argument('--machine', action='store_const', const='machine',
-        dest='mode', help='machine.reset() with reconnect')
-    reset_mode.add_argument('--rts', action='store_const', const='rts',
-        dest='mode', help='hardware reset via DTR/RTS')
-    reset_mode.add_argument('--raw', action='store_const', const='raw',
-        dest='mode', help='soft reset in raw REPL')
-    reset_mode.add_argument('--boot', action='store_const', const='boot',
-        dest='mode', help='enter bootloader')
-    reset_mode.add_argument(
-        '--dtr-boot', action='store_const', const='dtr-boot',
-        dest='mode', help='bootloader via DTR/RTS (ESP32)')
-    reset.add_argument('-t', '--timeout', type=int,
-        help='reconnect timeout in seconds')
-
-    # mount: mount local directory
-    mount = _CmdParser(
-        prog='mount',
-        description='Mount local dir as VFS. Without args, list mounts.')
-    mount.add_argument('-m', '--mpy', action='store_true',
-        help='compile .py to .mpy on-the-fly')
-    mount.add_argument('-w', '--writable', '--write', action='store_true',
-        help='mount as writable')
-    mount.add_argument(
-        'paths', nargs='*', metavar='local_and_remote',
-        help='local_dir [:mount_point] (default: /remote)')
-
-    # path: manage sys.path
-    path = _CmdParser(
-        prog='path',
-        description='Manage sys.path. Without args, show current path.')
-    path_mode = path.add_mutually_exclusive_group()
-    path_mode.add_argument(
-        '-f', '--first', action='store_const', const='first',
-        dest='mode', help='prepend to sys.path')
-    path_mode.add_argument(
-        '-a', '--append', action='store_const', const='append',
-        dest='mode', help='append to sys.path')
-    path_mode.add_argument(
-        '-d', '--delete', action='store_const', const='delete',
-        dest='mode', help='delete from sys.path')
-    path.add_argument('paths', nargs='*', metavar='remote',
-        help='paths to add/remove (: prefix required)')
-
-    # ls: list files
-    ls = _CmdParser(prog='ls',
-        description='List files and directories on device.')
-    ls.add_argument('path', nargs='?', default=':', metavar='remote',
-        help='device path (default: CWD)')
-
-    # tree: directory tree
-    tree = _CmdParser(prog='tree',
-        description='Show directory tree on device.')
-    tree.add_argument('path', nargs='?', default=':', metavar='remote',
-        help='device path (default: CWD)')
-
-    # cat: print file content
-    cat = _CmdParser(prog='cat',
-        description='Print file content from device to stdout.')
-    cat.add_argument('paths', nargs='+', metavar='remote',
-        help='device path(s) to print')
-
-    # mkdir: create directory
-    mkdir = _CmdParser(
-        prog='mkdir',
-        description='Create directory (with parents if needed).')
-    mkdir.add_argument('paths', nargs='+', metavar='remote',
-        help='device path(s) to create')
-
-    # rm: delete files/directories
-    rm = _CmdParser(
-        prog='rm',
-        description='Delete files/dirs. Use :path/ for contents only.')
-    rm.add_argument('paths', nargs='+', metavar='remote',
-        help='device path(s) to delete')
-
-    # cd: change directory
-    cd = _CmdParser(prog='cd',
-        description='Change current working directory on device.')
-    cd.add_argument('path', metavar='remote', help='device path')
-
-    # mv: move/rename files
-    mv = _CmdParser(prog='mv',
-        description='Move or rename files on device.')
-    mv.add_argument('paths', nargs='+', metavar='remote',
-        help='source(s) and destination (all with : prefix)')
-
-    # ln: link into mounted VFS
-    ln = _CmdParser(prog='ln',
-        description='Link local file/directory into mounted VFS.')
-    ln.add_argument('paths', nargs='+', metavar='local_and_remote',
-        help='local source(s) and device destination')
-
-    # exec: execute code
-    exec_cmd = _CmdParser(prog='exec',
-        description='Execute Python code on device.')
-    exec_cmd.add_argument('code', help='Python code to execute')
-
-    # run: run local file
-    run = _CmdParser(prog='run',
-        description='Run local Python file on device.')
-    run.add_argument('file', metavar='local_file', help='local .py file')
-
-    # sleep: pause
-    sleep = _CmdParser(prog='sleep',
-        description='Pause for specified number of seconds.')
-    sleep.add_argument('seconds', type=float, help='seconds to sleep')
-
-    # ota: OTA update
-    ota = _CmdParser(prog='ota',
-        description='Perform OTA firmware update (ESP32).')
-    ota.add_argument('firmware', help='firmware .app-bin file')
-
-    # flash: flash operations (with subcommands)
-    flash = _CmdParser(
-        prog='flash',
-        description='Flash/partition ops. Without args, show info.')
-    flash_sub = flash.add_subparsers(dest='operation')
-    # flash read [label] file
-    flash_read = flash_sub.add_parser('read', help='read to file')
-    flash_read.add_argument(
-        'args', nargs='+', metavar='[label] file',
-        help='destination file, optionally with partition label')
-    # flash write [label] file
-    flash_write = flash_sub.add_parser('write', help='write from file')
-    flash_write.add_argument(
-        'args', nargs='+', metavar='[label] file',
-        help='source file, optionally with partition label')
-    # flash erase [label] [--full]
-    flash_erase = flash_sub.add_parser('erase', help='erase flash')
-    flash_erase.add_argument(
-        'label', nargs='?', help='partition label (ESP32)')
-    flash_erase.add_argument(
-        '--full', action='store_true', help='full erase (slow)')
-
-    return {
-        'cp': cp,
-        'reset': reset,
-        'mount': mount,
-        'path': path,
-        'ls': ls,
-        'tree': tree,
-        'cat': cat,
-        'mkdir': mkdir,
-        'rm': rm,
-        'cd': cd,
-        'mv': mv,
-        'ln': ln,
-        'exec': exec_cmd,
-        'run': run,
-        'sleep': sleep,
-        'ota': ota,
-        'flash': flash,
-        'pwd': _CmdParser(prog='pwd',
-            description='Print current working directory on device.'),
-        'info': _CmdParser(
-            prog='info',
-            description='Show device info (platform, memory, filesystem).'),
-        'stop': _CmdParser(prog='stop',
-            description='Stop running program on device (send Ctrl-C).'),
-        'repl': _CmdParser(prog='repl',
-            description='Interactive REPL session. Press Ctrl-] to exit.'),
-        'monitor': _CmdParser(prog='monitor',
-            description='Monitor device output. Press Ctrl-C to stop.'),
-        'speedtest': _CmdParser(prog='speedtest',
-            description='Test serial link speed.'),
-    }
+# Command decorators (Click-style, no external dependencies)
+def command(name, description=None):
+    """Decorator to mark a method as a CLI command."""
+    def decorator(func):
+        func._cmd_name = name
+        func._cmd_description = description
+        if not hasattr(func, '_cmd_args'):
+            func._cmd_args = []
+        if not hasattr(func, '_cmd_options'):
+            func._cmd_options = []
+        if not hasattr(func, '_cmd_groups'):
+            func._cmd_groups = []
+        return func
+    return decorator
 
 
-_SUBPARSERS = _build_subparsers()
+def argument(*args, **kwargs):
+    """Decorator to add positional argument to command."""
+    def decorator(func):
+        if not hasattr(func, '_cmd_args'):
+            func._cmd_args = []
+        # Prepend (decorators apply bottom-up, we want top-down order)
+        func._cmd_args.insert(0, (args, kwargs))
+        return func
+    return decorator
+
+
+def option(*args, **kwargs):
+    """Decorator to add option/flag to command."""
+    def decorator(func):
+        if not hasattr(func, '_cmd_options'):
+            func._cmd_options = []
+        func._cmd_options.insert(0, (args, kwargs))
+        return func
+    return decorator
+
+
+def mutually_exclusive(*options):
+    """Decorator to group options as mutually exclusive."""
+    def decorator(func):
+        if not hasattr(func, '_cmd_groups'):
+            func._cmd_groups = []
+        func._cmd_groups.insert(0, options)
+        return func
+    return decorator
+
+
+def _make_parser(method):
+    """Create ArgumentParser from method's decorator metadata."""
+    parser = _CmdParser(
+        prog=method._cmd_name,
+        description=method._cmd_description)
+    # Build set of options that belong to mutually exclusive groups
+    grouped_opts = set()
+    for group_opts in getattr(method, '_cmd_groups', []):
+        grouped_opts.update(group_opts)
+    # Add mutually exclusive groups
+    for group_opts in getattr(method, '_cmd_groups', []):
+        group = parser.add_mutually_exclusive_group()
+        for opt_args, opt_kwargs in getattr(method, '_cmd_options', []):
+            # Match by first option string (e.g., '--machine')
+            if opt_args and opt_args[0] in group_opts:
+                group.add_argument(*opt_args, **opt_kwargs)
+    # Add non-grouped options
+    for opt_args, opt_kwargs in getattr(method, '_cmd_options', []):
+        if not opt_args or opt_args[0] not in grouped_opts:
+            parser.add_argument(*opt_args, **opt_kwargs)
+    # Add positional arguments
+    for args, kwargs in getattr(method, '_cmd_args', []):
+        parser.add_argument(*args, **kwargs)
+    return parser
 
 
 class MpyTool():
@@ -436,7 +315,7 @@ class MpyTool():
         # Support both cmd_cp(['a', 'b']) and cmd_cp('a', 'b')
         if len(cmd_args) == 1 and isinstance(cmd_args[0], list):
             cmd_args = cmd_args[0]
-        args = _SUBPARSERS['cp'].parse_args(cmd_args)
+        args = _make_parser(self._dispatch_cp).parse_args(cmd_args)
         if len(args.paths) < 2:
             raise ParamsError('cp requires source and destination')
         # Determine compress setting
@@ -838,8 +717,11 @@ class MpyTool():
                 raise _mpytool.MpyError(
                     "DTR boot not available (serial only)")
 
+    @command('ls', 'List files and directories on device.')
+    @argument('path', nargs='?', default=':', metavar='remote',
+        help='device path (default: CWD)')
     def _dispatch_ls(self, commands, is_last_group):
-        args = _SUBPARSERS['ls'].parse_args(commands[:1])
+        args = _make_parser(self._dispatch_ls).parse_args(commands[:1])
         del commands[:1]
         dir_name = args.path
         # Strip trailing / except for root
@@ -853,8 +735,11 @@ class MpyTool():
             else:
                 print(f'{"":9} {name}/')
 
+    @command('tree', 'Show directory tree on device.')
+    @argument('path', nargs='?', default=':', metavar='remote',
+        help='device path (default: CWD)')
     def _dispatch_tree(self, commands, is_last_group):
-        args = _SUBPARSERS['tree'].parse_args(commands[:1])
+        args = _make_parser(self._dispatch_tree).parse_args(commands[:1])
         del commands[:1]
         dir_name = args.path
         if dir_name not in (':', ':/'):
@@ -863,8 +748,11 @@ class MpyTool():
         tree = self.mpy.tree(path)
         self.print_tree(tree)
 
+    @command('cat', 'Print file content from device to stdout.')
+    @argument('paths', nargs='+', metavar='remote',
+        help='device path(s) to print')
     def _dispatch_cat(self, commands, is_last_group):
-        args = _SUBPARSERS['cat'].parse_args(commands)
+        args = _make_parser(self._dispatch_cat).parse_args(commands)
         commands.clear()
         for file_name in args.paths:
             path = _parse_device_path(file_name, 'cat')
@@ -872,32 +760,52 @@ class MpyTool():
             data = self.mpy.get(path)
             print(data.decode('utf-8'))
 
+    @command('mkdir', 'Create directory (with parents if needed).')
+    @argument('paths', nargs='+', metavar='remote',
+        help='device path(s) to create')
     def _dispatch_mkdir(self, commands, is_last_group):
-        args = _SUBPARSERS['mkdir'].parse_args(commands)
+        args = _make_parser(self._dispatch_mkdir).parse_args(commands)
         commands.clear()
         for dir_name in args.paths:
             path = _parse_device_path(dir_name, 'mkdir')
             self.verbose(f"MKDIR: {path}", 1)
             self.mpy.mkdir(path)
 
+    @command('rm', 'Delete files/dirs. Use :path/ for contents only.')
+    @argument('paths', nargs='+', metavar='remote',
+        help='device path(s) to delete')
     def _dispatch_rm(self, commands, is_last_group):
-        args = _SUBPARSERS['rm'].parse_args(commands)
+        args = _make_parser(self._dispatch_rm).parse_args(commands)
         commands.clear()
         self.cmd_rm(*args.paths)
 
+    @command('pwd', 'Print current working directory on device.')
     def _dispatch_pwd(self, commands, is_last_group):
-        _, commands[:] = _SUBPARSERS['pwd'].parse_known_args(commands)
+        _, commands[:] = _make_parser(self._dispatch_pwd).parse_known_args(
+            commands)
         cwd = self.mpy.getcwd()
         print(cwd)
 
+    @command('cd', 'Change current working directory on device.')
+    @argument('path', metavar='remote', help='device path')
     def _dispatch_cd(self, commands, is_last_group):
-        args = _SUBPARSERS['cd'].parse_args([commands.pop(0)])
+        args = _make_parser(self._dispatch_cd).parse_args([commands.pop(0)])
         path = _parse_device_path(args.path, 'cd')
         self.verbose(f"CD: {path}", 2)
         self.mpy.chdir(path)
 
+    @command('path', 'Manage sys.path. Without args, show current path.')
+    @mutually_exclusive('-f', '-a', '-d')
+    @option('-f', '--first', action='store_const', const='first',
+        dest='mode', help='prepend to sys.path')
+    @option('-a', '--append', action='store_const', const='append',
+        dest='mode', help='append to sys.path')
+    @option('-d', '--delete', action='store_const', const='delete',
+        dest='mode', help='delete from sys.path')
+    @argument('paths', nargs='*', metavar='remote',
+        help='paths to add/remove (: prefix required)')
     def _dispatch_path(self, commands, is_last_group):
-        args = _SUBPARSERS['path'].parse_args(commands)
+        args = _make_parser(self._dispatch_path).parse_args(commands)
         commands.clear()
         mode = args.mode or 'replace'
         # No arguments = show current path
@@ -921,13 +829,30 @@ class MpyTool():
             self.mpy.remove_from_sys_path(*parsed_paths)
             self.verbose(f"PATH removed {len(parsed_paths)} entries", 1)
 
+    @command('stop', 'Stop running program on device (send Ctrl-C).')
     def _dispatch_stop(self, commands, is_last_group):
-        _, commands[:] = _SUBPARSERS['stop'].parse_known_args(commands)
+        _, commands[:] = _make_parser(self._dispatch_stop).parse_known_args(
+            commands)
         self.mpy.stop()
         self.verbose("STOP", 1)
 
+    @command('reset', 'Reset the device. Default: soft reset (Ctrl-D).')
+    @mutually_exclusive('--machine', '--rts', '--raw', '--boot', '--dtr-boot')
+    @option('--machine', action='store_const', const='machine',
+        dest='mode', help='machine.reset() with reconnect')
+    @option('--rts', action='store_const', const='rts',
+        dest='mode', help='hardware reset via DTR/RTS')
+    @option('--raw', action='store_const', const='raw',
+        dest='mode', help='soft reset in raw REPL')
+    @option('--boot', action='store_const', const='boot',
+        dest='mode', help='enter bootloader')
+    @option('--dtr-boot', action='store_const', const='dtr-boot',
+        dest='mode', help='bootloader via DTR/RTS (ESP32)')
+    @option('-t', '--timeout', type=int,
+        help='reconnect timeout in seconds')
     def _dispatch_reset(self, commands, is_last_group):
-        args, commands[:] = _SUBPARSERS['reset'].parse_known_args(commands)
+        args, commands[:] = _make_parser(
+            self._dispatch_reset).parse_known_args(commands)
         mode = args.mode or 'soft'
         if args.timeout and mode not in ('machine', 'rts'):
             raise ParamsError('--timeout only with --machine or --rts')
@@ -935,24 +860,32 @@ class MpyTool():
         reconnect = has_more if mode in ('machine', 'rts') else True
         self.cmd_reset(mode=mode, reconnect=reconnect, timeout=args.timeout)
 
+    @command('monitor', 'Monitor device output. Press Ctrl-C to stop.')
     def _dispatch_monitor(self, commands, is_last_group):
-        _, commands[:] = _SUBPARSERS['monitor'].parse_known_args(commands)
+        _, commands[:] = _make_parser(
+            self._dispatch_monitor).parse_known_args(commands)
         self.cmd_monitor()
 
+    @command('repl', 'Interactive REPL session. Press Ctrl-] to exit.')
     def _dispatch_repl(self, commands, is_last_group):
-        _, commands[:] = _SUBPARSERS['repl'].parse_known_args(commands)
+        _, commands[:] = _make_parser(self._dispatch_repl).parse_known_args(
+            commands)
         self.cmd_repl()
 
+    @command('exec', 'Execute Python code on device.')
+    @argument('code', help='Python code to execute')
     def _dispatch_exec(self, commands, is_last_group):
-        args = _SUBPARSERS['exec'].parse_args([commands.pop(0)])
+        args = _make_parser(self._dispatch_exec).parse_args([commands.pop(0)])
         self.verbose(f"EXEC: {args.code}", 1)
         result = self.mpy.comm.exec(args.code)
         if result:
             print(result.decode('utf-8', 'backslashreplace'), end='')
 
+    @command('run', 'Run local Python file on device.')
+    @argument('file', metavar='local_file', help='local .py file')
     def _dispatch_run(self, commands, is_last_group):
         arg_list = [commands.pop(0)] if commands else []
-        args = _SUBPARSERS['run'].parse_args(arg_list)
+        args = _make_parser(self._dispatch_run).parse_args(arg_list)
         if not _os.path.isfile(args.file):
             raise ParamsError(f"file not found: {args.file}")
         with open(args.file, 'rb') as f:
@@ -960,12 +893,31 @@ class MpyTool():
         self.verbose(f"RUN: {args.file} ({len(code)} bytes)", 1)
         self.mpy.comm.try_raw_paste(code, timeout=0)
 
+    @command('info', 'Show device info (platform, memory, filesystem).')
     def _dispatch_info(self, commands, is_last_group):
-        _, commands[:] = _SUBPARSERS['info'].parse_known_args(commands)
+        _, commands[:] = _make_parser(self._dispatch_info).parse_known_args(
+            commands)
         self.cmd_info()
 
+    @command('flash', 'Flash/partition ops. Without args, show info.')
     def _dispatch_flash(self, commands, is_last_group):
-        args = _SUBPARSERS['flash'].parse_args(commands)
+        # Flash has subcommands, build parser manually
+        parser = _make_parser(self._dispatch_flash)
+        flash_sub = parser.add_subparsers(dest='operation')
+        flash_read = flash_sub.add_parser('read', help='read to file')
+        flash_read.add_argument(
+            'args', nargs='+', metavar='[label] file',
+            help='destination file, optionally with partition label')
+        flash_write = flash_sub.add_parser('write', help='write from file')
+        flash_write.add_argument(
+            'args', nargs='+', metavar='[label] file',
+            help='source file, optionally with partition label')
+        flash_erase = flash_sub.add_parser('erase', help='erase flash')
+        flash_erase.add_argument(
+            'label', nargs='?', help='partition label (ESP32)')
+        flash_erase.add_argument(
+            '--full', action='store_true', help='full erase (slow)')
+        args = parser.parse_args(commands)
         commands.clear()
         if args.operation == 'read':
             if len(args.args) == 1:
@@ -986,21 +938,37 @@ class MpyTool():
         else:
             self.cmd_flash()
 
+    @command('ota', 'Perform OTA firmware update (ESP32).')
+    @argument('firmware', help='firmware .app-bin file')
     def _dispatch_ota(self, commands, is_last_group):
-        args = _SUBPARSERS['ota'].parse_args([commands.pop(0)])
+        args = _make_parser(self._dispatch_ota).parse_args([commands.pop(0)])
         self.cmd_ota(args.firmware)
 
+    @command('sleep', 'Pause for specified number of seconds.')
+    @argument('seconds', type=float, help='seconds to sleep')
     def _dispatch_sleep(self, commands, is_last_group):
-        args = _SUBPARSERS['sleep'].parse_args([commands.pop(0)])
+        args = _make_parser(self._dispatch_sleep).parse_args([commands.pop(0)])
         self.verbose(f"SLEEP {args.seconds}s", 1)
         _time.sleep(args.seconds)
 
+    @command('cp', 'Copy files between local and device.')
+    @option('-f', '--force', action='store_true',
+        help='overwrite without checking')
+    @option('-m', '--mpy', action='store_true', help='compile .py to .mpy')
+    @option('-z', '--compress', action='store_true', help='force compression')
+    @option('-Z', '--no-compress', dest='no_compress', action='store_true',
+        help='disable compression')
+    @argument('paths', nargs='*', metavar='local_or_remote',
+        help='source(s) and dest (: prefix for device)')
     def _dispatch_cp(self, commands, is_last_group):
         self.cmd_cp(commands)
         commands.clear()
 
+    @command('mv', 'Move or rename files on device.')
+    @argument('paths', nargs='+', metavar='remote',
+        help='source(s) and destination (all with : prefix)')
     def _dispatch_mv(self, commands, is_last_group):
-        args = _SUBPARSERS['mv'].parse_args(commands)
+        args = _make_parser(self._dispatch_mv).parse_args(commands)
         commands.clear()
         if len(args.paths) < 2:
             raise ParamsError('mv requires source and destination')
@@ -1048,11 +1016,17 @@ class MpyTool():
             raise ParamsError('duplicate mount points')
         return pairs
 
+    @command('mount', 'Mount local dir as VFS. Without args, list mounts.')
+    @option('-m', '--mpy', action='store_true',
+        help='compile .py to .mpy on-the-fly')
+    @option('-w', '--writable', action='store_true', help='mount as writable')
+    @argument('paths', nargs='*', metavar='local_and_remote',
+        help='local_dir [:mount_point] (default: /remote)')
     def _dispatch_mount(self, commands, is_last_group):
         if not commands:
             self._list_mounts()
             return
-        args = _SUBPARSERS['mount'].parse_args(commands)
+        args = _make_parser(self._dispatch_mount).parse_args(commands)
         commands.clear()
         # Initialize mpy-cross if requested
         mpy_cross = None
@@ -1087,8 +1061,11 @@ class MpyTool():
                 f"Changed CWD to {first_mount_point}",
                 color='cyan')
 
+    @command('ln', 'Link local file/directory into mounted VFS.')
+    @argument('paths', nargs='+', metavar='local_and_remote',
+        help='local source(s) and device destination')
     def _dispatch_ln(self, commands, is_last_group):
-        args = _SUBPARSERS['ln'].parse_args(commands)
+        args = _make_parser(self._dispatch_ln).parse_args(commands)
         commands.clear()
         if len(args.paths) < 2:
             raise ParamsError('ln requires source(s) and destination')
@@ -1142,11 +1119,20 @@ class MpyTool():
                 f"Linked {local_path} -> {best_mp}/{subpath}",
                 color='green')
 
+    @command('speedtest', 'Test serial link speed.')
     def _dispatch_speedtest(self, commands, is_last_group):
-        _, commands[:] = _SUBPARSERS['speedtest'].parse_known_args(commands)
+        _, commands[:] = _make_parser(
+            self._dispatch_speedtest).parse_known_args(commands)
         from mpytool.speedtest import speedtest
         self.verbose("SPEEDTEST", 1)
         speedtest(self.mpy.comm, self._log)
+
+    def _get_cmd_method(self, name):
+        """Get dispatch method for command name, or None if not found."""
+        method = getattr(self, f'_dispatch_{name}', None)
+        if method and hasattr(method, '_cmd_name'):
+            return method
+        return None
 
     def _dispatch_paths(self, commands, is_last_group):
         # For shell completion - list files on device
@@ -1168,8 +1154,9 @@ class MpyTool():
         # For shell completion - list commands with descriptions
         # Output: name:description (ZSH _describe compatible)
         for name in _CMD_ORDER:
-            if name in _SUBPARSERS:
-                desc = _SUBPARSERS[name].description or ''
+            method = self._get_cmd_method(name)
+            if method:
+                desc = method._cmd_description or ''
                 print(f"{name}:{desc}")
 
     def _dispatch_options(self, commands, is_last_group):
@@ -1178,9 +1165,10 @@ class MpyTool():
         # Without command: global; with command: command-specific
         cmd_name = commands.pop(0) if commands else ''
         if cmd_name:
-            if cmd_name not in _SUBPARSERS:
+            method = self._get_cmd_method(cmd_name)
+            if not method:
                 return
-            parser = _SUBPARSERS[cmd_name]
+            parser = _make_parser(method)
         else:
             parser = _MAIN_PARSER
         for action in parser._actions:
@@ -1207,9 +1195,10 @@ class MpyTool():
         # Output: type:nargs:description
         # nargs: 1 = one, ? = optional, + = one+, * = zero+
         cmd_name = commands.pop(0) if commands else ''
-        if cmd_name not in _SUBPARSERS:
+        method = self._get_cmd_method(cmd_name)
+        if not method:
             return
-        parser = _SUBPARSERS[cmd_name]
+        parser = _make_parser(method)
         for action in parser._actions:
             if action.option_strings:
                 continue  # Skip options, only positional arguments
@@ -1238,12 +1227,20 @@ class MpyTool():
             pass  # connection already lost
 
 
+def _get_cmd_description(name):
+    """Get command description from MpyTool dispatch method."""
+    method = getattr(MpyTool, f'_dispatch_{name}', None)
+    if method and hasattr(method, '_cmd_description'):
+        return method._cmd_description or ''
+    return ''
+
+
 def _build_commands_help():
-    """Build commands help from subparsers descriptions."""
+    """Build commands help from dispatch method decorators."""
     lines = ["Commands (use '<command> --help' for details):"]
     for name in _CMD_ORDER:
-        if name in _SUBPARSERS:
-            desc = _SUBPARSERS[name].description or ''
+        desc = _get_cmd_description(name)
+        if desc:
             lines.append(f"  {name:12} {desc}")
     lines.append("")
     lines.append("Use -- to chain commands:")
