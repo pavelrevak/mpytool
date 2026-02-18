@@ -126,7 +126,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | VFS SEEK | 🟢 | 🟢 |
 | VFS READLINE | 🟢 | 🟢 |
 | File iteration | 🟢 | 🟢 |
-| Iterative listdir | 🔴 | 🟢 |
+| Iterative listdir | 🟢 | 🟢 |
 | Agent size | 🟢 4.2KB raw | 🔴 5.5KB compressed |
 
 ## Summary
@@ -148,6 +148,5 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 - RTC and ROMFS support
 - REPL session capture and code/file injection
 - User config file and custom aliases
-- More VFS operations (iterative listdir for large directories)
 - VFS timeout protection (polling)
 - Connect by device serial ID

@@ -10,9 +10,9 @@ from unittest.mock import Mock, patch
 
 from mpytool.mount import (
     MountHandler, ConnIntercept,
-    ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN, CMD_CLOSE, CMD_READ,
-    CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME, CMD_SEEK, CMD_READLINE,
-    CMD_MIN, CMD_MAX,
+    ESCAPE, CMD_STAT, CMD_ILISTDIR_START, CMD_ILISTDIR_NEXT, CMD_OPEN,
+    CMD_CLOSE, CMD_READ, CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME,
+    CMD_SEEK, CMD_READLINE, CMD_MIN, CMD_MAX,
 )
 
 
@@ -29,22 +29,19 @@ def _pack_str(s):
     return _pack_s32(len(data)) + data
 
 
-def _parse_listdir(data):
-    """Parse listdir wire output into {name: mode} dict"""
-    count = struct.unpack('<i', data[0:4])[0]
-    if count < 0:
-        return count, {}
-    entries = {}
-    offset = 4
-    for _ in range(count):
-        name_len = struct.unpack('<i', data[offset:offset + 4])[0]
-        offset += 4
-        name = data[offset:offset + name_len].decode()
-        offset += name_len
-        mode = struct.unpack('<I', data[offset:offset + 4])[0]
-        offset += 4
-        entries[name] = mode
-    return count, entries
+def _parse_ilistdir_start(data):
+    """Parse ilistdir START response - returns errno (0 = OK)"""
+    return struct.unpack('b', data[0:1])[0]
+
+
+def _parse_ilistdir_next(data):
+    """Parse ilistdir NEXT response - returns (name, mode) or (None, 0) at end"""
+    name_len = struct.unpack('<i', data[0:4])[0]
+    if name_len <= 0:
+        return None, 0  # end marker - no mode sent
+    name = data[4:4 + name_len].decode()
+    mode = struct.unpack('<I', data[4 + name_len:8 + name_len])[0]
+    return name, mode
 
 
 class MockConnForHandler:
@@ -96,6 +93,24 @@ class TestMountHandler(unittest.TestCase):
         self.handler.close_all()
         shutil.rmtree(self.temp_dir)
 
+    def _ilistdir(self, path):
+        """Helper: do full ilistdir and return (errno, {name: mode} dict)"""
+        self.conn.feed(_pack_str(path))
+        self.handler.dispatch(CMD_ILISTDIR_START)
+        data = self.conn.get_written()
+        err = _parse_ilistdir_start(data)
+        if err < 0:
+            return err, {}
+        entries = {}
+        while True:
+            self.handler.dispatch(CMD_ILISTDIR_NEXT)
+            data = self.conn.get_written()
+            name, mode = _parse_ilistdir_next(data)
+            if name is None:
+                break
+            entries[name] = mode
+        return 0, entries
+
     def test_stat_file(self):
         """stat() on existing file returns mode, size, mtime"""
         self.conn.feed(_pack_str('/test.py'))
@@ -144,34 +159,54 @@ class TestMountHandler(unittest.TestCase):
         mode = struct.unpack('<I', data[1:5])[0]
         self.assertEqual(mode, 0x4000)
 
-    def test_listdir(self):
-        """listdir() returns all entries with modes and sizes"""
-        self.conn.feed(_pack_str('/'))
-        self.handler.dispatch(CMD_LISTDIR)
-        data = self.conn.get_written()
-        count, entries = _parse_listdir(data)
-        self.assertEqual(count, 3)  # test.py, data.bin, lib/
+    def test_ilistdir(self):
+        """ilistdir() returns all entries with modes"""
+        err, entries = self._ilistdir('/')
+        self.assertEqual(err, 0)
+        self.assertEqual(len(entries), 3)  # test.py, data.bin, lib/
         self.assertIn('test.py', entries)
         self.assertIn('data.bin', entries)
         self.assertIn('lib', entries)
         self.assertEqual(entries['test.py'], 0x8000)
         self.assertEqual(entries['lib'], 0x4000)
 
-    def test_listdir_subdir(self):
-        """listdir() on subdirectory"""
-        self.conn.feed(_pack_str('/lib'))
-        self.handler.dispatch(CMD_LISTDIR)
-        data = self.conn.get_written()
-        count = struct.unpack('<i', data[0:4])[0]
-        self.assertEqual(count, 1)  # helper.py
+    def test_ilistdir_subdir(self):
+        """ilistdir() on subdirectory"""
+        err, entries = self._ilistdir('/lib')
+        self.assertEqual(err, 0)
+        self.assertEqual(len(entries), 1)  # helper.py
 
-    def test_listdir_nonexistent(self):
-        """listdir() on nonexistent dir returns ENOENT"""
-        self.conn.feed(_pack_str('/nope'))
-        self.handler.dispatch(CMD_LISTDIR)
+    def test_ilistdir_nonexistent(self):
+        """ilistdir() on nonexistent dir returns ENOENT"""
+        err, entries = self._ilistdir('/nope')
+        self.assertEqual(err, -errno.ENOENT)
+
+    def test_ilistdir_next_without_start(self):
+        """ilistdir NEXT without START returns empty (end marker)"""
+        self.handler.dispatch(CMD_ILISTDIR_NEXT)
         data = self.conn.get_written()
-        count = struct.unpack('<i', data[0:4])[0]
-        self.assertEqual(count, -errno.ENOENT)
+        name, mode = _parse_ilistdir_next(data)
+        self.assertIsNone(name)
+
+    def test_ilistdir_empty_dir(self):
+        """ilistdir on empty directory returns no entries"""
+        os.makedirs(os.path.join(self.temp_dir, 'empty'))
+        err, entries = self._ilistdir('/empty')
+        self.assertEqual(err, 0)
+        self.assertEqual(len(entries), 0)
+
+    def test_ilistdir_many_files(self):
+        """ilistdir with many files works correctly"""
+        many_dir = os.path.join(self.temp_dir, 'many')
+        os.makedirs(many_dir)
+        for i in range(100):
+            with open(os.path.join(many_dir, f'file{i:03d}.txt'), 'w') as f:
+                f.write('x')
+        err, entries = self._ilistdir('/many')
+        self.assertEqual(err, 0)
+        self.assertEqual(len(entries), 100)
+        self.assertIn('file000.txt', entries)
+        self.assertIn('file099.txt', entries)
 
     def test_open_read_close(self):
         """Full cycle: open, read, close"""
@@ -278,6 +313,24 @@ class TestMountHandlerSubmount(unittest.TestCase):
         shutil.rmtree(self.temp_root)
         shutil.rmtree(self.temp_sub)
 
+    def _ilistdir(self, path):
+        """Helper: do full ilistdir and return (errno, {name: mode} dict)"""
+        self.conn.feed(_pack_str(path))
+        self.handler.dispatch(CMD_ILISTDIR_START)
+        data = self.conn.get_written()
+        err = _parse_ilistdir_start(data)
+        if err < 0:
+            return err, {}
+        entries = {}
+        while True:
+            self.handler.dispatch(CMD_ILISTDIR_NEXT)
+            data = self.conn.get_written()
+            name, mode = _parse_ilistdir_next(data)
+            if name is None:
+                break
+            entries[name] = mode
+        return 0, entries
+
     def test_stat_submount_file(self):
         """stat on submount file resolves to submount dir"""
         self.conn.feed(_pack_str('/lib/helper.py'))
@@ -306,19 +359,17 @@ class TestMountHandlerSubmount(unittest.TestCase):
         result = struct.unpack('b', data[0:1])[0]
         self.assertEqual(result, 0)
 
-    def test_listdir_root_includes_virtual(self):
-        """listdir root includes virtual submount directory"""
-        self.conn.feed(_pack_str('/'))
-        self.handler.dispatch(CMD_LISTDIR)
-        count, entries = _parse_listdir(self.conn.get_written())
+    def test_ilistdir_root_includes_virtual(self):
+        """ilistdir root includes virtual submount directory"""
+        err, entries = self._ilistdir('/')
+        self.assertEqual(err, 0)
         self.assertIn('test.py', entries)
         self.assertIn('lib', entries)  # virtual dir injected
 
-    def test_listdir_submount(self):
-        """listdir on submount path lists submount contents"""
-        self.conn.feed(_pack_str('/lib'))
-        self.handler.dispatch(CMD_LISTDIR)
-        count, entries = _parse_listdir(self.conn.get_written())
+    def test_ilistdir_submount(self):
+        """ilistdir on submount path lists submount contents"""
+        err, entries = self._ilistdir('/lib')
+        self.assertEqual(err, 0)
         self.assertIn('helper.py', entries)
         self.assertIn('subdir', entries)
 
@@ -346,13 +397,12 @@ class TestMountHandlerSubmount(unittest.TestCase):
         fd = struct.unpack('b', data[0:1])[0]
         self.assertEqual(fd, -errno.EACCES)
 
-    def test_listdir_no_duplicate_when_real_exists(self):
+    def test_ilistdir_no_duplicate_when_real_exists(self):
         """Submount dir not duplicated if real dir with same name exists"""
         # Create real 'lib' dir in root
         os.makedirs(os.path.join(self.temp_root, 'lib'), exist_ok=True)
-        self.conn.feed(_pack_str('/'))
-        self.handler.dispatch(CMD_LISTDIR)
-        count, entries = _parse_listdir(self.conn.get_written())
+        err, entries = self._ilistdir('/')
+        self.assertEqual(err, 0)
         names = list(entries.keys())
         # 'lib' should appear only once
         self.assertEqual(names.count('lib'), 1)
@@ -387,6 +437,24 @@ class TestMountHandlerVirtualDir(unittest.TestCase):
         shutil.rmtree(self.temp_pkg)
         shutil.rmtree(self.temp_file_dir)
 
+    def _ilistdir(self, path):
+        """Helper: do full ilistdir and return (errno, {name: mode} dict)"""
+        self.conn.feed(_pack_str(path))
+        self.handler.dispatch(CMD_ILISTDIR_START)
+        data = self.conn.get_written()
+        err = _parse_ilistdir_start(data)
+        if err < 0:
+            return err, {}
+        entries = {}
+        while True:
+            self.handler.dispatch(CMD_ILISTDIR_NEXT)
+            data = self.conn.get_written()
+            name, mode = _parse_ilistdir_next(data)
+            if name is None:
+                break
+            entries[name] = mode
+        return 0, entries
+
     def test_stat_virtual_dir(self):
         """stat on virtual intermediate dir returns S_IFDIR"""
         self.conn.feed(_pack_str('/lib'))
@@ -397,22 +465,20 @@ class TestMountHandlerVirtualDir(unittest.TestCase):
         mode = struct.unpack('<I', data[1:5])[0]
         self.assertEqual(mode, 0x4000)
 
-    def test_listdir_virtual_dir(self):
-        """listdir on virtual intermediate dir returns submount entries"""
-        self.conn.feed(_pack_str('/lib'))
-        self.handler.dispatch(CMD_LISTDIR)
-        count, entries = _parse_listdir(self.conn.get_written())
-        self.assertEqual(count, 2)
+    def test_ilistdir_virtual_dir(self):
+        """ilistdir on virtual intermediate dir returns submount entries"""
+        err, entries = self._ilistdir('/lib')
+        self.assertEqual(err, 0)
+        self.assertEqual(len(entries), 2)
         self.assertIn('pkg', entries)
         self.assertIn('single.py', entries)
         self.assertEqual(entries['pkg'], 0x4000)  # directory
         self.assertEqual(entries['single.py'], 0x8000)  # file
 
-    def test_listdir_root_shows_virtual(self):
-        """listdir root includes virtual 'lib' directory"""
-        self.conn.feed(_pack_str('/'))
-        self.handler.dispatch(CMD_LISTDIR)
-        count, entries = _parse_listdir(self.conn.get_written())
+    def test_ilistdir_root_shows_virtual(self):
+        """ilistdir root includes virtual 'lib' directory"""
+        err, entries = self._ilistdir('/')
+        self.assertEqual(err, 0)
         self.assertIn('root.txt', entries)
         self.assertIn('lib', entries)
 

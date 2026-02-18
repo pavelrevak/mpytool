@@ -157,16 +157,17 @@ from mpytool.mpy_cross import BOOT_FILES
 # Protocol constants
 ESCAPE = 0x18  # CAN / Ctrl+X
 CMD_STAT = 1
-CMD_LISTDIR = 2
-CMD_OPEN = 3
-CMD_CLOSE = 4
-CMD_READ = 5
-CMD_WRITE = 6
-CMD_MKDIR = 7
-CMD_REMOVE = 8
-CMD_RENAME = 9
-CMD_SEEK = 10
-CMD_READLINE = 11
+CMD_ILISTDIR_START = 2
+CMD_ILISTDIR_NEXT = 3
+CMD_OPEN = 4
+CMD_CLOSE = 5
+CMD_READ = 6
+CMD_WRITE = 7
+CMD_MKDIR = 8
+CMD_REMOVE = 9
+CMD_RENAME = 10
+CMD_SEEK = 11
+CMD_READLINE = 12
 
 CMD_MIN = CMD_STAT
 CMD_MAX = CMD_READLINE
@@ -205,7 +206,7 @@ class _mt_F(io.IOBase):
    s._rn=0;s._rp=0
   else:s._rb=None
  def _refill(s):
-  _mt_bg(5);_mt_w('b',s.fd);_mt_w('<i',CHUNK_SIZE)
+  _mt_bg(6);_mt_w('b',s.fd);_mt_w('<i',CHUNK_SIZE)
   n=_mt_r('<i')
   if n<0:_mt_en();raise OSError(-n)
   if n>0:
@@ -233,7 +234,7 @@ class _mt_F(io.IOBase):
     r+=s._rb[s._rp:i+1];s._rp=i+1
     s._pos+=len(r);return str(r,'utf8') if s.txt else bytes(r)
    r+=s._rb[s._rp:s._rn];s._rp=s._rn
-  _mt_bg(11);_mt_w('b',s.fd)
+  _mt_bg(12);_mt_w('b',s.fd)
   n=_mt_r('<i')
   if n<0:_mt_en();raise OSError(-n)
   if n>0:r+=_mt_si.read(n)
@@ -257,7 +258,7 @@ class _mt_F(io.IOBase):
  def readlines(s):return list(s)
  def write(s,buf):
   b=buf.encode('utf8') if s.txt and isinstance(buf,str) else bytes(buf)
-  _mt_bg(6);_mt_w('b',s.fd);_mt_w('<i',len(b))
+  _mt_bg(7);_mt_w('b',s.fd);_mt_w('<i',len(b))
   _mt_so.write(b);e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
   s._pos+=len(b);return len(b)
@@ -267,14 +268,14 @@ class _mt_F(io.IOBase):
   return 0
  def seek(s,offset,whence=0):
   if whence==1:offset+=s._pos;whence=0
-  _mt_bg(10);_mt_w('b',s.fd);_mt_w('<i',offset);_mt_w('b',whence)
+  _mt_bg(11);_mt_w('b',s.fd);_mt_w('<i',offset);_mt_w('b',whence)
   pos=_mt_r('<i');_mt_en()
   if pos<0:raise OSError(-pos)
   if s._rb:s._rp=s._rn=0
   s._pos=pos;return pos
  def close(s):
   if s.fd>=0:
-   _mt_bg(4);_mt_w('b',s.fd)
+   _mt_bg(5);_mt_w('b',s.fd)
    e=_mt_r('b');_mt_en()
    if e<0:raise OSError(-e)
    s.fd=-1
@@ -305,31 +306,34 @@ class RemoteFS:
   return(m,0,0,0,0,0,sz,mt,mt,mt)
  def ilistdir(s,p):
   _mt_bg(2,s.mid);_mt_ws(s._abs(p))
-  n=_mt_r('<i')
-  if n<0:_mt_en();raise OSError(-n)
-  E=[]
-  for _ in range(n):E.append((_mt_rs(),_mt_r('<I'),0))
+  e=_mt_r('b')
+  if e<0:_mt_en();raise OSError(-e)
   _mt_en()
-  for e in E:yield e
+  while 1:
+   _mt_bg(3,s.mid)
+   n=_mt_rs()
+   if not n:_mt_en();return
+   m=_mt_r('<I');_mt_en()
+   yield(n,m,0)
  def open(s,p,mode):
-  _mt_bg(3,s.mid);_mt_ws(s._abs(p));_mt_ws(mode)
+  _mt_bg(4,s.mid);_mt_ws(s._abs(p));_mt_ws(mode)
   fd=_mt_r('b');_mt_en()
   if fd<0:raise OSError(-fd)
   return _mt_F(fd,'b' not in mode,mode)
  def mkdir(s,p):
-  _mt_bg(7,s.mid);_mt_ws(s._abs(p))
+  _mt_bg(8,s.mid);_mt_ws(s._abs(p))
   e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
  def remove(s,p):
-  _mt_bg(8,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
+  _mt_bg(9,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
   e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
  def rmdir(s,p):
-  _mt_bg(8,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
+  _mt_bg(9,s.mid);_mt_ws(s._abs(p));_mt_w('b',0)
   e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
  def rename(s,old,new):
-  _mt_bg(9,s.mid);_mt_ws(s._abs(old));_mt_ws(s._abs(new))
+  _mt_bg(10,s.mid);_mt_ws(s._abs(old));_mt_ws(s._abs(new))
   e=_mt_r('b');_mt_en()
   if e<0:raise OSError(-e)
 def _mt_mount(mp='/remote',mid=0):
@@ -387,9 +391,11 @@ class MountHandler:
         self._next_fd = 0
         self._free_fds = []
         self._submounts = {}  # {subpath: realpath} for virtual nested mounts
+        self._ilistdir_iter = None  # current ilistdir iterator
         self._dispatch = {
             CMD_STAT: self._do_stat,
-            CMD_LISTDIR: self._do_listdir,
+            CMD_ILISTDIR_START: self._do_ilistdir_start,
+            CMD_ILISTDIR_NEXT: self._do_ilistdir_next,
             CMD_OPEN: self._do_open,
             CMD_CLOSE: self._do_close,
             CMD_READ: self._do_read,
@@ -546,29 +552,26 @@ class MountHandler:
             else:
                 self._wr_s8(-_errno.ENOENT)
 
-    def _do_listdir(self):
-        path = self._rd_str()
-        if self._log:
-            self._log.info("MOUNT: LISTDIR: '%s'", path)
+    def _ilistdir_entries(self, path):
+        """Generate (name, mode) entries for a directory path"""
         local = self._resolve_path(path)
         if local is None:
-            self._wr_s32(-_errno.EACCES)
-            return
-        entries = []
+            return  # Access denied - caller handles
         real_dir = False
+        existing = set()
         try:
             for name in _os.listdir(local):
                 full = _os.path.join(local, name)
                 try:
                     st = _os.stat(full)
-                    entries.append((name, st.st_mode & 0xF000))
+                    existing.add(name)
+                    yield (name, st.st_mode & 0xF000)
                 except OSError:
                     pass
             real_dir = True
         except OSError:
             pass  # Virtual intermediate dir — may have submount entries
         prefix = path.lstrip('/').rstrip('/')
-        existing = {name for name, _ in entries}
         for subpath in self._submounts:
             if prefix:
                 if not subpath.startswith(prefix + '/'):
@@ -585,15 +588,59 @@ class MountHandler:
                     mode = 0x4000 if _os.path.isdir(local_sub) else 0x8000
                 else:
                     mode = 0x4000  # virtual intermediate dir
-                entries.append((child_name, mode))
+                yield (child_name, mode)
                 existing.add(child_name)
-        if not entries and not real_dir and not self._is_virtual_dir(path):
-            self._wr_s32(-_errno.ENOENT)
+        if not existing and not real_dir and not self._is_virtual_dir(path):
+            return  # ENOENT - caller handles
+
+    def _do_ilistdir_start(self):
+        path = self._rd_str()
+        if self._log:
+            self._log.info("MOUNT: ILISTDIR_START: '%s'", path)
+        local = self._resolve_path(path)
+        if local is None:
+            self._wr_s8(-_errno.EACCES)
             return
-        self._wr_s32(len(entries))
-        for name, mode in entries:
+        # Check if path exists (real dir, virtual dir, or has submount entries)
+        exists = False
+        try:
+            _os.listdir(local)
+            exists = True
+        except OSError:
+            pass
+        if not exists:
+            exists = self._is_virtual_dir(path)
+        if not exists:
+            # Check if any submounts would create entries
+            prefix = path.lstrip('/').rstrip('/')
+            for subpath in self._submounts:
+                if prefix:
+                    if subpath.startswith(prefix + '/'):
+                        exists = True
+                        break
+                else:
+                    exists = True
+                    break
+        if not exists:
+            self._wr_s8(-_errno.ENOENT)
+            return
+        self._ilistdir_iter = self._ilistdir_entries(path)
+        self._wr_s8(0)  # OK
+
+    def _do_ilistdir_next(self):
+        if self._log:
+            self._log.info("MOUNT: ILISTDIR_NEXT")
+        if self._ilistdir_iter is None:
+            # No active iterator - send empty name (end marker), no mode
+            self._wr_bytes(b'')
+            return
+        try:
+            name, mode = next(self._ilistdir_iter)
             self._wr_bytes(name.encode('utf-8'))
             self._wr_u32(mode)
+        except StopIteration:
+            self._ilistdir_iter = None
+            self._wr_bytes(b'')  # empty name = end marker, no mode
 
     def _do_open(self):
         path = self._rd_str()
