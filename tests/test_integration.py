@@ -1342,10 +1342,28 @@ class TestPartitions(unittest.TestCase):
                 break
         if not nvs:
             self.skipTest("No nvs partition found")
-        # Read nvs partition
+        # Read nvs partition (flash_read uses dynamic chunk size based on RAM)
         data = self.mpy.flash_read(label='nvs')
         self.assertIsInstance(data, bytes)
         self.assertEqual(len(data), nvs['size'])
+
+    def test_03_partition_read_phy_init(self):
+        """Test reading phy_init partition (4KB, works on low-RAM devices)"""
+        if not self.is_esp32:
+            self.skipTest("Not an ESP32 device")
+        # Find phy_init partition
+        info = self.mpy.partitions()
+        phy = None
+        for p in info['partitions']:
+            if p['label'] == 'phy_init':
+                phy = p
+                break
+        if not phy:
+            self.skipTest("No phy_init partition found")
+        # Read phy_init partition (small enough for low-RAM devices)
+        data = self.mpy.flash_read(label='phy_init')
+        self.assertIsInstance(data, bytes)
+        self.assertEqual(len(data), phy['size'])
 
 
 @requires_device

@@ -534,21 +534,23 @@ def _mt_pfind(label):
             free = self._mpy_comm.exec_eval("gc.mem_free()")
         except _mpy_comm.CmdError:
             free = 0
-        # Select chunk size based on free RAM (~10-15% of free RAM)
-        if free > 256 * 1024:
+        # Select chunk size based on free RAM
+        if free > 320 * 1024:
             chunk = 32768
-        elif free > 128 * 1024:
+        elif free > 192 * 1024:
             chunk = 16384
-        elif free > 64 * 1024:
+        elif free > 128 * 1024:
             chunk = 8192
-        elif free > 48 * 1024:
+        elif free > 92 * 1024:
             chunk = 4096
-        elif free > 32 * 1024:
+        elif free > 64 * 1024:
             chunk = 2048
-        elif free > 24 * 1024:
+        elif free > 48 * 1024:
             chunk = 1024
-        else:
+        elif free > 32 * 1024:
             chunk = 512
+        else:
+            chunk = 256
         Mpy._CHUNK_AUTO_DETECTED = chunk
         return chunk
 
@@ -1146,15 +1148,19 @@ def _mt_pfind(label):
             total_size = block_count * block_size
 
         total_blocks = (total_size + block_size - 1) // block_size
-        chunk_blocks = 8  # 32KB per iteration
+        # Use detect_chunk_size() which auto-detects based on free RAM
+        chunk_bytes = self.detect_chunk_size()
+        chunk_blocks = max(1, chunk_bytes // block_size)
         data = bytearray()
         block_num = 0
 
         while block_num < total_blocks:
             blocks_to_read = min(chunk_blocks, total_blocks - block_num)
             bytes_to_read = blocks_to_read * block_size
+            # gc.collect() before each chunk to avoid fragmentation on low-RAM devices
             self._mpy_comm.exec(
-                f"_buf=bytearray({bytes_to_read}); _dev.readblocks({block_num}, _buf)")
+                f"gc.collect(); _buf=bytearray({bytes_to_read}); "
+                f"_dev.readblocks({block_num}, _buf)")
             b64_data = self._mpy_comm.exec_eval("repr(ub.b2a_base64(_buf).decode())")
             chunk = base64.b64decode(b64_data)
             data.extend(chunk)

@@ -140,57 +140,57 @@ class TestDetectChunkSize(unittest.TestCase):
         Mpy._CHUNK_AUTO_DETECTED = None
 
     def test_large_ram_uses_32k_chunks(self):
-        """Test that devices with >256KB RAM use 32KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 300 * 1024  # 300KB
+        """Test that devices with >320KB RAM use 32KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 350 * 1024  # 350KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 32768)
 
     def test_medium_large_ram_uses_16k_chunks(self):
-        """Test that devices with >128KB RAM use 16KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 150 * 1024  # 150KB
+        """Test that devices with >192KB RAM use 16KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 250 * 1024  # 250KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 16384)
 
     def test_medium_ram_uses_8k_chunks(self):
-        """Test that devices with >64KB RAM use 8KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 80 * 1024  # 80KB
+        """Test that devices with >128KB RAM use 8KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 150 * 1024  # 150KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 8192)
 
     def test_small_ram_uses_4k_chunks(self):
-        """Test that devices with >48KB RAM use 4KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 55 * 1024  # 55KB
+        """Test that devices with >92KB RAM use 4KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 100 * 1024  # 100KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 4096)
 
     def test_smaller_ram_uses_2k_chunks(self):
-        """Test that devices with >32KB RAM use 2KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 40 * 1024  # 40KB
+        """Test that devices with >64KB RAM use 2KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 70 * 1024  # 70KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 2048)
 
     def test_small_ram_uses_1k_chunks(self):
-        """Test that devices with >24KB RAM use 1KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 28 * 1024  # 28KB
+        """Test that devices with >48KB RAM use 1KB chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 55 * 1024  # 55KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 1024)
 
     def test_tiny_ram_uses_512_chunks(self):
-        """Test that devices with <=24KB RAM use 512B chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
+        """Test that devices with >32KB RAM use 512B chunks"""
+        self.mpy._mpy_comm.exec_eval.return_value = 40 * 1024  # 40KB
         chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 512)
 
-    def test_error_defaults_to_512(self):
-        """Test that errors default to 512B chunks"""
+    def test_error_defaults_to_256(self):
+        """Test that errors default to 256B chunks"""
         from mpytool.mpy_comm import CmdError
         self.mpy._mpy_comm.exec_eval.side_effect = CmdError("cmd", b"", b"error")
         chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 512)
+        self.assertEqual(chunk, 256)
 
     def test_caches_result(self):
         """Test that chunk size is cached after first detection"""
-        self.mpy._mpy_comm.exec_eval.return_value = 300 * 1024  # 300KB
+        self.mpy._mpy_comm.exec_eval.return_value = 350 * 1024  # 350KB
         chunk1 = self.mpy.detect_chunk_size()
         # Change return value - should still use cached
         self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
@@ -340,6 +340,7 @@ class TestFlashReadWithLabel(unittest.TestCase):
         self.mpy = Mpy(self.mock_conn)
         self.mpy._mpy_comm = Mock()
         self.mpy._platform = 'esp32'  # Set platform for partition operations
+        self.mpy._chunk_size = 4096  # Skip chunk size detection
 
     def test_flash_read_with_label_returns_bytes(self):
         """Test that flash_read with label returns bytes"""
