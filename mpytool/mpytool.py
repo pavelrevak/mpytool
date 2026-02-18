@@ -432,8 +432,8 @@ class MpyTool():
 
         ota_size = _utils.format_size(info['next_ota_size'])
         self.verbose(f"  Target: {info['next_ota']} ({ota_size})", 1)
-        use_compress = self.mpy._detect_deflate()
-        chunk_size = self.mpy._detect_chunk_size()
+        use_compress = self.mpy.detect_deflate()
+        chunk_size = self.mpy.detect_chunk_size()
         if chunk_size >= 1024:
             chunk_str = f"{chunk_size // 1024}K"
         else:

@@ -1236,6 +1236,18 @@ class TestMountHandlerMpyCross(unittest.TestCase):
         self.mpy_cross = Mock()
         self.mpy_cross.compiled = {}
 
+        def find_compiled_side_effect(py_path):
+            # 1. Check prebuilt .mpy
+            mpy_path = py_path[:-3] + '.mpy'
+            if os.path.exists(mpy_path):
+                return mpy_path
+            # 2. Check cache
+            cache = self.mpy_cross.compiled.get(py_path)
+            if cache and os.path.exists(cache):
+                return cache
+            return None
+        self.mpy_cross.find_compiled.side_effect = find_compiled_side_effect
+
         # Create handler with mpy_cross
         self.handler = MountHandler(
             self.conn, self.temp_dir, mpy_cross=self.mpy_cross)

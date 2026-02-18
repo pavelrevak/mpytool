@@ -130,6 +130,24 @@ class MpyCross:
         self.compiled[src_path] = cache_path
         return cache_path
 
+    def find_compiled(self, py_path):
+        """Find .mpy for given .py source (prebuilt or cached)
+
+        Checks:
+        1. Prebuilt .mpy in same directory as .py
+        2. Cached .mpy from previous compilation
+
+        Returns:
+            Path to .mpy file, or None if not found
+        """
+        mpy_path = py_path[:-3] + '.mpy'
+        if _os.path.exists(mpy_path):
+            return mpy_path
+        cache = self.compiled.get(py_path)
+        if cache and _os.path.exists(cache):
+            return cache
+        return None
+
     def compile_sources(self, sources, is_excluded=None):
         """Pre-compile all .py source files to .mpy cache
 

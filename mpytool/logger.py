@@ -38,6 +38,11 @@ class SimpleColorLogger():
         )
         self._pending_line = False  # True when last output had no trailing newline
 
+    @property
+    def loglevel(self):
+        """Return current log level (1=error, 2=warning, 3=info, 4=debug)"""
+        return self._loglevel
+
     def _clear_pending(self):
         """End pending progress line before printing a new message"""
         if self._pending_line:

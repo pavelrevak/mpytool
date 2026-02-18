@@ -475,6 +475,14 @@ class MountHandler:
         return any(
             sp.startswith(prefix + '/') for sp in self._submounts)
 
+    def _find_mpy_path(self, mpy_path):
+        """Find actual path for .mpy file request."""
+        py_path = mpy_path[:-4] + '.py'
+        local_py = self._resolve_path(py_path)
+        if not local_py or not _os.path.isfile(local_py):
+            return None
+        return self._mpy_cross.find_compiled(local_py)
+
     def _do_stat(self):
         path = self._rd_str()
         if self._log:
@@ -514,26 +522,13 @@ class MountHandler:
 
         # .mpy file with -m mode
         if path.endswith('.mpy') and self._mpy_cross:
-            py_path = path[:-4] + '.py'
-            local_py = self._resolve_path(py_path)
-
-            if local_py and _os.path.isfile(local_py):
-                # 1. Check prebuilt .mpy in same dir
-                local_mpy = local_py[:-3] + '.mpy'
-                if _os.path.exists(local_mpy):
-                    try:
-                        self._send_stat(_os.stat(local_mpy))
-                        return
-                    except OSError:
-                        pass
-                # 2. Check cache (from previous .py stat)
-                cache_path = self._mpy_cross.compiled.get(local_py)
-                if cache_path and _os.path.exists(cache_path):
-                    try:
-                        self._send_stat(_os.stat(cache_path))
-                        return
-                    except OSError:
-                        pass
+            mpy_local = self._find_mpy_path(path)
+            if mpy_local:
+                try:
+                    self._send_stat(_os.stat(mpy_local))
+                    return
+                except OSError:
+                    pass
             self._wr_s8(-_errno.ENOENT)
             return
 
@@ -614,19 +609,9 @@ class MountHandler:
 
         # .mpy file with -m mode: redirect to prebuilt or cache
         if path.endswith('.mpy') and self._mpy_cross:
-            py_path = path[:-4] + '.py'
-            local_py = self._resolve_path(py_path)
-
-            if local_py and _os.path.isfile(local_py):
-                # 1. Check prebuilt .mpy in same dir
-                local_mpy = local_py[:-3] + '.mpy'
-                if _os.path.exists(local_mpy):
-                    local = local_mpy
-                else:
-                    # 2. Check cache
-                    cache_path = self._mpy_cross.compiled.get(local_py)
-                    if cache_path and _os.path.exists(cache_path):
-                        local = cache_path
+            mpy_local = self._find_mpy_path(path)
+            if mpy_local:
+                local = mpy_local
 
         try:
             # Always binary on PC side — text conversion happens on device

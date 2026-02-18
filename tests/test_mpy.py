@@ -126,7 +126,7 @@ class TestFileInfo(unittest.TestCase):
 
 
 class TestDetectChunkSize(unittest.TestCase):
-    """Tests for Mpy._detect_chunk_size method"""
+    """Tests for Mpy.detect_chunk_size method"""
 
     def setUp(self):
         self.mock_conn = Mock()
@@ -142,59 +142,59 @@ class TestDetectChunkSize(unittest.TestCase):
     def test_large_ram_uses_32k_chunks(self):
         """Test that devices with >256KB RAM use 32KB chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 300 * 1024  # 300KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 32768)
 
     def test_medium_large_ram_uses_16k_chunks(self):
         """Test that devices with >128KB RAM use 16KB chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 150 * 1024  # 150KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 16384)
 
     def test_medium_ram_uses_8k_chunks(self):
         """Test that devices with >64KB RAM use 8KB chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 80 * 1024  # 80KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 8192)
 
     def test_small_ram_uses_4k_chunks(self):
         """Test that devices with >48KB RAM use 4KB chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 55 * 1024  # 55KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 4096)
 
     def test_smaller_ram_uses_2k_chunks(self):
         """Test that devices with >32KB RAM use 2KB chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 40 * 1024  # 40KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 2048)
 
     def test_small_ram_uses_1k_chunks(self):
         """Test that devices with >24KB RAM use 1KB chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 28 * 1024  # 28KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 1024)
 
     def test_tiny_ram_uses_512_chunks(self):
         """Test that devices with <=24KB RAM use 512B chunks"""
         self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 512)
 
     def test_error_defaults_to_512(self):
         """Test that errors default to 512B chunks"""
         from mpytool.mpy_comm import CmdError
         self.mpy._mpy_comm.exec_eval.side_effect = CmdError("cmd", b"", b"error")
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         self.assertEqual(chunk, 512)
 
     def test_caches_result(self):
         """Test that chunk size is cached after first detection"""
         self.mpy._mpy_comm.exec_eval.return_value = 300 * 1024  # 300KB
-        chunk1 = self.mpy._detect_chunk_size()
+        chunk1 = self.mpy.detect_chunk_size()
         # Change return value - should still use cached
         self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
-        chunk2 = self.mpy._detect_chunk_size()
+        chunk2 = self.mpy.detect_chunk_size()
         self.assertEqual(chunk1, chunk2)
         self.assertEqual(chunk2, 32768)
 
@@ -202,7 +202,7 @@ class TestDetectChunkSize(unittest.TestCase):
         """Test that user-specified chunk size skips auto-detection"""
         mpy = Mpy(self.mock_conn, chunk_size=4096)
         mpy._mpy_comm = Mock()
-        chunk = mpy._detect_chunk_size()
+        chunk = mpy.detect_chunk_size()
         self.assertEqual(chunk, 4096)
         # exec_eval should not be called (no RAM detection)
         mpy._mpy_comm.exec_eval.assert_not_called()

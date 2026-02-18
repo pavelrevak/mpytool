@@ -7,15 +7,7 @@ import time as _time
 import mpytool as _mpytool
 import mpytool.utils as _utils
 from mpytool.mpy_cross import MpyCross
-
-
-# Import ParamsError from mpytool to avoid duplicate class definition
-def _get_params_error():
-    from mpytool.mpytool import ParamsError
-    return ParamsError
-
-
-ParamsError = _get_params_error()
+from mpytool.mpytool import ParamsError
 
 
 def _join_remote_path(base, name):
@@ -88,7 +80,7 @@ class CopyCommand:
         self._remote_file_cache = {}
 
         # Debug mode
-        self._is_debug = getattr(self._log, '_loglevel', 1) >= 4
+        self._is_debug = getattr(self._log, 'loglevel', 1) >= 4
 
     @property
     def _verbose(self):
@@ -106,6 +98,18 @@ class CopyCommand:
         if self._is_excluded_fn:
             return self._is_excluded_fn(name)
         return False
+
+    def _mpy_cache_info(self, src_path):
+        """Get mpy-cross compiled file info for a source file.
+
+        Returns:
+            (mpy_path, file_size) - mpy_path is None if not compiled
+        """
+        if self._mpy_cross:
+            mpy_path = self._mpy_cross.find_compiled(src_path)
+            if mpy_path:
+                return mpy_path, _os.path.getsize(mpy_path)
+        return None, _os.path.getsize(src_path)
 
     # --- Formatting methods ---
 
@@ -269,12 +273,10 @@ class CopyCommand:
             basename = _os.path.basename(src_path)
             if basename and not _os.path.basename(dst_path):
                 dst_path = _join_remote_path(dst_path, basename)
-            cache = self._mpy_cross and self._mpy_cross.compiled.get(src_path)
+            cache, size = self._mpy_cache_info(src_path)
             if cache:
                 dst_path = dst_path[:-3] + '.mpy'
-                files[dst_path] = _os.path.getsize(cache)
-            else:
-                files[dst_path] = _os.path.getsize(src_path)
+            files[dst_path] = size
         elif _os.path.isdir(src_path):
             if add_src_basename:
                 basename = _os.path.basename(_os.path.abspath(src_path))
@@ -291,17 +293,11 @@ class CopyCommand:
                     rel_path = ''
                 for file_name in filenames:
                     spath = _os.path.join(root, file_name)
-                    mpyc = self._mpy_cross
-                    cache = mpyc and mpyc.compiled.get(spath)
-                    if cache:
-                        dst_name = file_name[:-3] + '.mpy'
-                        dpath = _join_remote_path(
-                            _join_remote_path(dst_path, rel_path), dst_name)
-                        files[dpath] = _os.path.getsize(cache)
-                    else:
-                        dpath = _join_remote_path(
-                            _join_remote_path(dst_path, rel_path), file_name)
-                        files[dpath] = _os.path.getsize(spath)
+                    cache, size = self._mpy_cache_info(spath)
+                    dst_name = file_name[:-3] + '.mpy' if cache else file_name
+                    dpath = _join_remote_path(
+                        _join_remote_path(dst_path, rel_path), dst_name)
+                    files[dpath] = size
         return files
 
     def _collect_destination_paths(self, sources, dest, dest_is_remote):
@@ -471,8 +467,8 @@ class CopyCommand:
             self._stats_wire_bytes += wire
         return True  # uploaded
 
-    def _put_dir(self, src_path, dst_path, show_progress=True,
-            target_name=None):
+    def _put_dir(
+            self, src_path, dst_path, show_progress=True, target_name=None):
         """Upload directory to device
 
         Arguments:
@@ -544,8 +540,8 @@ class CopyCommand:
         with open(dst_path, 'wb') as dst_file:
             dst_file.write(data)
 
-    def _get_dir(self, src_path, dst_path, copy_contents=False,
-            show_progress=True):
+    def _get_dir(
+            self, src_path, dst_path, copy_contents=False, show_progress=True):
         """Download directory from device"""
         if not copy_contents:
             basename = _remote_basename(src_path)
@@ -762,7 +758,7 @@ class CopyCommand:
             elif dest_is_remote:
                 self._cp_local_to_remote(src_path, dest_path, dest_is_dir)
             else:
-                self.verbose(f"skip local-to-local: {src} -> {dest}", 2)
+                self._log.error(f"local-to-local copy not supported: {src}")
 
     def count_files(self, sources, dest):
         """Count files for batch progress.
@@ -838,10 +834,10 @@ class CopyCommand:
 
     def print_transfer_info(self):
         """Print transfer settings (chunk size and compression)"""
-        chunk = self.mpy._detect_chunk_size()
+        chunk = self.mpy.detect_chunk_size()
         chunk_str = f"{chunk // 1024}K" if chunk >= 1024 else str(chunk)
         if self._compress is None:
-            compress = self.mpy._detect_deflate()
+            compress = self.mpy.detect_deflate()
         else:
             compress = self._compress
         compress_str = "on" if compress else "off"

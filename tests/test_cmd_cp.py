@@ -28,7 +28,7 @@ class TestCollectDstFiles(unittest.TestCase):
     def setUp(self):
         # Create a mock mpy instance
         self.mock_mpy = Mock()
-        self.mock_log = Mock(_loglevel=1)
+        self.mock_log = Mock(loglevel=1)
         self.copy_cmd = CopyCommand(
             self.mock_mpy, self.mock_log,
             lambda *a, **kw: None, lambda: False, lambda: 1,
@@ -109,7 +109,7 @@ class TestFileNeedsUpdateWithCache(unittest.TestCase):
 
     def setUp(self):
         self.mock_mpy = Mock()
-        self.mock_log = Mock(_loglevel=1)
+        self.mock_log = Mock(loglevel=1)
         self.copy_cmd = CopyCommand(
             self.mock_mpy, self.mock_log,
             lambda *a, **kw: None, lambda: False, lambda: 1)
@@ -171,7 +171,7 @@ class TestPrefetchRemoteInfo(unittest.TestCase):
 
     def setUp(self):
         self.mock_mpy = Mock()
-        self.mock_log = Mock(_loglevel=1)
+        self.mock_log = Mock(loglevel=1)
         self.copy_cmd = CopyCommand(
             self.mock_mpy, self.mock_log,
             lambda *a, **kw: None, lambda: False, lambda: 1)
@@ -240,7 +240,7 @@ class TestResetBatchProgress(unittest.TestCase):
 
     def setUp(self):
         self.mock_mpy = Mock()
-        self.mock_log = Mock(_loglevel=1)
+        self.mock_log = Mock(loglevel=1)
         self.copy_cmd = CopyCommand(
             self.mock_mpy, self.mock_log,
             lambda *a, **kw: None, lambda: False, lambda: 1)
@@ -258,7 +258,7 @@ class TestExcludeInCollect(unittest.TestCase):
 
     def setUp(self):
         self.mock_mpy = Mock()
-        self.mock_log = Mock(_loglevel=1)
+        self.mock_log = Mock(loglevel=1)
         self.copy_cmd = CopyCommand(
             self.mock_mpy, self.mock_log,
             lambda *a, **kw: None, lambda: False, lambda: 1,

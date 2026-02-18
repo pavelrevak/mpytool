@@ -518,7 +518,7 @@ def _mt_pfind(label):
 
         return best_cmd, chunk_size, best_type
 
-    def _detect_chunk_size(self):
+    def detect_chunk_size(self):
         """Detect optimal chunk size based on device free RAM
 
         Returns:
@@ -552,7 +552,7 @@ def _mt_pfind(label):
         Mpy._CHUNK_AUTO_DETECTED = chunk
         return chunk
 
-    def _detect_deflate(self):
+    def detect_deflate(self):
         """Detect if deflate module is available and device has enough RAM
 
         Returns:
@@ -560,7 +560,7 @@ def _mt_pfind(label):
         """
         if Mpy._DEFLATE_AVAILABLE is None:
             # Check RAM first - need at least 64KB for decompression
-            chunk = self._detect_chunk_size()
+            chunk = self.detect_chunk_size()
             if chunk < 8192:  # chunk < 8K means RAM <= 64KB
                 Mpy._DEFLATE_AVAILABLE = False
             else:
@@ -585,14 +585,14 @@ def _mt_pfind(label):
                 encodings_used: set of encoding types ('raw', 'base64', 'compressed')
                 wire_bytes: number of bytes sent over the wire (encoded size)
         """
-        chunk_size = self._detect_chunk_size()
+        chunk_size = self.detect_chunk_size()
         total_size = len(data)
         transferred = 0
         wire_bytes = 0
         encodings_used = set()
 
         if compress is None:
-            compress = self._detect_deflate()
+            compress = self.detect_deflate()
 
         self.import_module('ubinascii as ub')
         if compress:
@@ -1404,10 +1404,10 @@ def _mt_pfind(label):
             )
 
         if compress is None:
-            compress = self._detect_deflate()
+            compress = self.detect_deflate()
 
         flash_block = 4096
-        chunk_size = self._detect_chunk_size()
+        chunk_size = self.detect_chunk_size()
         chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
 
         self.import_module('ubinascii as ub')
@@ -1597,7 +1597,7 @@ def _mt_pfind(label):
             except (_mpy_comm.CmdError, Timeout):
                 pass
 
-            chunk_size = self._detect_chunk_size()
+            chunk_size = self.detect_chunk_size()
             agent_code = MOUNT_AGENT.replace(
                 'CHUNK_SIZE', str(chunk_size))
             self._mount_agent_code = agent_code
