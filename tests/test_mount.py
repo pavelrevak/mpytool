@@ -219,12 +219,12 @@ class TestMountHandler(unittest.TestCase):
         self.assertEqual(fd, -errno.EACCES)
 
     def test_read_invalid_fd(self):
-        """read() with invalid fd returns empty bytes"""
+        """read() with invalid fd returns EBADF"""
         self.conn.feed(struct.pack('b', 99) + _pack_s32(1024))
         self.handler.dispatch(CMD_READ)
         data = self.conn.get_written()
         length = struct.unpack('<i', data[0:4])[0]
-        self.assertEqual(length, 0)
+        self.assertEqual(length, -errno.EBADF)
 
     def test_close_all(self):
         """close_all() closes all open files"""
@@ -2012,7 +2012,7 @@ class TestMountHandlerWrite(unittest.TestCase):
         handler.dispatch(CMD_READLINE)
         result = self.conn.get_written()
         length = struct.unpack('<i', result[0:4])[0]
-        self.assertEqual(length, 0)
+        self.assertEqual(length, -errno.EBADF)
 
     def test_readline_after_seek(self):
         """readline() works correctly after seek"""

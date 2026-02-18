@@ -207,6 +207,7 @@ class _mt_F(io.IOBase):
  def _refill(s):
   _mt_bg(5);_mt_w('b',s.fd);_mt_w('<i',CHUNK_SIZE)
   n=_mt_r('<i')
+  if n<0:_mt_en();raise OSError(-n)
   if n>0:
    mv=memoryview(s._rb);p=0
    while p<n:
@@ -234,6 +235,7 @@ class _mt_F(io.IOBase):
    r+=s._rb[s._rp:s._rn];s._rp=s._rn
   _mt_bg(11);_mt_w('b',s.fd)
   n=_mt_r('<i')
+  if n<0:_mt_en();raise OSError(-n)
   if n>0:r+=_mt_si.read(n)
   _mt_en();s._pos+=len(r);return str(r,'utf8') if s.txt else bytes(r)
  def read(s,n=-1):
@@ -649,17 +651,17 @@ class MountHandler:
             self._log.info("MOUNT: READ: fd=%d n=%d", fd, n)
         f = self._files.get(fd)
         if f is None:
-            self._wr_s32(0)
+            self._wr_s32(-_errno.EBADF)
             return
         data = f.read(n)
         self._wr_bytes(data if data else b'')
 
     def _do_write(self):
+        fd = self._rd_s8()
+        data = self._rd_bytes()
         if not self._writable:
             self._wr_s8(-_errno.EROFS)
             return
-        fd = self._rd_s8()
-        data = self._rd_bytes()
         if self._log:
             self._log.info("MOUNT: WRITE: fd=%d n=%d", fd, len(data))
         f = self._files.get(fd)
@@ -673,12 +675,12 @@ class MountHandler:
             self._wr_s8(-e.errno)
 
     def _do_mkdir(self):
-        if not self._writable:
-            self._wr_s8(-_errno.EROFS)
-            return
         path = self._rd_str()
         if self._log:
             self._log.info("MOUNT: MKDIR: '%s'", path)
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(-_errno.EACCES)
@@ -690,14 +692,14 @@ class MountHandler:
             self._wr_s8(-e.errno)
 
     def _do_remove(self):
-        if not self._writable:
-            self._wr_s8(-_errno.EROFS)
-            return
         path = self._rd_str()
         recursive = self._rd_s8()
         if self._log:
             self._log.info(
                 "MOUNT: REMOVE: '%s' recursive=%d", path, recursive)
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(-_errno.EACCES)
@@ -718,14 +720,14 @@ class MountHandler:
             self._wr_s8(-e.errno)
 
     def _do_rename(self):
-        if not self._writable:
-            self._wr_s8(-_errno.EROFS)
-            return
         old_path = self._rd_str()
         new_path = self._rd_str()
         if self._log:
             self._log.info(
                 "MOUNT: RENAME: '%s' -> '%s'", old_path, new_path)
+        if not self._writable:
+            self._wr_s8(-_errno.EROFS)
+            return
         old_local = self._resolve_path(old_path)
         new_local = self._resolve_path(new_path)
         if old_local is None or new_local is None:
@@ -760,7 +762,7 @@ class MountHandler:
             self._log.info("MOUNT: READLINE: fd=%d", fd)
         f = self._files.get(fd)
         if f is None:
-            self._wr_s32(0)
+            self._wr_s32(-_errno.EBADF)
             return
         line = f.readline()
         self._wr_bytes(line if line else b'')
