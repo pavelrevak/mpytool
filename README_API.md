@@ -96,7 +96,7 @@ conn = mpytool.ConnSocket(address='192.168.1.100:8266')
 
 ### Common Connection Methods
 
-All connection types (including `ConnIntercept` used by mount) share these methods:
+All connection types share these methods:
 
 #### read(timeout=0)
 
@@ -131,7 +131,7 @@ Property indicating if the connection is busy with an internal protocol exchange
 conn.busy  # True during VFS dispatch, False otherwise
 ```
 
-Always `False` on plain `ConnSerial`/`ConnSocket`. On `ConnIntercept` (after mount), `True` while servicing a VFS request from the device.
+Always `False` when no mount is active. After `mount()`, `True` while servicing a VFS request from the device.
 
 #### fd
 
@@ -661,9 +661,8 @@ mpy.mount(local_path, mount_point='/remote', log=None, writable=False, mpy_cross
 The device can then read, import and execute files from the local directory
 without uploading to flash. A MicroPython agent is injected into the device
 that forwards filesystem requests (stat, listdir, open, read, close, and
-optionally write, mkdir, remove) to the PC over the serial link. The connection
-is wrapped in a transparent proxy (`ConnIntercept`) that intercepts VFS protocol
-messages while passing REPL I/O through.
+optionally write, mkdir, remove, rename, seek) to the PC over the serial link.
+VFS protocol messages are intercepted transparently while REPL I/O passes through.
 
 **Write support:** If `writable=True`, the device can create, modify and delete
 files in the mounted directory. All changes are written directly to the local

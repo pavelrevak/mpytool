@@ -126,8 +126,8 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | VFS SEEK | 🟢 | 🟢 |
 | VFS READLINE | 🟢 | 🟢 |
 | File iteration | 🟢 | 🟢 |
-| Iterative listdir | 🟢 | 🟢 |
-| Agent size | 🟢 4.2KB raw | 🔴 5.5KB compressed |
+| Directory listing | 🟢 batch (1 RTT) | 🔴 iterative (buggy recursion) |
+| Agent size | 🟢 4.3KB raw | 🔴 5.5KB compressed |
 
 ## Summary
 
@@ -140,7 +140,8 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 - Shell completion with remote path support
 - CWD and sys.path tracking across commands
 - No auto soft-reset (preserves device state between commands)
-- Smaller VFS agent (4.2KB vs 5.5KB) — 24% less RAM, faster mount
+- Smaller VFS agent (4.3KB vs 5.5KB) — 22% less RAM, faster mount
+- Batch directory listing (1 RTT) — mpremote has recursion bug with shared state
 - Minimalist design (blocking I/O, simpler code)
 
 **mpremote advantages:**

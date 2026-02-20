@@ -1,5 +1,6 @@
 """MicroPython tool: MPY communication"""
 
+import re as _re
 import time as _time
 
 import mpytool.conn as _conn
@@ -45,8 +46,7 @@ class CmdError(MpyError):
 
     def _friendly_error(self):
         """Translate known OSError codes to human-readable messages"""
-        import re
-        match = re.search(r'OSError: (\d+)', self._error)
+        match = _re.search(r'OSError: (\d+)', self._error)
         if match:
             code = match.group(1)
             msg = self._OSERROR_MESSAGES.get(code)
@@ -175,6 +175,11 @@ class MpyComm():
         self._conn.read_until(b'soft reboot', timeout=1)
         self._conn.read_until(b'>', timeout=1)
         self._repl_mode = True
+        self._raw_paste_supported = None
+
+    def reset_state(self):
+        """Reset internal state (call after device reset)"""
+        self._repl_mode = None
         self._raw_paste_supported = None
 
     def exec(self, command, timeout=5):

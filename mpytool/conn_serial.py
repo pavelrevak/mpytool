@@ -55,7 +55,10 @@ class ConnSerial(_conn.Conn):
         try:
             in_waiting = self._serial.in_waiting
             if in_waiting > 0:
-                return self._serial.read(in_waiting)
+                data = self._serial.read(in_waiting)
+                if data and self._log:
+                    self._log.debug("RX: %r", data)
+                return data
             return None
         except OSError as err:
             raise _conn.ConnError(f"Connection lost: {err}") from err
@@ -64,6 +67,8 @@ class ConnSerial(_conn.Conn):
         """Write data to serial port"""
         if self._serial is None:
             raise _conn.ConnError("Not connected")
+        if self._log:
+            self._log.debug("TX: %r", data)
         try:
             return self._serial.write(data)
         except OSError as err:

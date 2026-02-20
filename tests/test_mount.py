@@ -9,8 +9,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from mpytool.mount import (
-    MountHandler, ConnIntercept,
-    ESCAPE, CMD_STAT, CMD_ILISTDIR_START, CMD_ILISTDIR_NEXT, CMD_OPEN,
+    MountHandler, VfsProtocol,
+    ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN,
     CMD_CLOSE, CMD_READ, CMD_WRITE, CMD_MKDIR, CMD_REMOVE, CMD_RENAME,
     CMD_SEEK, CMD_READLINE, CMD_MIN, CMD_MAX,
 )
@@ -29,19 +29,25 @@ def _pack_str(s):
     return _pack_s32(len(data)) + data
 
 
-def _parse_ilistdir_start(data):
-    """Parse ilistdir START response - returns errno (0 = OK)"""
-    return struct.unpack('b', data[0:1])[0]
-
-
-def _parse_ilistdir_next(data):
-    """Parse ilistdir NEXT response - returns (name, mode) or (None, 0) at end"""
-    name_len = struct.unpack('<i', data[0:4])[0]
-    if name_len <= 0:
-        return None, 0  # end marker - no mode sent
-    name = data[4:4 + name_len].decode()
-    mode = struct.unpack('<I', data[4 + name_len:8 + name_len])[0]
-    return name, mode
+def _parse_listdir(data):
+    """Parse listdir response - returns (errno, {name: (mode, size)})"""
+    errno_val = struct.unpack('b', data[0:1])[0]
+    if errno_val < 0:
+        return errno_val, {}
+    count = struct.unpack('<i', data[1:5])[0]
+    entries = {}
+    offset = 5
+    for _ in range(count):
+        name_len = struct.unpack('<i', data[offset:offset + 4])[0]
+        offset += 4
+        name = data[offset:offset + name_len].decode()
+        offset += name_len
+        mode = struct.unpack('<I', data[offset:offset + 4])[0]
+        offset += 4
+        size = struct.unpack('<I', data[offset:offset + 4])[0]
+        offset += 4
+        entries[name] = (mode, size)
+    return 0, entries
 
 
 class MockConnForHandler:
@@ -93,23 +99,12 @@ class TestMountHandler(unittest.TestCase):
         self.handler.close_all()
         shutil.rmtree(self.temp_dir)
 
-    def _ilistdir(self, path):
-        """Helper: do full ilistdir and return (errno, {name: mode} dict)"""
+    def _listdir(self, path):
+        """Helper: do listdir and return (errno, {name: (mode, size)} dict)"""
         self.conn.feed(_pack_str(path))
-        self.handler.dispatch(CMD_ILISTDIR_START)
+        self.handler.dispatch(CMD_LISTDIR)
         data = self.conn.get_written()
-        err = _parse_ilistdir_start(data)
-        if err < 0:
-            return err, {}
-        entries = {}
-        while True:
-            self.handler.dispatch(CMD_ILISTDIR_NEXT)
-            data = self.conn.get_written()
-            name, mode = _parse_ilistdir_next(data)
-            if name is None:
-                break
-            entries[name] = mode
-        return 0, entries
+        return _parse_listdir(data)
 
     def test_stat_file(self):
         """stat() on existing file returns mode, size, mtime"""
@@ -159,50 +154,44 @@ class TestMountHandler(unittest.TestCase):
         mode = struct.unpack('<I', data[1:5])[0]
         self.assertEqual(mode, 0x4000)
 
-    def test_ilistdir(self):
-        """ilistdir() returns all entries with modes"""
-        err, entries = self._ilistdir('/')
+    def test_listdir(self):
+        """listdir() returns all entries with modes and sizes"""
+        err, entries = self._listdir('/')
         self.assertEqual(err, 0)
         self.assertEqual(len(entries), 3)  # test.py, data.bin, lib/
         self.assertIn('test.py', entries)
         self.assertIn('data.bin', entries)
         self.assertIn('lib', entries)
-        self.assertEqual(entries['test.py'], 0x8000)
-        self.assertEqual(entries['lib'], 0x4000)
+        self.assertEqual(entries['test.py'], (0x8000, len(self.test_content)))
+        self.assertEqual(entries['data.bin'], (0x8000, 1024))
+        self.assertEqual(entries['lib'], (0x4000, 0))
 
-    def test_ilistdir_subdir(self):
-        """ilistdir() on subdirectory"""
-        err, entries = self._ilistdir('/lib')
+    def test_listdir_subdir(self):
+        """listdir() on subdirectory"""
+        err, entries = self._listdir('/lib')
         self.assertEqual(err, 0)
         self.assertEqual(len(entries), 1)  # helper.py
 
-    def test_ilistdir_nonexistent(self):
-        """ilistdir() on nonexistent dir returns ENOENT"""
-        err, entries = self._ilistdir('/nope')
+    def test_listdir_nonexistent(self):
+        """listdir() on nonexistent dir returns ENOENT"""
+        err, entries = self._listdir('/nope')
         self.assertEqual(err, -errno.ENOENT)
 
-    def test_ilistdir_next_without_start(self):
-        """ilistdir NEXT without START returns empty (end marker)"""
-        self.handler.dispatch(CMD_ILISTDIR_NEXT)
-        data = self.conn.get_written()
-        name, mode = _parse_ilistdir_next(data)
-        self.assertIsNone(name)
-
-    def test_ilistdir_empty_dir(self):
-        """ilistdir on empty directory returns no entries"""
+    def test_listdir_empty_dir(self):
+        """listdir on empty directory returns no entries"""
         os.makedirs(os.path.join(self.temp_dir, 'empty'))
-        err, entries = self._ilistdir('/empty')
+        err, entries = self._listdir('/empty')
         self.assertEqual(err, 0)
         self.assertEqual(len(entries), 0)
 
-    def test_ilistdir_many_files(self):
-        """ilistdir with many files works correctly"""
+    def test_listdir_many_files(self):
+        """listdir with many files works correctly"""
         many_dir = os.path.join(self.temp_dir, 'many')
         os.makedirs(many_dir)
         for i in range(100):
             with open(os.path.join(many_dir, f'file{i:03d}.txt'), 'w') as f:
                 f.write('x')
-        err, entries = self._ilistdir('/many')
+        err, entries = self._listdir('/many')
         self.assertEqual(err, 0)
         self.assertEqual(len(entries), 100)
         self.assertIn('file000.txt', entries)
@@ -313,23 +302,12 @@ class TestMountHandlerSubmount(unittest.TestCase):
         shutil.rmtree(self.temp_root)
         shutil.rmtree(self.temp_sub)
 
-    def _ilistdir(self, path):
-        """Helper: do full ilistdir and return (errno, {name: mode} dict)"""
+    def _listdir(self, path):
+        """Helper: do listdir and return (errno, {name: (mode, size)} dict)"""
         self.conn.feed(_pack_str(path))
-        self.handler.dispatch(CMD_ILISTDIR_START)
+        self.handler.dispatch(CMD_LISTDIR)
         data = self.conn.get_written()
-        err = _parse_ilistdir_start(data)
-        if err < 0:
-            return err, {}
-        entries = {}
-        while True:
-            self.handler.dispatch(CMD_ILISTDIR_NEXT)
-            data = self.conn.get_written()
-            name, mode = _parse_ilistdir_next(data)
-            if name is None:
-                break
-            entries[name] = mode
-        return 0, entries
+        return _parse_listdir(data)
 
     def test_stat_submount_file(self):
         """stat on submount file resolves to submount dir"""
@@ -359,16 +337,16 @@ class TestMountHandlerSubmount(unittest.TestCase):
         result = struct.unpack('b', data[0:1])[0]
         self.assertEqual(result, 0)
 
-    def test_ilistdir_root_includes_virtual(self):
-        """ilistdir root includes virtual submount directory"""
-        err, entries = self._ilistdir('/')
+    def test_listdir_root_includes_virtual(self):
+        """listdir root includes virtual submount directory"""
+        err, entries = self._listdir('/')
         self.assertEqual(err, 0)
         self.assertIn('test.py', entries)
         self.assertIn('lib', entries)  # virtual dir injected
 
-    def test_ilistdir_submount(self):
-        """ilistdir on submount path lists submount contents"""
-        err, entries = self._ilistdir('/lib')
+    def test_listdir_submount(self):
+        """listdir on submount path lists submount contents"""
+        err, entries = self._listdir('/lib')
         self.assertEqual(err, 0)
         self.assertIn('helper.py', entries)
         self.assertIn('subdir', entries)
@@ -397,11 +375,11 @@ class TestMountHandlerSubmount(unittest.TestCase):
         fd = struct.unpack('b', data[0:1])[0]
         self.assertEqual(fd, -errno.EACCES)
 
-    def test_ilistdir_no_duplicate_when_real_exists(self):
+    def test_listdir_no_duplicate_when_real_exists(self):
         """Submount dir not duplicated if real dir with same name exists"""
         # Create real 'lib' dir in root
         os.makedirs(os.path.join(self.temp_root, 'lib'), exist_ok=True)
-        err, entries = self._ilistdir('/')
+        err, entries = self._listdir('/')
         self.assertEqual(err, 0)
         names = list(entries.keys())
         # 'lib' should appear only once
@@ -437,23 +415,12 @@ class TestMountHandlerVirtualDir(unittest.TestCase):
         shutil.rmtree(self.temp_pkg)
         shutil.rmtree(self.temp_file_dir)
 
-    def _ilistdir(self, path):
-        """Helper: do full ilistdir and return (errno, {name: mode} dict)"""
+    def _listdir(self, path):
+        """Helper: do listdir and return (errno, {name: (mode, size)} dict)"""
         self.conn.feed(_pack_str(path))
-        self.handler.dispatch(CMD_ILISTDIR_START)
+        self.handler.dispatch(CMD_LISTDIR)
         data = self.conn.get_written()
-        err = _parse_ilistdir_start(data)
-        if err < 0:
-            return err, {}
-        entries = {}
-        while True:
-            self.handler.dispatch(CMD_ILISTDIR_NEXT)
-            data = self.conn.get_written()
-            name, mode = _parse_ilistdir_next(data)
-            if name is None:
-                break
-            entries[name] = mode
-        return 0, entries
+        return _parse_listdir(data)
 
     def test_stat_virtual_dir(self):
         """stat on virtual intermediate dir returns S_IFDIR"""
@@ -465,19 +432,22 @@ class TestMountHandlerVirtualDir(unittest.TestCase):
         mode = struct.unpack('<I', data[1:5])[0]
         self.assertEqual(mode, 0x4000)
 
-    def test_ilistdir_virtual_dir(self):
-        """ilistdir on virtual intermediate dir returns submount entries"""
-        err, entries = self._ilistdir('/lib')
+    def test_listdir_virtual_dir(self):
+        """listdir on virtual intermediate dir returns submount entries"""
+        err, entries = self._listdir('/lib')
         self.assertEqual(err, 0)
         self.assertEqual(len(entries), 2)
         self.assertIn('pkg', entries)
         self.assertIn('single.py', entries)
-        self.assertEqual(entries['pkg'], 0x4000)  # directory
-        self.assertEqual(entries['single.py'], 0x8000)  # file
+        self.assertEqual(entries['pkg'][0], 0x4000)  # directory
+        self.assertEqual(entries['single.py'][0], 0x8000)  # file
+        # File should have size, directory should have 0
+        self.assertGreater(entries['single.py'][1], 0)
+        self.assertEqual(entries['pkg'][1], 0)
 
-    def test_ilistdir_root_shows_virtual(self):
-        """ilistdir root includes virtual 'lib' directory"""
-        err, entries = self._ilistdir('/')
+    def test_listdir_root_shows_virtual(self):
+        """listdir root includes virtual 'lib' directory"""
+        err, entries = self._listdir('/')
         self.assertEqual(err, 0)
         self.assertIn('root.txt', entries)
         self.assertIn('lib', entries)
@@ -506,189 +476,240 @@ class TestMountHandlerVirtualDir(unittest.TestCase):
         self.assertEqual(content, b'# single\n')
 
 
-class TestConnIntercept(unittest.TestCase):
-    """Tests for ConnIntercept transparent proxy"""
+class TestVfsProtocol(unittest.TestCase):
+    """Tests for VfsProtocol VFS protocol handler.
+
+    Note: VfsProtocol receives data INCLUDING ESCAPE byte.
+    So process() gets [ESCAPE, CMD, MID, ...].
+    """
 
     def setUp(self):
         self.mock_conn = Mock()
-        self.mock_conn.fd = 5
+        self.mock_conn._buffer = bytearray()
         self.mock_handler = Mock()
 
     def _make_intercept(self, remount_fn=None):
-        return ConnIntercept(
-            self.mock_conn, {0: self.mock_handler},
-            remount_fn=remount_fn)
-
-    def test_fd_delegation(self):
-        """fd property delegates to underlying connection"""
-        intercept = self._make_intercept()
-        self.assertEqual(intercept.fd, 5)
-
-    def test_passthrough_no_escape(self):
-        """Data without 0x18 passes through unchanged"""
-        intercept = self._make_intercept()
-        self.mock_conn._read_available.return_value = b'Hello World\r\n'
-        result = intercept._read_available()
-        self.assertEqual(result, b'Hello World\r\n')
-        self.mock_handler.dispatch.assert_not_called()
+        intercept = VfsProtocol(self.mock_conn, remount_fn=remount_fn)
+        intercept.add_handler(0, self.mock_handler)
+        return intercept
 
     def test_passthrough_none(self):
-        """None from underlying conn passes through"""
+        """None returns None (no pending data)"""
         intercept = self._make_intercept()
-        self.mock_conn._read_available.return_value = None
-        result = intercept._read_available()
+        result = intercept.process(None)
         self.assertIsNone(result)
 
-    def test_intercept_vfs_command(self):
-        """0x18 + valid CMD triggers dispatch"""
+    def test_valid_cmd_triggers_dispatch(self):
+        """ESCAPE + valid CMD + MID triggers dispatch"""
         intercept = self._make_intercept()
-        # VFS command in stream: ESCAPE + CMD_STAT + MID=0
-        self.mock_conn._read_available.return_value = bytes([ESCAPE, CMD_STAT, 0])
-        result = intercept._read_available()
-        # ACK sent
+        # ESCAPE + CMD_STAT + MID=0
+        result = intercept.process(bytes([ESCAPE, CMD_STAT, 0]))
+        # ACK sent via write()
         self.mock_conn.write.assert_called_once_with(bytes([ESCAPE]))
         # Handler dispatched
         self.mock_handler.dispatch.assert_called_once_with(CMD_STAT)
-        # No REPL output (VFS command consumed), but returns b'' to signal processing occurred
+        # Returns b'' (done, no leftover)
         self.assertEqual(result, b'')
 
-    def test_mixed_data(self):
-        """VFS command embedded in REPL output"""
+    def test_invalid_cmd_returns_with_escape(self):
+        """Invalid CMD returns ESCAPE + data back to REPL"""
         intercept = self._make_intercept()
-        data = b'Hello' + bytes([ESCAPE, CMD_READ, 0]) + b'World'
-        self.mock_conn._read_available.return_value = data
-        result = intercept._read_available()
-        self.assertEqual(result, b'HelloWorld')
-        self.mock_handler.dispatch.assert_called_once_with(CMD_READ)
-
-    def test_partial_escape_at_end(self):
-        """0x18 at end of buffer saved as pending"""
-        intercept = self._make_intercept()
-        # Only escape byte, no CMD yet
-        self.mock_conn._read_available.return_value = b'data' + bytes([ESCAPE])
-        result = intercept._read_available()
-        self.assertEqual(result, b'data')
-        self.assertEqual(intercept._pending, bytes([ESCAPE]))
+        # ESCAPE + 0xFF (not a valid command)
+        result = intercept.process(bytes([ESCAPE, 0xFF, 0x00]))
+        # ESCAPE + invalid cmd returned
+        self.assertEqual(result, bytes([ESCAPE, 0xFF, 0x00]))
         self.mock_handler.dispatch.assert_not_called()
 
-    def test_partial_escape_one_byte(self):
-        """0x18 + CMD but no MID saved as pending"""
+    def test_wrong_escape_returns_data(self):
+        """Data not starting with ESCAPE is returned as-is"""
         intercept = self._make_intercept()
-        self.mock_conn._read_available.return_value = bytes([ESCAPE, CMD_STAT])
-        result = intercept._read_available()
-        self.assertEqual(result, b'')  # Got new data, no REPL output
-        self.assertEqual(intercept._pending, bytes([ESCAPE, CMD_STAT]))
+        result = intercept.process(b'not escape')
+        self.assertEqual(result, b'not escape')
+        self.mock_handler.dispatch.assert_not_called()
+
+    def test_partial_cmd_needs_more_data(self):
+        """Partial data (ESCAPE + CMD, no MID) returns None"""
+        intercept = self._make_intercept()
+        result = intercept.process(bytes([ESCAPE, CMD_STAT]))
+        self.assertIsNone(result)  # Need more data
+        self.assertTrue(intercept.pending)
+        self.mock_handler.dispatch.assert_not_called()
 
     def test_pending_completed_next_read(self):
         """Pending bytes completed on next read"""
         intercept = self._make_intercept()
-        # First read: partial escape
-        self.mock_conn._read_available.return_value = bytes([ESCAPE, CMD_STAT])
-        intercept._read_available()
+        # First read: ESCAPE + CMD
+        intercept.process(bytes([ESCAPE, CMD_STAT]))
         # Second read: MID arrives
-        self.mock_conn._read_available.return_value = bytes([0])
-        intercept._read_available()
+        intercept.process(bytes([0]))
         self.mock_handler.dispatch.assert_called_once_with(CMD_STAT)
 
-    def test_invalid_cmd_passthrough(self):
-        """0x18 + invalid CMD passes through as data"""
+    def test_pending_property(self):
+        """pending property returns True when buffer has data"""
         intercept = self._make_intercept()
-        # 0x18 followed by 0xFF (not a valid command)
-        self.mock_conn._read_available.return_value = bytes([ESCAPE, 0xFF, 0x00])
-        result = intercept._read_available()
-        # 0x18 passes through, rest continues as normal data
-        self.assertIn(ESCAPE, result)
+        self.assertFalse(intercept.pending)
+        intercept._buf = b'pending'
+        self.assertTrue(intercept.pending)
 
-    def test_has_data_with_pending(self):
-        """_has_data returns True when pending data exists"""
+    def test_busy_property(self):
+        """busy property is True when not in STATE_ESCAPE"""
         intercept = self._make_intercept()
-        intercept._pending = b'pending'
-        self.mock_conn._has_data.return_value = False
-        self.assertTrue(intercept._has_data(0))
+        self.assertFalse(intercept.busy)
+        intercept._state = VfsProtocol.STATE_MID
+        self.assertTrue(intercept.busy)
 
-    def test_has_data_delegates(self):
-        """_has_data delegates to underlying conn when no pending"""
+    def test_close_all_handlers(self):
+        """close_all() closes all handlers"""
         intercept = self._make_intercept()
-        self.mock_conn._has_data.return_value = True
-        self.assertTrue(intercept._has_data(0.1))
-        self.mock_conn._has_data.assert_called_with(0.1)
-
-    def test_write_delegates(self):
-        """_write_raw delegates to underlying connection"""
-        intercept = self._make_intercept()
-        self.mock_conn._write_raw.return_value = 5
-        result = intercept._write_raw(b'hello')
-        self.assertEqual(result, 5)
-        self.mock_conn._write_raw.assert_called_with(b'hello')
-
-    def test_close_closes_all_handlers(self):
-        """close() closes all handlers and underlying connection"""
-        intercept = self._make_intercept()
-        intercept.close()
+        intercept.close_all()
         self.mock_handler.close_all.assert_called_once()
-        self.mock_conn.close.assert_called_once()
-
-    def test_multiple_vfs_commands(self):
-        """Multiple VFS commands in single read"""
-        intercept = self._make_intercept()
-        data = (bytes([ESCAPE, CMD_STAT, 0])
-                + bytes([ESCAPE, CMD_OPEN, 0]))
-        self.mock_conn._read_available.return_value = data
-        intercept._read_available()
-        self.assertEqual(self.mock_handler.dispatch.call_count, 2)
 
 
-class TestConnInterceptSoftReboot(unittest.TestCase):
-    """Tests for soft reboot detection in ConnIntercept"""
+class TestConnEscapeHandlers(unittest.TestCase):
+    """Tests for Conn escape handler registry"""
+
+    def test_conn_no_handlers_initially(self):
+        """Conn has no escape handlers by default"""
+        from mpytool.conn import Conn
+        conn = Conn()
+        self.assertEqual(conn._escape_handlers, {})
+
+    def test_conn_busy_false_without_handler(self):
+        """Conn.busy is False when no handler active"""
+        from mpytool.conn import Conn
+        conn = Conn()
+        self.assertFalse(conn.busy)
+
+    def test_conn_busy_reflects_active_handler(self):
+        """Conn.busy reflects _active_handler state"""
+        from mpytool.conn import Conn
+        conn = Conn()
+        self.assertFalse(conn.busy)
+        conn._active_handler = Mock()
+        self.assertTrue(conn.busy)
+
+    def test_register_escape_handler(self):
+        """register_escape_handler adds handler to registry"""
+        from mpytool.conn import Conn, ESCAPE
+        conn = Conn()
+        handler = Mock()
+        conn.register_escape_handler(ESCAPE, handler)
+        self.assertIs(conn._escape_handlers[ESCAPE], handler)
+
+    def test_unregister_escape_handler(self):
+        """unregister_escape_handler removes handler"""
+        from mpytool.conn import Conn, ESCAPE
+        conn = Conn()
+        handler = Mock()
+        conn.register_escape_handler(ESCAPE, handler)
+        conn.unregister_escape_handler(ESCAPE)
+        self.assertNotIn(ESCAPE, conn._escape_handlers)
+
+    def test_vfsprotocol_self_registers(self):
+        """VfsProtocol registers itself in conn on creation"""
+        from mpytool.conn import Conn, ESCAPE
+        from mpytool.mount import VfsProtocol
+        conn = Conn()
+        vfs = VfsProtocol(conn, remount_fn=None)
+        self.assertIs(conn._escape_handlers[ESCAPE], vfs)
+
+    def test_has_data_with_pending_handler(self):
+        """Conn._has_data returns True when active handler has pending"""
+        from mpytool.conn import Conn
+        conn = Conn()
+        mock_handler = Mock()
+        mock_handler.pending = True
+        conn._active_handler = mock_handler
+        self.assertTrue(conn._has_data(0))
+
+    def test_process_data_routes_to_handler(self):
+        """_process_data routes escape to registered handler"""
+        from mpytool.conn import Conn, ESCAPE
+        conn = Conn()
+        handler = Mock()
+        handler.process.return_value = b''  # Handler done
+        conn.register_escape_handler(ESCAPE, handler)
+
+        result = conn._process_data(b'prefix' + bytes([ESCAPE]) + b'data')
+
+        self.assertEqual(result, b'prefix')
+        handler.process.assert_called_once()
+
+    def test_process_data_no_handler_passthrough(self):
+        """_process_data passes through escape if no handler registered"""
+        from mpytool.conn import Conn, ESCAPE
+        conn = Conn()
+
+        data = b'hello' + bytes([ESCAPE]) + b'world'
+        result = conn._process_data(data)
+
+        self.assertEqual(result, data)
+
+    def test_multiple_escape_handlers(self):
+        """Multiple escape bytes can have different handlers"""
+        from mpytool.conn import Conn
+        conn = Conn()
+        handler1 = Mock()
+        handler1.process.return_value = b''
+        handler2 = Mock()
+        handler2.process.return_value = b''
+        conn.register_escape_handler(0x18, handler1)
+        conn.register_escape_handler(0x19, handler2)
+
+        conn._process_data(bytes([0x18]) + b'data1')
+        handler1.process.assert_called()
+        handler2.process.assert_not_called()
+
+        handler1.reset_mock()
+        conn._process_data(bytes([0x19]) + b'data2')
+        handler2.process.assert_called()
+        handler1.process.assert_not_called()
+
+
+class TestVfsProtocolSoftReboot(unittest.TestCase):
+    """Tests for soft reboot detection in VfsProtocol.
+
+    Note: Soft reboot detection is now via check_reboot() called by Conn
+    on REPL output, not in process() which handles VFS commands.
+    """
 
     def test_soft_reboot_detection(self):
-        """Detects 'soft reboot' in stream"""
+        """check_reboot detects 'soft reboot' in REPL output"""
         remount = Mock()
         mock_conn = Mock()
-        mock_conn.fd = 5
-        handler = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler}, remount_fn=remount)
+        mock_conn._buffer = bytearray()
+        intercept = VfsProtocol(mock_conn, remount_fn=remount)
 
-        # Send "MPY: soft reboot\r\n"
-        mock_conn._read_available.return_value = b'MPY: soft reboot\r\n'
-        intercept._read_available()
+        # Send "MPY: soft reboot\r\n" via check_reboot
+        intercept.check_reboot(b'MPY: soft reboot\r\n')
         self.assertTrue(intercept._needs_remount)
         remount.assert_not_called()
 
         # Send REPL prompt
-        mock_conn._read_available.return_value = b'MicroPython v1.25\r\n>>> '
-        intercept._read_available()
+        intercept.check_reboot(b'MicroPython v1.25\r\n>>> ')
         remount.assert_called_once()
         self.assertFalse(intercept._needs_remount)
 
     def test_no_remount_without_callback(self):
         """No remount if remount_fn is None"""
         mock_conn = Mock()
-        mock_conn.fd = 5
-        handler = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler}, remount_fn=None)
+        mock_conn._buffer = bytearray()
+        intercept = VfsProtocol(mock_conn, remount_fn=None)
 
-        mock_conn._read_available.return_value = b'MPY: soft reboot\r\n'
-        intercept._read_available()
+        intercept.check_reboot(b'MPY: soft reboot\r\n')
         self.assertFalse(intercept._needs_remount)
 
     def test_reboot_split_across_reads(self):
         """Soft reboot text split across multiple reads"""
         remount = Mock()
         mock_conn = Mock()
-        mock_conn.fd = 5
-        handler = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler}, remount_fn=remount)
+        mock_conn._buffer = bytearray()
+        intercept = VfsProtocol(mock_conn, remount_fn=remount)
 
-        mock_conn._read_available.return_value = b'MPY: soft reb'
-        intercept._read_available()
+        intercept.check_reboot(b'MPY: soft reb')
         self.assertFalse(intercept._needs_remount)
 
-        mock_conn._read_available.return_value = b'oot\r\n'
-        intercept._read_available()
+        intercept.check_reboot(b'oot\r\n')
         self.assertTrue(intercept._needs_remount)
 
 
@@ -847,13 +868,14 @@ class TestMountNested(unittest.TestCase):
         self.mock_conn = Mock()
         self.mock_conn._buffer = bytearray()
         self.mock_conn._has_data.return_value = False
+        self.mock_conn.vfs = None
         self.mpy = Mpy(self.mock_conn)
 
     def test_nested_mount_raises(self):
         """Nested mount raises error"""
         from mpytool.mpy_comm import MpyError
         self.mpy._mounts = [(0, '/xyz', '/tmp/a', Mock())]
-        self.mpy._intercept = Mock()
+        self.mock_conn.vfs = Mock()
         with self.assertRaises(MpyError) as ctx:
             self.mpy.mount('/tmp/b', '/xyz/lib')
         self.assertIn('nested', str(ctx.exception))
@@ -862,7 +884,7 @@ class TestMountNested(unittest.TestCase):
         """Cannot mount if existing mount would be nested inside new"""
         from mpytool.mpy_comm import MpyError
         self.mpy._mounts = [(0, '/xyz/lib', '/tmp/a', Mock())]
-        self.mpy._intercept = Mock()
+        self.mock_conn.vfs = Mock()
         with self.assertRaises(MpyError) as ctx:
             self.mpy.mount('/tmp/b', '/xyz')
         self.assertIn('nested', str(ctx.exception))
@@ -871,7 +893,7 @@ class TestMountNested(unittest.TestCase):
         """Sibling mount points (non-nested) pass validation"""
         from mpytool.mpy_comm import MpyError
         self.mpy._mounts = [(0, '/app', '/tmp/a', Mock())]
-        self.mpy._intercept = Mock()
+        self.mock_conn.vfs = Mock()
         try:
             self.mpy.mount('/tmp/b', '/lib')
         except MpyError as e:
@@ -885,108 +907,90 @@ class TestMountNested(unittest.TestCase):
         """Deeply nested mount raises error"""
         from mpytool.mpy_comm import MpyError
         self.mpy._mounts = [(0, '/xyz', '/tmp/a', Mock())]
-        self.mpy._intercept = Mock()
+        self.mock_conn.vfs = Mock()
         with self.assertRaises(MpyError) as ctx:
             self.mpy.mount('/tmp/deep', '/xyz/lib/vendor')
         self.assertIn('nested', str(ctx.exception))
 
 
-class TestConnInterceptMultiHandler(unittest.TestCase):
-    """Tests for ConnIntercept multi-handler dispatch"""
+class TestVfsProtocolMultiHandler(unittest.TestCase):
+    """Tests for VfsProtocol multi-handler dispatch.
+
+    Note: VfsProtocol receives data INCLUDING ESCAPE.
+    """
 
     def test_dispatch_to_correct_handler(self):
         """VFS command routed to handler matching mid"""
         mock_conn = Mock()
-        mock_conn.fd = 5
+        mock_conn._buffer = bytearray()
         handler0 = Mock()
         handler1 = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler0, 1: handler1})
+        intercept = VfsProtocol(mock_conn)
+        intercept.add_handler(0, handler0)
+        intercept.add_handler(1, handler1)
 
         # Send command with mid=1
-        mock_conn._read_available.return_value = bytes(
-            [ESCAPE, CMD_STAT, 1])
-        intercept._read_available()
+        intercept.process(bytes([ESCAPE, CMD_STAT, 1]))
         handler0.dispatch.assert_not_called()
         handler1.dispatch.assert_called_once_with(CMD_STAT)
 
     def test_dispatch_mid0(self):
         """VFS command with mid=0 goes to handler 0"""
         mock_conn = Mock()
-        mock_conn.fd = 5
+        mock_conn._buffer = bytearray()
         handler0 = Mock()
         handler1 = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler0, 1: handler1})
+        intercept = VfsProtocol(mock_conn)
+        intercept.add_handler(0, handler0)
+        intercept.add_handler(1, handler1)
 
-        mock_conn._read_available.return_value = bytes(
-            [ESCAPE, CMD_OPEN, 0])
-        intercept._read_available()
+        intercept.process(bytes([ESCAPE, CMD_OPEN, 0]))
         handler0.dispatch.assert_called_once_with(CMD_OPEN)
         handler1.dispatch.assert_not_called()
 
-    def test_unknown_mid_ignored(self):
-        """VFS command with unknown mid is consumed but not dispatched"""
+    def test_unknown_mid_creates_dismiss_handler(self):
+        """VFS command with unknown mid creates dismiss handler"""
         mock_conn = Mock()
-        mock_conn.fd = 5
+        mock_conn._buffer = bytearray()
         handler0 = Mock()
-        intercept = ConnIntercept(mock_conn, {0: handler0})
+        intercept = VfsProtocol(mock_conn)
+        intercept.add_handler(0, handler0)
 
-        # mid=5 has no handler
-        mock_conn._read_available.return_value = bytes(
-            [ESCAPE, CMD_STAT, 5])
-        result = intercept._read_available()
-        handler0.dispatch.assert_not_called()
-        # ACK not sent either (no handler)
-        mock_conn.write.assert_not_called()
-        self.assertEqual(result, b'')  # Got new data, no REPL output
-
-    def test_mixed_mids_in_stream(self):
-        """Multiple commands with different mids in one read"""
-        mock_conn = Mock()
-        mock_conn.fd = 5
-        handler0 = Mock()
-        handler1 = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler0, 1: handler1})
-
-        data = (bytes([ESCAPE, CMD_STAT, 0])
-                + bytes([ESCAPE, CMD_OPEN, 1])
-                + b'output')
-        mock_conn._read_available.return_value = data
-        result = intercept._read_available()
-        handler0.dispatch.assert_called_once_with(CMD_STAT)
-        handler1.dispatch.assert_called_once_with(CMD_OPEN)
-        self.assertEqual(result, b'output')
+        # Verify dismiss handler is created lazily
+        self.assertIsNone(intercept._dismiss_handler)
+        dismiss = intercept._get_dismiss_handler()
+        self.assertIsNotNone(dismiss)
+        self.assertTrue(dismiss._dismiss)  # Handler is in dismiss mode
+        # Same instance returned on second call
+        self.assertIs(intercept._get_dismiss_handler(), dismiss)
 
     def test_add_handler(self):
         """add_handler adds new mid routing"""
         mock_conn = Mock()
-        mock_conn.fd = 5
+        mock_conn._buffer = bytearray()
         handler0 = Mock()
-        intercept = ConnIntercept(mock_conn, {0: handler0})
+        intercept = VfsProtocol(mock_conn)
+        intercept.add_handler(0, handler0)
 
         handler1 = Mock()
         intercept.add_handler(1, handler1)
 
-        mock_conn._read_available.return_value = bytes(
-            [ESCAPE, CMD_READ, 1])
-        intercept._read_available()
+        intercept.process(bytes([ESCAPE, CMD_READ, 1]))
         handler1.dispatch.assert_called_once_with(CMD_READ)
 
     def test_close_all_handlers(self):
-        """close() calls close_all on every handler"""
+        """close_all() calls close_all on every handler"""
         mock_conn = Mock()
-        mock_conn.fd = 5
+        mock_conn._buffer = bytearray()
         handler0 = Mock()
         handler1 = Mock()
-        intercept = ConnIntercept(
-            mock_conn, {0: handler0, 1: handler1})
+        intercept = VfsProtocol(mock_conn)
+        intercept.add_handler(0, handler0)
+        intercept.add_handler(1, handler1)
 
-        intercept.close()
+        intercept.close_all()
         handler0.close_all.assert_called_once()
         handler1.close_all.assert_called_once()
-        mock_conn.close.assert_called_once()
 
 
 class TestStaleVfsRecovery(unittest.TestCase):
@@ -1032,81 +1036,6 @@ class TestStaleVfsRecovery(unittest.TestCase):
         mock_conn.read_until.side_effect = read_side_effect
         comm = MpyComm(mock_conn)
         comm.stop_current_operation()
-
-
-class TestStaleVfsCleanup(unittest.TestCase):
-    """Tests for _cleanup_stale_vfs in Mpy"""
-
-    def test_cleanup_skipped_with_active_mount(self):
-        """_cleanup_stale_vfs skipped when intercept is active"""
-        from mpytool.mpy import Mpy
-
-        mock_conn = Mock()
-        mpy = Mpy(mock_conn)
-        mpy._mpy_comm = Mock()
-        mpy._mpy_comm.exec.return_value = b''
-        mpy._intercept = Mock()  # Active mount
-
-        mpy._cleanup_stale_vfs()
-
-        # No exec calls - cleanup skipped
-        mpy._mpy_comm.exec.assert_not_called()
-
-    def test_cleanup_error_ignored(self):
-        """_cleanup_stale_vfs errors don't propagate"""
-        from mpytool.mpy import Mpy
-        from mpytool.conn import Timeout
-
-        mock_conn = Mock()
-        mpy = Mpy(mock_conn)
-        mpy._mpy_comm = Mock()
-        mpy._mpy_comm.exec.side_effect = Timeout("cleanup failed")
-
-        # Should not raise
-        mpy._cleanup_stale_vfs()
-
-    def test_cleanup_preserves_cwd_without_stale_mounts(self):
-        """_cleanup_stale_vfs should not change CWD if no stale mounts found
-
-        Bug: cleanup code always called os.chdir('/') even when no stale
-        VFS mounts were found. This changed CWD from e.g. /ramfs to / on
-        first command after boot.
-        """
-        from mpytool.mpy import Mpy
-
-        mock_conn = Mock()
-        mpy = Mpy(mock_conn)
-        mpy._mpy_comm = Mock()
-        mpy._mpy_comm.exec.return_value = b''
-
-        mpy._cleanup_stale_vfs()
-
-        # Find the cleanup code (second call after import os)
-        calls = mpy._mpy_comm.exec.call_args_list
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0].args[0], 'import os')
-        cleanup_code = calls[1].args[0]
-        # chdir('/') should be conditional on _stale flag, not unconditional
-        self.assertIn('_stale', cleanup_code,
-            "cleanup should track whether stale mounts were removed")
-        self.assertIn('if _stale', cleanup_code,
-            "chdir('/') should be conditional on stale mount removal")
-
-    def test_import_module_does_not_call_cleanup(self):
-        """import_module should not call _cleanup_stale_vfs anymore"""
-        from mpytool.mpy import Mpy
-
-        mock_conn = Mock()
-        mpy = Mpy(mock_conn)
-        mpy._mpy_comm = Mock()
-        mpy._mpy_comm.exec.return_value = b''
-
-        mpy.import_module('os')
-
-        # Only one call - the import itself
-        calls = mpy._mpy_comm.exec.call_args_list
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0].args[0], 'import os')
 
 
 class TestLnDispatch(unittest.TestCase):

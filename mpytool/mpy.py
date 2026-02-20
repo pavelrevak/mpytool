@@ -1,8 +1,12 @@
 """MicroPython tool: main MPY class"""
 
-import base64
-import zlib
+import base64 as _base64
+import struct as _struct
+import time as _time
+import zlib as _zlib
 
+import mpytool.conn as _conn
+import mpytool.mount as _mount
 import mpytool.mpy_comm as _mpy_comm
 
 # Timeout for flash I/O operations (open/close/gc) - some FLASH GC can block >5s
@@ -138,10 +142,11 @@ def _mt_pfind(label):
         self._chunk_size = chunk_size  # None = auto-detect
         self._platform = None  # Cached platform name
         # Multi-mount state
-        self._intercept = None  # ConnIntercept (shared for all mounts)
         self._mounts = []  # [(mid, mount_point, local_path, handler), ...]
         self._next_mid = 0
-        self._mount_agent_code = None
+        # VfsProtocol always registered - handles stale VFS and all mounts
+        self._vfs_protocol = _mount.VfsProtocol(
+            conn, remount_fn=self._do_remount_all, log=log)
 
     @property
     def conn(self):
@@ -162,7 +167,7 @@ def _mt_pfind(label):
         """
         self._imported = []
         self._load_helpers = []
-        self._mpy_comm._repl_mode = None
+        self._mpy_comm.reset_state()
         self._platform = None
         Mpy._CHUNK_AUTO_DETECTED = None
         Mpy._DEFLATE_AVAILABLE = None
@@ -184,29 +189,6 @@ def _mt_pfind(label):
                 raise _mpy_comm.MpyError(f'Helper {helper} not defined')
             self._mpy_comm.exec(self._HELPERS[helper])
             self._load_helpers.append(helper)
-
-    def _cleanup_stale_vfs(self):
-        """Remove stale VFS mounts from previous sessions.
-
-        Detects stale mounts by checking statvfs — RemoteFS doesn't
-        support it, so failure indicates a stale mount to remove.
-        Only changes CWD to '/' if a stale mount was actually removed.
-        """
-        if self._intercept is not None:
-            return  # Active mount session, don't cleanup
-        try:
-            self.import_module('os')
-            self._mpy_comm.exec(
-                "_stale=0\n"
-                "for _d in os.listdir('/'):\n"
-                " _p='/'+_d\n"
-                " try:os.statvfs(_p)\n"
-                " except:\n"
-                "  try:os.umount(_p);_stale=1\n"
-                "  except:pass\n"
-                "if _stale:os.chdir('/')", timeout=3)
-        except Exception:
-            pass
 
     def import_module(self, module):
         """Import module to MicroPython
@@ -411,7 +393,7 @@ def _mt_pfind(label):
         self.load_helper('_hash')
         try:
             result = self._mpy_comm.exec_eval(f"_mt_hash('{_escape_path(path)}')")
-            return base64.b64decode(result) if result else None
+            return _base64.b64decode(result) if result else None
         except _mpy_comm.CmdError:
             return None
 
@@ -439,7 +421,7 @@ def _mt_pfind(label):
             result = self._mpy_comm.exec_eval(f"_mt_finfo({escaped_files})", timeout=timeout)
             for path, info in result.items():
                 if info and info[1]:
-                    result[path] = (info[0], base64.b64decode(info[1]))
+                    result[path] = (info[0], _base64.b64decode(info[1]))
             return result
         except _mpy_comm.CmdError:
             return None
@@ -489,7 +471,7 @@ def _mt_pfind(label):
         raw = repr(chunk)
         raw_len = len(raw)
 
-        b64 = base64.b64encode(chunk).decode('ascii')
+        b64 = _base64.b64encode(chunk).decode('ascii')
         b64_cmd = f"ub.a2b_base64('{b64}')"
         b64_len = len(b64_cmd)
 
@@ -503,8 +485,8 @@ def _mt_pfind(label):
             best_type = 'base64'
 
         if compress:
-            compressed = zlib.compress(chunk)
-            comp_b64 = base64.b64encode(compressed).decode('ascii')
+            compressed = _zlib.compress(chunk)
+            comp_b64 = _base64.b64encode(compressed).decode('ascii')
             comp_cmd = f"df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read()"
             comp_len = len(comp_cmd)
             if comp_len < best_len:
@@ -692,9 +674,8 @@ def _mt_pfind(label):
             hex string or None if not available
         """
         try:
-            return self._mpy_comm.exec_eval(
-                "repr(__import__('machine').unique_id().hex())"
-            )
+            self.import_module('machine')
+            return self._mpy_comm.exec_eval("repr(machine.unique_id().hex())")
         except _mpy_comm.CmdError:
             return None
 
@@ -919,9 +900,8 @@ def _mt_pfind(label):
         if len(magic) >= 512:
             # Boot sector signature at 510-511
             if magic[510:512] == b'\x55\xAA':
-                import struct
                 # Bytes per sector (offset 11-12)
-                bytes_per_sector = struct.unpack('<H', magic[11:13])[0]
+                bytes_per_sector = _struct.unpack('<H', magic[11:13])[0]
                 # Sectors per cluster (offset 13)
                 sectors_per_cluster = magic[13]
                 result['block_size'] = bytes_per_sector * sectors_per_cluster
@@ -1158,7 +1138,7 @@ def _mt_pfind(label):
                 f"gc.collect(); _buf=bytearray({bytes_to_read}); "
                 f"_dev.readblocks({block_num}, _buf)")
             b64_data = self._mpy_comm.exec_eval("repr(ub.b2a_base64(_buf).decode())")
-            chunk = base64.b64decode(b64_data)
+            chunk = _base64.b64decode(b64_data)
             data.extend(chunk)
             block_num += blocks_to_read
             if progress_callback:
@@ -1242,7 +1222,7 @@ def _mt_pfind(label):
                 blocks_to_write = min(chunk_blocks, total_blocks - block_num)
                 offset = block_num * block_size
                 chunk = data[offset:offset + blocks_to_write * block_size]
-                b64_chunk = base64.b64encode(chunk).decode('ascii')
+                b64_chunk = _base64.b64encode(chunk).decode('ascii')
                 self._mpy_comm.exec(f"_buf=ub.a2b_base64('{b64_chunk}')")
                 self._mpy_comm.exec(f"_dev.writeblocks({block_num}, _buf)")
                 block_num += blocks_to_write
@@ -1318,7 +1298,7 @@ def _mt_pfind(label):
 
     def stop(self):
         """Stop running program and return to REPL prompt"""
-        self._mpy_comm._repl_mode = None
+        self._mpy_comm.reset_state()
         self._mpy_comm.stop_current_operation()
 
     def soft_reset(self):
@@ -1432,9 +1412,9 @@ def _mt_pfind(label):
                 chunk = chunk + b'\xff' * padding
 
             if compress:
-                compressed = zlib.compress(chunk)
-                comp_b64 = base64.b64encode(compressed).decode('ascii')
-                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                compressed = _zlib.compress(chunk)
+                comp_b64 = _base64.b64encode(compressed).decode('ascii')
+                raw_b64 = _base64.b64encode(chunk).decode('ascii')
                 if len(comp_b64) < len(raw_b64) - 20:
                     cmd = f"{part_var}.writeblocks({block_num}, df.DeflateIO(_io.BytesIO(ub.a2b_base64('{comp_b64}'))).read())"
                     wire_bytes += len(comp_b64)
@@ -1443,7 +1423,7 @@ def _mt_pfind(label):
                     cmd = f"{part_var}.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
                     wire_bytes += len(raw_b64)
             else:
-                raw_b64 = base64.b64encode(chunk).decode('ascii')
+                raw_b64 = _base64.b64encode(chunk).decode('ascii')
                 cmd = f"{part_var}.writeblocks({block_num}, ub.a2b_base64('{raw_b64}'))"
                 wire_bytes += len(raw_b64)
 
@@ -1555,12 +1535,10 @@ def _mt_pfind(label):
         Raises:
             MpyError: if mount_point is already mounted
         """
-        import time
-        from mpytool.conn import Timeout
-        from mpytool.mount import MOUNT_AGENT, MountHandler, ConnIntercept
-
-        # Clean up stale VFS mounts from previous sessions
-        self._cleanup_stale_vfs()
+        # Disallow mounting on root - breaks filesystem access
+        if mount_point == '/':
+            raise _mpy_comm.MpyError(
+                "cannot mount on '/' - use '/remote' or another mount point")
 
         # Check for duplicate mount points and detect nested mounts
         for p_mid, p_mp, _, p_handler in self._mounts:
@@ -1581,66 +1559,20 @@ def _mt_pfind(label):
         mid = self._next_mid
         mp_escaped = _escape_path(mount_point)
 
-        if self._intercept is None:
-            # First mount: full setup
-            self._mpy_comm.enter_raw_repl()
-            del self._conn._buffer[:]
-            time.sleep(0.2)
-            while self._conn._has_data(timeout=0.1):
-                self._conn._read_available()
-            # Cleanup all stale VFS from previous sessions
-            try:
-                self._mpy_comm.exec(
-                    "import uos\n"
-                    "for _d in uos.listdir('/'):\n"
-                    " _p='/'+_d\n"
-                    " try:uos.statvfs(_p)\n"
-                    " except:\n"
-                    "  try:uos.umount(_p)\n"
-                    "  except:pass\n"
-                    "uos.chdir('/')", timeout=3)
-            except (_mpy_comm.CmdError, Timeout):
-                pass
+        self._mpy_comm.enter_raw_repl()
 
-            chunk_size = self.detect_chunk_size()
-            agent_code = MOUNT_AGENT.replace(
-                'CHUNK_SIZE', str(chunk_size))
-            self._mount_agent_code = agent_code
+        if not self._mounts:
+            # First mount: inject agent and detect chunk size
+            self._chunk_size = self.detect_chunk_size()
+            self._mpy_comm.exec(_mount.MOUNT_AGENT, timeout=10)
 
-            self._mpy_comm.exec(agent_code, timeout=10)
-            self._mpy_comm.exec(
-                f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
-
-            handler = MountHandler(
-                self._conn, local_path, log=log, writable=writable,
-                mpy_cross=mpy_cross)
-            intercept = ConnIntercept(
-                self._conn, {mid: handler},
-                remount_fn=self._do_remount_all, log=log)
-
-            # Replace connection in all layers
-            self._conn = intercept
-            self._mpy_comm._conn = intercept
-            self._intercept = intercept
-        else:
-            # Additional mount: agent already injected
-            self._mpy_comm.enter_raw_repl()
-            # Cleanup stale VFS at this mount point
-            try:
-                self._mpy_comm.exec(
-                    "import uos\n"
-                    f"try:uos.umount('{mp_escaped}')\nexcept:pass",
-                    timeout=3)
-            except (_mpy_comm.CmdError, Timeout):
-                pass
-            self._mpy_comm.exec(
-                f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
-
-            # Create handler and add to existing intercept
-            handler = MountHandler(
-                self._intercept._conn, local_path, log=log,
-                writable=writable, mpy_cross=mpy_cross)
-            self._intercept.add_handler(mid, handler)
+        # Mount on device and add handler
+        self._mpy_comm.exec(
+            f"_mt_mount('{mp_escaped}',{mid},{self._chunk_size})", timeout=5)
+        handler = _mount.MountHandler(
+            self._conn, local_path, log=log, writable=writable,
+            mpy_cross=mpy_cross)
+        self._vfs_protocol.add_handler(mid, handler)
 
         self._mounts.append((mid, mount_point, local_path, handler))
         self._next_mid += 1
@@ -1648,26 +1580,27 @@ def _mt_pfind(label):
 
     def _do_remount_all(self):
         """Re-inject agent and re-mount all VFS after soft reset"""
-        for handler in self._intercept._handlers.values():
-            handler.close_all()
+        if not self._mounts:
+            return  # Nothing to remount
+        self._vfs_protocol.close_all()
         self._imported.clear()
         self._load_helpers.clear()
-        self._mpy_comm._repl_mode = None
-        self._mpy_comm._raw_paste_supported = None
+        self._mpy_comm.reset_state()
         self._mpy_comm.enter_raw_repl()
-        self._mpy_comm.exec(self._mount_agent_code, timeout=10)
+        self._mpy_comm.exec(_mount.MOUNT_AGENT, timeout=10)
         for mid, mount_point, _, _ in self._mounts:
             if mid is None:
                 continue  # submount — PC-only, persists in handler
             mp_escaped = _escape_path(mount_point)
             self._mpy_comm.exec(
-                f"_mt_mount('{mp_escaped}',{mid})", timeout=5)
+                f"_mt_mount('{mp_escaped}',{mid},{self._chunk_size})",
+                timeout=5)
         # Restore CWD to first mount point (mpremote compatibility)
         if self._mounts:
             first_mount = self._mounts[0]
             if first_mount[0] is not None:  # Not a submount
                 mp_escaped = _escape_path(first_mount[1])
                 self._mpy_comm.exec(
-                    f"__import__('uos').chdir('{mp_escaped}')", timeout=3)
+                    f"os.chdir('{mp_escaped}')", timeout=3)
         self._mpy_comm.exit_raw_repl()
 

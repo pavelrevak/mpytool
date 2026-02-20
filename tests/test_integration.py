@@ -1661,8 +1661,8 @@ class TestMount(unittest.TestCase):
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
-                "import uos\ntry:uos.umount('/remote')\nexcept:pass\n"
-                "uos.chdir('/')", timeout=3)
+                "import os\ntry:os.umount('/remote')\nexcept:pass\n"
+                "os.chdir('/')", timeout=3)
         except Exception:
             pass
         try:
@@ -1971,8 +1971,8 @@ class TestMountLn(unittest.TestCase):
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
-                "import uos\ntry:uos.umount('/lntest')\nexcept:pass\n"
-                "uos.chdir('/')", timeout=3)
+                "import os\ntry:os.umount('/lntest')\nexcept:pass\n"
+                "os.chdir('/')", timeout=3)
         except Exception:
             pass
         try:
@@ -2135,8 +2135,8 @@ class TestMountMpyCross(unittest.TestCase):
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
-                "import uos\ntry:uos.umount('/mpytest')\nexcept:pass\n"
-                "uos.chdir('/')", timeout=3)
+                "import os\ntry:os.umount('/mpytest')\nexcept:pass\n"
+                "os.chdir('/')", timeout=3)
         except Exception:
             pass
         try:
@@ -2179,17 +2179,17 @@ class TestMountMpyCross(unittest.TestCase):
     def test_03_empty_file_uses_py(self):
         """Empty __init__.py remains as .py (not compiled)"""
         # Stat should return size=0 for .py (not redirected to .mpy)
-        self.mpy.comm.exec("import uos")
-        result = self.mpy.comm.exec_eval("uos.stat('/mpytest/__init__.py')[6]")
+        self.mpy.comm.exec("import os")
+        result = self.mpy.comm.exec_eval("os.stat('/mpytest/__init__.py')[6]")
         self.assertEqual(result, 0)
 
     def test_04_prebuilt_mpy_has_priority(self):
         """Prebuilt .mpy file is used instead of compiling .py"""
-        self.mpy.comm.exec("import uos")
+        self.mpy.comm.exec("import os")
         # Check that prebuilt.mpy exists
         self.mpy.comm.exec(
             "try:\n"
-            " uos.stat('/mpytest/prebuilt.mpy')\n"
+            " os.stat('/mpytest/prebuilt.mpy')\n"
             " _r1 = True\n"
             "except:\n"
             " _r1 = False")
@@ -2198,7 +2198,7 @@ class TestMountMpyCross(unittest.TestCase):
         # Check that prebuilt.py is hidden (ENOENT)
         self.mpy.comm.exec(
             "try:\n"
-            " uos.stat('/mpytest/prebuilt.py')\n"
+            " os.stat('/mpytest/prebuilt.py')\n"
             " _r2 = False\n"
             "except OSError:\n"
             " _r2 = True")
@@ -2210,9 +2210,9 @@ class TestMountMpyCross(unittest.TestCase):
         cache_dir = os.path.join(self.LOCAL_DIR, '__pycache__')
         # Trigger compilation by stat (happens during import)
         self.mpy.comm.exec(
-            "import uos\n"
+            "import os\n"
             "try:\n"
-            " uos.stat('/mpytest/regular.py')\n"
+            " os.stat('/mpytest/regular.py')\n"
             "except: pass")
         # Now import should use the compiled .mpy
         self.mpy.comm.exec(
@@ -2277,8 +2277,8 @@ class TestMountWrite(unittest.TestCase):
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
-                "import uos\ntry:uos.umount('/remote')\nexcept:pass\n"
-                "uos.chdir('/')", timeout=3)
+                "import os\ntry:os.umount('/remote')\nexcept:pass\n"
+                "os.chdir('/')", timeout=3)
         except Exception:
             pass
         try:
@@ -2450,8 +2450,8 @@ class TestMountWrite(unittest.TestCase):
             f.write('Content to preserve')
         # Rename via mount
         self.mpy.comm.exec(
-            "import uos\n"
-            "uos.rename('/remote/old_name.txt', '/remote/new_name.txt')")
+            "import os\n"
+            "os.rename('/remote/old_name.txt', '/remote/new_name.txt')")
         # Verify old file gone, new file exists with same content
         self.assertFalse(os.path.exists(test_file))
         new_file = os.path.join(self.LOCAL_DIR, 'new_name.txt')
@@ -2470,8 +2470,8 @@ class TestMountWrite(unittest.TestCase):
             f.write('Inside directory')
         # Rename via mount
         self.mpy.comm.exec(
-            "import uos\n"
-            "uos.rename('/remote/old_dir', '/remote/new_dir')")
+            "import os\n"
+            "os.rename('/remote/old_dir', '/remote/new_dir')")
         # Verify old dir gone, new dir exists with contents
         self.assertFalse(os.path.exists(old_dir))
         new_dir = os.path.join(self.LOCAL_DIR, 'new_dir')
@@ -2536,8 +2536,8 @@ class TestMountReadonly(unittest.TestCase):
         try:
             cls.mpy.comm.enter_raw_repl()
             cls.mpy.comm.exec(
-                "import uos\ntry:uos.umount('/remote')\nexcept:pass\n"
-                "uos.chdir('/')", timeout=3)
+                "import os\ntry:os.umount('/remote')\nexcept:pass\n"
+                "os.chdir('/')", timeout=3)
         except Exception:
             pass
         try:

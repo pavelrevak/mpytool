@@ -1,6 +1,7 @@
 """Utility functions for mpytool"""
 
-import sys
+import glob as _glob
+import sys as _sys
 
 from serial.tools.list_ports import comports as _comports
 
@@ -76,26 +77,24 @@ def detect_serial_ports() -> list[str]:
     Returns:
         list of port paths sorted by likelihood of being MicroPython device
     """
-    import glob
-
     patterns = []
-    if sys.platform == "darwin":
+    if _sys.platform == "darwin":
         # Use cu.* (call-up) instead of tty.* - doesn't wait for DCD signal
         patterns = [
             "/dev/cu.usbmodem*",
             "/dev/cu.usbserial*",
             "/dev/cu.usb*",
         ]
-    elif sys.platform == "linux":
+    elif _sys.platform == "linux":
         patterns = [
             "/dev/ttyACM*",
             "/dev/ttyUSB*",
         ]
-    elif sys.platform == "win32":
+    elif _sys.platform == "win32":
         return sorted(
             p.device for p in _comports() if p.vid is not None)
 
     ports = []
     for pattern in patterns:
-        ports.extend(glob.glob(pattern))
+        ports.extend(_glob.glob(pattern))
     return sorted(set(ports))
