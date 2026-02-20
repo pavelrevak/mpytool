@@ -137,7 +137,6 @@ def _mt_pfind(label):
         self._load_helpers = []
         self._chunk_size = chunk_size  # None = auto-detect
         self._platform = None  # Cached platform name
-        self._stale_cleanup_done = False  # Stale VFS cleanup on first use
         # Multi-mount state
         self._intercept = None  # ConnIntercept (shared for all mounts)
         self._mounts = []  # [(mid, mount_point, local_path, handler), ...]
@@ -165,7 +164,6 @@ def _mt_pfind(label):
         self._load_helpers = []
         self._mpy_comm._repl_mode = None
         self._platform = None
-        self._stale_cleanup_done = False
         Mpy._CHUNK_AUTO_DETECTED = None
         Mpy._DEFLATE_AVAILABLE = None
 
@@ -190,22 +188,23 @@ def _mt_pfind(label):
     def _cleanup_stale_vfs(self):
         """Remove stale VFS mounts from previous sessions.
 
-        Uses uos (C built-in) to avoid triggering stale VFS agent.
         Detects stale mounts by checking statvfs — RemoteFS doesn't
         support it, so failure indicates a stale mount to remove.
+        Only changes CWD to '/' if a stale mount was actually removed.
         """
         if self._intercept is not None:
             return  # Active mount session, don't cleanup
         try:
+            self.import_module('os')
             self._mpy_comm.exec(
-                "import uos\n"
-                "for _d in uos.listdir('/'):\n"
+                "_stale=0\n"
+                "for _d in os.listdir('/'):\n"
                 " _p='/'+_d\n"
-                " try:uos.statvfs(_p)\n"
+                " try:os.statvfs(_p)\n"
                 " except:\n"
-                "  try:uos.umount(_p)\n"
+                "  try:os.umount(_p);_stale=1\n"
                 "  except:pass\n"
-                "uos.chdir('/')", timeout=3)
+                "if _stale:os.chdir('/')", timeout=3)
         except Exception:
             pass
 
@@ -215,9 +214,6 @@ def _mt_pfind(label):
         Arguments:
             module: module name to import
         """
-        if not self._stale_cleanup_done:
-            self._stale_cleanup_done = True
-            self._cleanup_stale_vfs()
         if module not in self._imported:
             self._mpy_comm.exec(f'import {module}')
             self._imported.append(module)
@@ -1562,6 +1558,9 @@ def _mt_pfind(label):
         import time
         from mpytool.conn import Timeout
         from mpytool.mount import MOUNT_AGENT, MountHandler, ConnIntercept
+
+        # Clean up stale VFS mounts from previous sessions
+        self._cleanup_stale_vfs()
 
         # Check for duplicate mount points and detect nested mounts
         for p_mid, p_mp, _, p_handler in self._mounts:

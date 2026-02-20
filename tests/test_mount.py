@@ -1037,46 +1037,6 @@ class TestStaleVfsRecovery(unittest.TestCase):
 class TestStaleVfsCleanup(unittest.TestCase):
     """Tests for _cleanup_stale_vfs in Mpy"""
 
-    def test_cleanup_runs_on_first_import(self):
-        """_cleanup_stale_vfs called on first import_module"""
-        from mpytool.mpy import Mpy
-
-        mock_conn = Mock()
-        mpy = Mpy(mock_conn)
-        mpy._mpy_comm = Mock()
-        mpy._mpy_comm.exec.return_value = b''
-
-        mpy.import_module('os')
-
-        # First call should be cleanup, second should be import
-        calls = mpy._mpy_comm.exec.call_args_list
-        self.assertEqual(len(calls), 2)
-        cleanup_code = calls[0].args[0]
-        self.assertIn('uos.umount', cleanup_code)
-        self.assertIn('uos.statvfs', cleanup_code)
-        import_code = calls[1].args[0]
-        self.assertEqual(import_code, 'import os')
-
-    def test_cleanup_runs_only_once(self):
-        """_cleanup_stale_vfs not called on subsequent imports"""
-        from mpytool.mpy import Mpy
-
-        mock_conn = Mock()
-        mpy = Mpy(mock_conn)
-        mpy._mpy_comm = Mock()
-        mpy._mpy_comm.exec.return_value = b''
-
-        mpy.import_module('os')
-        mpy.import_module('gc')
-
-        calls = mpy._mpy_comm.exec.call_args_list
-        # cleanup + import os + import gc = 3
-        self.assertEqual(len(calls), 3)
-        # Only first is cleanup
-        self.assertIn('uos.umount', calls[0].args[0])
-        self.assertEqual(calls[1].args[0], 'import os')
-        self.assertEqual(calls[2].args[0], 'import gc')
-
     def test_cleanup_skipped_with_active_mount(self):
         """_cleanup_stale_vfs skipped when intercept is active"""
         from mpytool.mpy import Mpy
@@ -1087,46 +1047,66 @@ class TestStaleVfsCleanup(unittest.TestCase):
         mpy._mpy_comm.exec.return_value = b''
         mpy._intercept = Mock()  # Active mount
 
-        mpy.import_module('os')
+        mpy._cleanup_stale_vfs()
 
-        calls = mpy._mpy_comm.exec.call_args_list
-        # Only import, no cleanup
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0].args[0], 'import os')
+        # No exec calls - cleanup skipped
+        mpy._mpy_comm.exec.assert_not_called()
 
     def test_cleanup_error_ignored(self):
-        """_cleanup_stale_vfs errors don't block import"""
+        """_cleanup_stale_vfs errors don't propagate"""
         from mpytool.mpy import Mpy
         from mpytool.conn import Timeout
 
         mock_conn = Mock()
         mpy = Mpy(mock_conn)
         mpy._mpy_comm = Mock()
-
-        call_count = 0
-
-        def exec_side_effect(cmd, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise Timeout("cleanup failed")
-            return b''
-
-        mpy._mpy_comm.exec.side_effect = exec_side_effect
+        mpy._mpy_comm.exec.side_effect = Timeout("cleanup failed")
 
         # Should not raise
-        mpy.import_module('os')
-        self.assertEqual(call_count, 2)
+        mpy._cleanup_stale_vfs()
 
-    def test_reset_state_clears_cleanup_flag(self):
-        """reset_state() allows cleanup to run again"""
+    def test_cleanup_preserves_cwd_without_stale_mounts(self):
+        """_cleanup_stale_vfs should not change CWD if no stale mounts found
+
+        Bug: cleanup code always called os.chdir('/') even when no stale
+        VFS mounts were found. This changed CWD from e.g. /ramfs to / on
+        first command after boot.
+        """
         from mpytool.mpy import Mpy
 
         mock_conn = Mock()
         mpy = Mpy(mock_conn)
-        mpy._stale_cleanup_done = True
-        mpy.reset_state()
-        self.assertFalse(mpy._stale_cleanup_done)
+        mpy._mpy_comm = Mock()
+        mpy._mpy_comm.exec.return_value = b''
+
+        mpy._cleanup_stale_vfs()
+
+        # Find the cleanup code (second call after import os)
+        calls = mpy._mpy_comm.exec.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].args[0], 'import os')
+        cleanup_code = calls[1].args[0]
+        # chdir('/') should be conditional on _stale flag, not unconditional
+        self.assertIn('_stale', cleanup_code,
+            "cleanup should track whether stale mounts were removed")
+        self.assertIn('if _stale', cleanup_code,
+            "chdir('/') should be conditional on stale mount removal")
+
+    def test_import_module_does_not_call_cleanup(self):
+        """import_module should not call _cleanup_stale_vfs anymore"""
+        from mpytool.mpy import Mpy
+
+        mock_conn = Mock()
+        mpy = Mpy(mock_conn)
+        mpy._mpy_comm = Mock()
+        mpy._mpy_comm.exec.return_value = b''
+
+        mpy.import_module('os')
+
+        # Only one call - the import itself
+        calls = mpy._mpy_comm.exec.call_args_list
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].args[0], 'import os')
 
 
 class TestLnDispatch(unittest.TestCase):
