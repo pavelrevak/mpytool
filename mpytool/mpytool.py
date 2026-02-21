@@ -4,7 +4,10 @@ import argparse as _argparse
 import fnmatch as _fnmatch
 import importlib.metadata as _metadata
 import os as _os
+import shlex as _shlex
+import subprocess as _subprocess
 import sys as _sys
+import tempfile as _tempfile
 import time as _time
 
 import mpytool as _mpytool
@@ -27,7 +30,7 @@ else:
 # Order of commands in help and completion
 _CMD_ORDER = [
     'ls', 'tree', 'cat', 'cp', 'mv', 'mkdir', 'rm', 'pwd', 'cd', 'path',
-    'stop', 'reset', 'monitor', 'repl', 'exec', 'run', 'info',
+    'stop', 'reset', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
     'flash', 'ota', 'mount', 'ln', 'speedtest', 'sleep',
 ]
 
@@ -897,6 +900,63 @@ class MpyTool():
         self.verbose(f"RUN: {args.file} ({len(code)} bytes)", 1)
         self.mpy.comm.try_raw_paste(code, timeout=0)
 
+    def _get_editor(self, editor_arg=None):
+        """Get editor from --editor, $VISUAL, or $EDITOR"""
+        if editor_arg:
+            return editor_arg
+        editor = _os.environ.get('VISUAL') or _os.environ.get('EDITOR')
+        if not editor:
+            raise ParamsError(
+                'No editor configured. '
+                'Set $VISUAL or $EDITOR, or use --editor')
+        return editor
+
+    def cmd_edit(self, path, editor=None):
+        """Edit file on device using local editor"""
+        editor_cmd = self._get_editor(editor)
+        self.verbose(f"EDIT: {path}", 1)
+        try:
+            data = self.mpy.get(path)
+        except _mpytool.FileNotFound:
+            data = b''
+            self.verbose("  (new file)", 1)
+        suffix = '.' + path.rsplit('.', 1)[-1] if '.' in path else ''
+        with _tempfile.NamedTemporaryFile(
+                mode='wb', suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            self.verbose(f"  editor: {editor_cmd}", 2)
+            result = _subprocess.run(_shlex.split(editor_cmd) + [tmp_path])
+            if result.returncode != 0:
+                self.verbose(
+                    f"  editor exited with code {result.returncode}, "
+                    "file not uploaded", 1, color='yellow')
+                return
+            with open(tmp_path, 'rb') as f:
+                new_data = f.read()
+            if new_data == data:
+                self.verbose("  (no changes)", 1)
+                return
+            self.verbose(
+                f"  uploading {len(new_data)} bytes...", 1, color='cyan')
+            self.mpy.put(new_data, path)
+            self.verbose("  done", 1, color='green')
+        finally:
+            try:
+                _os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    @command('edit', 'Edit file on device in local editor.')
+    @option('--editor', metavar='CMD', help='editor command')
+    @argument('path', metavar='remote', help='device file to edit (: prefix)')
+    def _dispatch_edit(self, commands, is_last_group):
+        args = _make_parser(self._dispatch_edit).parse_args(commands)
+        commands.clear()
+        path = _parse_device_path(args.path, 'edit')
+        self.cmd_edit(path, editor=args.editor)
+
     @command('info', 'Show device info (platform, memory, filesystem).')
     def _dispatch_info(self, commands, is_last_group):
         _, commands[:] = _make_parser(self._dispatch_info).parse_known_args(
@@ -1213,8 +1273,8 @@ class MpyTool():
 
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd', 'path',
-        'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'info', 'flash',
-        'ota', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
+        'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
+        'flash', 'ota', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
         '_paths', '_ports', '_commands', '_options', '_args',
     })
 

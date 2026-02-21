@@ -222,6 +222,17 @@ $ mpytool run script.py                  # run script (fire-and-forget)
 $ mpytool run script.py -- monitor       # run script and capture output
 ```
 
+### Edit file on device
+```
+$ mpytool edit :boot.py              # edit file (uses $VISUAL or $EDITOR)
+$ mpytool edit :/lib/config.py       # absolute path
+$ mpytool edit --editor vim :main.py # explicit editor
+$ mpytool edit :newfile.py           # create new file if doesn't exist
+```
+
+Downloads file to a temp file, opens in editor, uploads back if changed.
+Editor priority: `--editor` > `$VISUAL` > `$EDITOR` > error.
+
 ### Mount local directory on device
 ```
 $ mpytool mount ./src                       # mount ./src as /remote, auto-start REPL

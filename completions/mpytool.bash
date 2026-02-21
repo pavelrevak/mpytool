@@ -279,6 +279,16 @@ _mpytool() {
             fi
             [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
+        edit)
+            # --editor CMD + 1 remote file, -- after file
+            COMPREPLY=($(compgen -W "$(_mpytool_get_options edit)" -- "$cur"))
+            if [[ "$cur" == :* ]]; then
+                _mpytool_complete_remote "$cur"
+            else
+                COMPREPLY+=($(compgen -W ":" -- "$cur"))
+            fi
+            [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
+            ;;
         pwd)
             # No arguments, -- immediately
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")

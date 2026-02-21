@@ -268,6 +268,16 @@ _mpytool() {
                     fi
                     [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
+                edit)
+                    # --editor CMD + 1 remote file, -- after file
+                    _mpytool_options edit
+                    if [[ "$words[CURRENT]" == :* ]]; then
+                        _mpytool_complete_remote
+                    else
+                        compadd -S '' ':'
+                    fi
+                    [[ $nargs -ge 1 ]] && compadd -- '--'
+                    ;;
                 pwd)
                     # No arguments, -- immediately
                     compadd -- '--'

@@ -37,7 +37,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Package install | 🔴 | 🟢 `mip install pkg` |
 | RTC control | 🔴 | 🟢 `rtc`, `rtc --set` |
 | ROMFS manage | 🔴 | 🟢 `romfs` |
-| Edit remote file | 🔴 | 🟢 `edit :file` |
+| Edit remote file | 🟢 `edit :file` | 🟢 `edit :file` |
 | Flash read/write | 🟢 `flash r/w/erase` | 🔴 |
 | OTA update | 🟢 `ota firmware.app-bin` | 🔴 |
 | Print CWD | 🟢 `pwd` | 🔴 use `exec` |
