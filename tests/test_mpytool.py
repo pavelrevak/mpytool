@@ -813,5 +813,152 @@ class TestPathCommand(unittest.TestCase):
         self.assertIn('-x', str(ctx.exception))
 
 
+class TestRtcCommand(unittest.TestCase):
+    """Tests for rtc command"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.tool = MpyTool(self.mock_conn, verbose=None)
+        self.tool._mpy = Mock()
+        self.tool._mpy.comm = Mock()
+
+    def test_rtc_display(self):
+        """'rtc' displays current RTC"""
+        # RTC tuple: (year, month, day, weekday, hour, min, sec, subsec)
+        self.tool._mpy.comm.exec.return_value = b"(2026, 2, 21, 5, 14, 30, 45, 0)\n"
+        with patch('builtins.print') as mock_print:
+            commands = []
+            self.tool._dispatch_rtc(commands, False)
+            mock_print.assert_called_once_with("2026-02-21 14:30:45")
+
+    def test_rtc_set_local(self):
+        """'rtc --set' sets RTC to local time"""
+        self.tool._mpy.comm.exec.return_value = b""
+        with patch('mpytool.mpytool._datetime') as mock_dt:
+            mock_now = Mock()
+            mock_now.year = 2026
+            mock_now.month = 2
+            mock_now.day = 21
+            mock_now.weekday.return_value = 5
+            mock_now.hour = 14
+            mock_now.minute = 30
+            mock_now.second = 45
+            mock_now.microsecond = 0
+            mock_now.strftime.return_value = "2026-02-21 14:30:45"
+            mock_dt.datetime.now.return_value = mock_now
+            commands = ['--set']
+            self.tool._dispatch_rtc(commands, False)
+            # Verify RTC was set
+            call_args = self.tool._mpy.comm.exec.call_args[0][0]
+            self.assertIn("RTC().datetime", call_args)
+            self.assertIn("2026", call_args)
+
+    def test_rtc_local_flag(self):
+        """'rtc --local' sets RTC to local time"""
+        self.tool._mpy.comm.exec.return_value = b""
+        with patch('mpytool.mpytool._datetime') as mock_dt:
+            mock_now = Mock()
+            mock_now.year = 2026
+            mock_now.month = 1
+            mock_now.day = 15
+            mock_now.weekday.return_value = 2
+            mock_now.hour = 10
+            mock_now.minute = 0
+            mock_now.second = 0
+            mock_now.microsecond = 0
+            mock_now.strftime.return_value = "2026-01-15 10:00:00"
+            mock_dt.datetime.now.return_value = mock_now
+            commands = ['--local']
+            self.tool._dispatch_rtc(commands, False)
+            call_args = self.tool._mpy.comm.exec.call_args[0][0]
+            self.assertIn("RTC().datetime", call_args)
+
+    def test_rtc_utc_flag(self):
+        """'rtc --utc' sets RTC to UTC time"""
+        self.tool._mpy.comm.exec.return_value = b""
+        with patch('mpytool.mpytool._datetime') as mock_dt:
+            mock_utc = Mock()
+            mock_utc.year = 2026
+            mock_utc.month = 2
+            mock_utc.day = 21
+            mock_utc.weekday.return_value = 5
+            mock_utc.hour = 13
+            mock_utc.minute = 30
+            mock_utc.second = 45
+            mock_utc.microsecond = 0
+            mock_utc.strftime.return_value = "2026-02-21 13:30:45"
+            mock_dt.datetime.now.return_value = mock_utc
+            mock_dt.timezone.utc = Mock()
+            commands = ['--utc']
+            self.tool._dispatch_rtc(commands, False)
+            # Verify datetime.now was called with UTC timezone
+            mock_dt.datetime.now.assert_called_with(mock_dt.timezone.utc)
+
+    def test_rtc_manual_datetime(self):
+        """'rtc "2026-02-21 14:30:00"' sets RTC manually"""
+        self.tool._mpy.comm.exec.return_value = b""
+        with patch('mpytool.mpytool._datetime') as mock_dt:
+            mock_parsed = Mock()
+            mock_parsed.year = 2026
+            mock_parsed.month = 2
+            mock_parsed.day = 21
+            mock_parsed.weekday.return_value = 5
+            mock_parsed.hour = 14
+            mock_parsed.minute = 30
+            mock_parsed.second = 0
+            mock_parsed.microsecond = 0
+            mock_parsed.strftime.return_value = "2026-02-21 14:30:00"
+            mock_dt.datetime.strptime.return_value = mock_parsed
+            commands = ['2026-02-21 14:30:00']
+            self.tool._dispatch_rtc(commands, False)
+            mock_dt.datetime.strptime.assert_called_with(
+                '2026-02-21 14:30:00', '%Y-%m-%d %H:%M:%S')
+
+    def test_rtc_invalid_datetime_format(self):
+        """'rtc "invalid"' raises ParamsError"""
+        commands = ['invalid']
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_rtc(commands, False)
+        self.assertIn('invalid datetime format', str(ctx.exception))
+
+    def test_rtc_datetime_with_flag_error(self):
+        """'rtc --set "2026-02-21 14:30:00"' raises ParamsError"""
+        commands = ['--set', '2026-02-21 14:30:00']
+        with self.assertRaises(ParamsError) as ctx:
+            self.tool._dispatch_rtc(commands, False)
+        self.assertIn('incompatible', str(ctx.exception))
+
+    def test_rtc_short_flags(self):
+        """Test short flags -s, -l, -u"""
+        self.tool._mpy.comm.exec.return_value = b""
+        with patch('mpytool.mpytool._datetime') as mock_dt:
+            mock_now = Mock()
+            mock_now.year = 2026
+            mock_now.month = 1
+            mock_now.day = 1
+            mock_now.weekday.return_value = 2
+            mock_now.hour = 0
+            mock_now.minute = 0
+            mock_now.second = 0
+            mock_now.microsecond = 0
+            mock_now.strftime.return_value = "2026-01-01 00:00:00"
+            mock_dt.datetime.now.return_value = mock_now
+            mock_dt.timezone.utc = Mock()
+            # Test -s
+            commands = ['-s']
+            self.tool._dispatch_rtc(commands, False)
+            self.assertTrue(self.tool._mpy.comm.exec.called)
+            self.tool._mpy.comm.exec.reset_mock()
+            # Test -l
+            commands = ['-l']
+            self.tool._dispatch_rtc(commands, False)
+            self.assertTrue(self.tool._mpy.comm.exec.called)
+            self.tool._mpy.comm.exec.reset_mock()
+            # Test -u
+            commands = ['-u']
+            self.tool._dispatch_rtc(commands, False)
+            mock_dt.datetime.now.assert_called_with(mock_dt.timezone.utc)
+
+
 if __name__ == "__main__":
     unittest.main()

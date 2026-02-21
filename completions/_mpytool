@@ -278,6 +278,11 @@ _mpytool() {
                     fi
                     [[ $nargs -ge 1 ]] && compadd -- '--'
                     ;;
+                rtc)
+                    # rtc [-s|-l|-u] [datetime]
+                    _mpytool_options rtc
+                    compadd -- '--'
+                    ;;
                 pwd)
                     # No arguments, -- immediately
                     compadd -- '--'

@@ -289,6 +289,10 @@ _mpytool() {
             fi
             [[ $nargs -ge 1 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
             ;;
+        rtc)
+            # rtc [-s|-l|-u] [datetime]
+            COMPREPLY=($(compgen -W "$(_mpytool_get_options rtc) --" -- "$cur"))
+            ;;
         pwd)
             # No arguments, -- immediately
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")

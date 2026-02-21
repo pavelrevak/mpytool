@@ -35,7 +35,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Unmount VFS | 🔴 exit session | 🟢 `umount` |
 | Virtual submount | 🟢 `ln ./src :/dst` | 🔴 |
 | Package install | 🔴 | 🟢 `mip install pkg` |
-| RTC control | 🔴 | 🟢 `rtc`, `rtc --set` |
+| RTC control | 🟢 `rtc`, `rtc --set` | 🟢 `rtc`, `rtc --set` |
 | ROMFS manage | 🔴 | 🟢 `romfs` |
 | Edit remote file | 🟢 `edit :file` | 🟢 `edit :file` |
 | Flash read/write/ota | 🟢 `flash r/w/erase/ota` | 🔴 |

@@ -2687,5 +2687,78 @@ class TestPathOperations(unittest.TestCase):
         self.assertEqual(path[-2:], ['/a', '/b'])
 
 
+@requires_device
+class TestRtc(unittest.TestCase):
+    """Test RTC operations"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpytool import ConnSerial, Mpy
+        from mpytool.mpytool import MpyTool
+        from mpytool.logger import SimpleColorLogger
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
+        cls.mpy = Mpy(cls.conn)
+        cls.log = SimpleColorLogger(loglevel=0, verbose_level=0)
+        cls.tool = MpyTool(cls.conn, log=cls.log, verbose=None)
+        cls.tool._mpy = cls.mpy
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mpy.comm.exit_raw_repl()
+        cls.conn.close()
+
+    def test_01_rtc_display(self):
+        """Test RTC display returns valid datetime tuple"""
+        rtc = self.tool._get_rtc()
+        self.assertEqual(len(rtc), 8)
+        # Year should be reasonable (2000 is default, up to 2100)
+        self.assertGreaterEqual(rtc[0], 2000)
+        self.assertLessEqual(rtc[0], 2100)
+        # Month 1-12
+        self.assertGreaterEqual(rtc[1], 1)
+        self.assertLessEqual(rtc[1], 12)
+        # Day 1-31
+        self.assertGreaterEqual(rtc[2], 1)
+        self.assertLessEqual(rtc[2], 31)
+
+    def test_02_rtc_set_local(self):
+        """Test setting RTC to local time"""
+        import datetime
+        now = datetime.datetime.now()
+        self.tool._set_rtc(now)
+        rtc = self.tool._get_rtc()
+        # Year, month, day should match
+        self.assertEqual(rtc[0], now.year)
+        self.assertEqual(rtc[1], now.month)
+        self.assertEqual(rtc[2], now.day)
+        # Hour, minute should be close (within 1 minute tolerance)
+        self.assertEqual(rtc[4], now.hour)
+        self.assertAlmostEqual(rtc[5], now.minute, delta=1)
+
+    def test_03_rtc_set_utc(self):
+        """Test setting RTC to UTC time"""
+        import datetime
+        utc_now = datetime.datetime.now(datetime.timezone.utc)
+        self.tool._set_rtc(utc_now)
+        rtc = self.tool._get_rtc()
+        self.assertEqual(rtc[0], utc_now.year)
+        self.assertEqual(rtc[1], utc_now.month)
+        self.assertEqual(rtc[2], utc_now.day)
+        self.assertEqual(rtc[4], utc_now.hour)
+
+    def test_04_rtc_set_manual(self):
+        """Test setting RTC to manual datetime"""
+        import datetime
+        test_dt = datetime.datetime(2025, 6, 15, 12, 30, 45)
+        self.tool._set_rtc(test_dt)
+        rtc = self.tool._get_rtc()
+        self.assertEqual(rtc[0], 2025)
+        self.assertEqual(rtc[1], 6)
+        self.assertEqual(rtc[2], 15)
+        self.assertEqual(rtc[4], 12)
+        self.assertEqual(rtc[5], 30)
+        self.assertEqual(rtc[6], 45)
+
+
 if __name__ == "__main__":
     unittest.main()

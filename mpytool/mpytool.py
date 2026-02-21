@@ -1,6 +1,7 @@
 """MicroPython tool"""
 
 import argparse as _argparse
+import datetime as _datetime
 import fnmatch as _fnmatch
 import importlib.metadata as _metadata
 import os as _os
@@ -31,7 +32,7 @@ else:
 _CMD_ORDER = [
     'ls', 'tree', 'cat', 'cp', 'mv', 'mkdir', 'rm', 'pwd', 'cd', 'path',
     'stop', 'reset', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
-    'flash', 'mount', 'ln', 'speedtest', 'sleep',
+    'rtc', 'flash', 'mount', 'ln', 'speedtest', 'sleep',
 ]
 
 
@@ -147,12 +148,12 @@ def _make_parser(method):
     for group_opts in getattr(method, '_cmd_groups', []):
         group = parser.add_mutually_exclusive_group()
         for opt_args, opt_kwargs in getattr(method, '_cmd_options', []):
-            # Match by first option string (e.g., '--machine')
-            if opt_args and opt_args[0] in group_opts:
+            # Match any option string (e.g., '-s' or '--set')
+            if opt_args and any(opt in group_opts for opt in opt_args):
                 group.add_argument(*opt_args, **opt_kwargs)
     # Add non-grouped options
     for opt_args, opt_kwargs in getattr(method, '_cmd_options', []):
-        if not opt_args or opt_args[0] not in grouped_opts:
+        if not opt_args or not any(opt in grouped_opts for opt in opt_args):
             parser.add_argument(*opt_args, **opt_kwargs)
     # Add positional arguments
     for args, kwargs in getattr(method, '_cmd_args', []):
@@ -957,6 +958,63 @@ class MpyTool():
         path = _parse_device_path(args.path, 'edit')
         self.cmd_edit(path, editor=args.editor)
 
+    @command('rtc', 'Get or set device RTC.')
+    @mutually_exclusive('--set', '--local', '--utc')
+    @option('-s', '--set', action='store_true',
+        help='set to local PC time')
+    @option('-l', '--local', action='store_true',
+        help='set to local PC time')
+    @option('-u', '--utc', action='store_true',
+        help='set to UTC time')
+    @argument('datetime', nargs='?', metavar='DATETIME',
+        help='datetime string (YYYY-MM-DD HH:MM:SS)')
+    def _dispatch_rtc(self, commands, is_last_group):
+        args = _make_parser(self._dispatch_rtc).parse_args(commands)
+        commands.clear()
+        if args.datetime:
+            if args.set or args.local or args.utc:
+                raise ParamsError(
+                    'datetime argument is incompatible with --set/--local/--utc')
+            try:
+                parsed = _datetime.datetime.strptime(
+                    args.datetime, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                raise ParamsError(
+                    'invalid datetime format (use YYYY-MM-DD HH:MM:SS)')
+            self._set_rtc(parsed)
+            self.verbose(
+                f"RTC set to {parsed.strftime('%Y-%m-%d %H:%M:%S')}", 1)
+        elif args.set or args.local:
+            now = _datetime.datetime.now()
+            self._set_rtc(now)
+            self.verbose(
+                f"RTC set to {now.strftime('%Y-%m-%d %H:%M:%S')} (local)", 1)
+        elif args.utc:
+            now = _datetime.datetime.now(_datetime.timezone.utc)
+            self._set_rtc(now)
+            self.verbose(
+                f"RTC set to {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)", 1)
+        else:
+            rtc = self._get_rtc()
+            print(
+                f"{rtc[0]:04d}-{rtc[1]:02d}-{rtc[2]:02d} "
+                f"{rtc[4]:02d}:{rtc[5]:02d}:{rtc[6]:02d}")
+
+    def _set_rtc(self, dt_obj):
+        """Set device RTC from datetime object"""
+        timetuple = (
+            dt_obj.year, dt_obj.month, dt_obj.day, dt_obj.weekday(),
+            dt_obj.hour, dt_obj.minute, dt_obj.second, dt_obj.microsecond)
+        self.mpy.comm.exec(
+            f"__import__('machine').RTC().datetime({timetuple})")
+
+    def _get_rtc(self):
+        """Get device RTC as tuple"""
+        import ast
+        result = self.mpy.comm.exec(
+            "print(__import__('machine').RTC().datetime())")
+        return ast.literal_eval(result.decode().strip())
+
     @command('info', 'Show device info (platform, memory, filesystem).')
     def _dispatch_info(self, commands, is_last_group):
         _, commands[:] = _make_parser(self._dispatch_info).parse_known_args(
@@ -1274,7 +1332,7 @@ class MpyTool():
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd', 'path',
         'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
-        'flash', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
+        'rtc', 'flash', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
         '_paths', '_ports', '_commands', '_options', '_args',
     })
 

@@ -233,6 +233,24 @@ $ mpytool edit :newfile.py           # create new file if doesn't exist
 Downloads file to a temp file, opens in editor, uploads back if changed.
 Editor priority: `--editor` > `$VISUAL` > `$EDITOR` > error.
 
+### Device RTC (real-time clock)
+```
+$ mpytool rtc                        # display current RTC
+2026-02-21 15:30:45
+
+$ mpytool rtc --set                  # set RTC to local PC time
+RTC set to 2026-02-21 15:30:45 (local)
+
+$ mpytool rtc --utc                  # set RTC to UTC time
+RTC set to 2026-02-21 14:30:45 (UTC)
+
+$ mpytool rtc "2026-02-21 14:30:00"  # set RTC to specific datetime
+RTC set to 2026-02-21 14:30:00
+```
+
+Flags: `-s`/`--set` and `-l`/`--local` both set local time, `-u`/`--utc` sets UTC.
+Manual datetime format: `YYYY-MM-DD HH:MM:SS`.
+
 ### Mount local directory on device
 ```
 $ mpytool mount ./src                       # mount ./src as /remote, auto-start REPL
