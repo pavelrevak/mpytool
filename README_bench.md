@@ -85,6 +85,13 @@ Reading files from mounted VFS (PC filesystem accessible on device).
 | Read 50 x 2KB files | **0.6s** | 3.2s | **5.6x** |
 | Read 1 x 100KB file | **0.3s** | 0.5s | **1.8x** |
 
+### ESP32-S3 - USB-CDC - MacOS
+
+| Test | mpytool | mpremote | Speedup |
+|------|---------|----------|---------|
+| Read 50 x 2KB files | **1.6s** | 3.9s | **2.3x** |
+| Read 1 x 100KB file | **0.6s** | 1.0s | **1.7x** |
+
 ### Summary
 
 Batch LISTDIR (1 RTT) vs iterative ilistdir (N+1 RTT) makes significant difference when opening many files. The speedup is more pronounced on faster CPUs (ESP32-C6 160MHz vs RP2040 133MHz).

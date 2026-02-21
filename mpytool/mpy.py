@@ -144,6 +144,8 @@ def _mt_pfind(label):
         # Multi-mount state
         self._mounts = []  # [(mid, mount_point, local_path, handler), ...]
         self._next_mid = 0
+        self._custom_cwd = None  # CWD to restore after soft reset
+        self._custom_syspath = None  # sys.path to restore after soft reset
         # VfsProtocol always registered - handles stale VFS and all mounts
         self._vfs_protocol = _mount.VfsProtocol(
             conn, remount_fn=self._do_remount_all, log=log)
@@ -328,6 +330,7 @@ def _mt_pfind(label):
         self.import_module('os')
         try:
             self._mpy_comm.exec(f"os.chdir('{_escape_path(path)}')")
+            self._custom_cwd = path
         except _mpy_comm.CmdError as err:
             raise DirNotFound(path) from err
 
@@ -347,7 +350,9 @@ def _mt_pfind(label):
             *paths: path strings
         """
         self.import_module('sys')
-        self._mpy_comm.exec(f"sys.path = {list(paths)!r}")
+        new_path = list(paths)
+        self._mpy_comm.exec(f"sys.path = {new_path!r}")
+        self._custom_syspath = new_path
 
     def prepend_sys_path(self, *paths):
         """Add paths to beginning of sys.path (removes duplicates)
@@ -357,7 +362,9 @@ def _mt_pfind(label):
         """
         current = self.get_sys_path()
         current = [p for p in current if p not in paths]
-        self._mpy_comm.exec(f"sys.path = {list(paths) + current!r}")
+        new_path = list(paths) + current
+        self._mpy_comm.exec(f"sys.path = {new_path!r}")
+        self._custom_syspath = new_path
 
     def append_sys_path(self, *paths):
         """Add paths to end of sys.path (removes duplicates)
@@ -367,7 +374,9 @@ def _mt_pfind(label):
         """
         current = self.get_sys_path()
         current = [p for p in current if p not in paths]
-        self._mpy_comm.exec(f"sys.path = {current + list(paths)!r}")
+        new_path = current + list(paths)
+        self._mpy_comm.exec(f"sys.path = {new_path!r}")
+        self._custom_syspath = new_path
 
     def remove_from_sys_path(self, *paths):
         """Remove specified paths from sys.path
@@ -378,6 +387,7 @@ def _mt_pfind(label):
         current = self.get_sys_path()
         new_path = [p for p in current if p not in paths]
         self._mpy_comm.exec(f"sys.path = {new_path!r}")
+        self._custom_syspath = new_path
 
     def hashfile(self, path):
         """Compute SHA256 hash of file
@@ -1576,6 +1586,12 @@ def _mt_pfind(label):
 
         self._mounts.append((mid, mount_point, local_path, handler))
         self._next_mid += 1
+
+        # First mount: change CWD to mount point (mpremote compatibility)
+        if len(self._mounts) == 1:
+            self._mpy_comm.exec(f"os.chdir('{mp_escaped}')", timeout=3)
+            self._custom_cwd = mount_point
+
         return handler
 
     def _do_remount_all(self):
@@ -1595,12 +1611,15 @@ def _mt_pfind(label):
             self._mpy_comm.exec(
                 f"_mt_mount('{mp_escaped}',{mid},{self._chunk_size})",
                 timeout=5)
-        # Restore CWD to first mount point (mpremote compatibility)
-        if self._mounts:
-            first_mount = self._mounts[0]
-            if first_mount[0] is not None:  # Not a submount
-                mp_escaped = _escape_path(first_mount[1])
-                self._mpy_comm.exec(
-                    f"os.chdir('{mp_escaped}')", timeout=3)
+        # Restore CWD
+        if self._custom_cwd is not None:
+            cwd_escaped = _escape_path(self._custom_cwd)
+            self._mpy_comm.exec(f"os.chdir('{cwd_escaped}')", timeout=3)
+
+        # Restore sys.path
+        if self._custom_syspath is not None:
+            self._mpy_comm.exec(
+                f"import sys; sys.path[:] = {self._custom_syspath!r}", timeout=3)
+
         self._mpy_comm.exit_raw_repl()
 

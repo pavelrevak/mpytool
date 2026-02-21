@@ -604,5 +604,60 @@ class TestExecSubmitOnly(unittest.TestCase):
         self.assertFalse(self.comm._repl_mode)
 
 
+class TestCwdAndPathTracking(unittest.TestCase):
+    """Tests for CWD and sys.path tracking for soft reset restore"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn._escape_handlers = {}
+        self.mock_conn.register_escape_handler = Mock(
+            side_effect=lambda b, h: self.mock_conn._escape_handlers.__setitem__(b, h))
+        self.mpy = Mpy(self.mock_conn)
+
+    def test_initial_state_none(self):
+        """_custom_cwd and _custom_syspath are None initially"""
+        self.assertIsNone(self.mpy._custom_cwd)
+        self.assertIsNone(self.mpy._custom_syspath)
+
+    def test_chdir_saves_cwd(self):
+        """chdir() saves path to _custom_cwd"""
+        self.mpy._mpy_comm = Mock()
+        self.mpy._imported = ['os']
+        self.mpy.chdir('/lib')
+        self.assertEqual(self.mpy._custom_cwd, '/lib')
+        self.mpy._mpy_comm.exec.assert_called()
+
+    def test_set_sys_path_saves_path(self):
+        """set_sys_path() saves to _custom_syspath"""
+        self.mpy._mpy_comm = Mock()
+        self.mpy._imported = ['sys']
+        self.mpy.set_sys_path('/lib', '/app')
+        self.assertEqual(self.mpy._custom_syspath, ['/lib', '/app'])
+
+    def test_prepend_sys_path_saves_path(self):
+        """prepend_sys_path() saves combined path to _custom_syspath"""
+        self.mpy._mpy_comm = Mock()
+        self.mpy._mpy_comm.exec_eval.return_value = ['/old']
+        self.mpy._imported = ['sys']
+        self.mpy.prepend_sys_path('/new')
+        self.assertEqual(self.mpy._custom_syspath, ['/new', '/old'])
+
+    def test_append_sys_path_saves_path(self):
+        """append_sys_path() saves combined path to _custom_syspath"""
+        self.mpy._mpy_comm = Mock()
+        self.mpy._mpy_comm.exec_eval.return_value = ['/old']
+        self.mpy._imported = ['sys']
+        self.mpy.append_sys_path('/new')
+        self.assertEqual(self.mpy._custom_syspath, ['/old', '/new'])
+
+    def test_remove_from_sys_path_saves_path(self):
+        """remove_from_sys_path() saves filtered path to _custom_syspath"""
+        self.mpy._mpy_comm = Mock()
+        self.mpy._mpy_comm.exec_eval.return_value = ['/a', '/b', '/c']
+        self.mpy._imported = ['sys']
+        self.mpy.remove_from_sys_path('/b')
+        self.assertEqual(self.mpy._custom_syspath, ['/a', '/c'])
+
+
 if __name__ == "__main__":
     unittest.main()

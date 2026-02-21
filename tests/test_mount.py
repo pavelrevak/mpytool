@@ -1960,5 +1960,103 @@ class TestMountHandlerWrite(unittest.TestCase):
         self.assertEqual(result[4:4+length], b'BBB\n')
 
 
+class TestMountCwdTracking(unittest.TestCase):
+    """Tests for mount() CWD tracking"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn._escape_handlers = {}
+        self.mock_conn.register_escape_handler = Mock(
+            side_effect=lambda b, h: self.mock_conn._escape_handlers.__setitem__(b, h))
+        from mpytool.mpy import Mpy
+        self.mpy = Mpy(self.mock_conn)
+        self.mpy._mpy_comm = Mock()
+        self.mpy._mpy_comm.exec_eval.return_value = 4096  # chunk size
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_first_mount_saves_cwd(self):
+        """First mount saves mount_point to _custom_cwd"""
+        self.mpy.mount(self.temp_dir, '/remote')
+        self.assertEqual(self.mpy._custom_cwd, '/remote')
+
+    def test_second_mount_does_not_change_cwd(self):
+        """Second mount does not overwrite _custom_cwd"""
+        temp_dir2 = tempfile.mkdtemp()
+        try:
+            self.mpy.mount(self.temp_dir, '/remote')
+            self.mpy.mount(temp_dir2, '/other')
+            # CWD should still be from first mount
+            self.assertEqual(self.mpy._custom_cwd, '/remote')
+        finally:
+            shutil.rmtree(temp_dir2)
+
+
+class TestRemountRestoreState(unittest.TestCase):
+    """Tests for _do_remount_all() state restore"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn._escape_handlers = {}
+        self.mock_conn.register_escape_handler = Mock(
+            side_effect=lambda b, h: self.mock_conn._escape_handlers.__setitem__(b, h))
+        from mpytool.mpy import Mpy
+        self.mpy = Mpy(self.mock_conn)
+        self.mpy._mpy_comm = Mock()
+        self.mpy._mpy_comm.exec_eval.return_value = 4096
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_remount_restores_cwd(self):
+        """_do_remount_all() restores _custom_cwd"""
+        self.mpy.mount(self.temp_dir, '/remote')
+        self.mpy._custom_cwd = '/lib'  # user changed CWD
+        self.mpy._mpy_comm.reset_mock()
+
+        self.mpy._do_remount_all()
+
+        # Check that os.chdir('/lib') was called
+        exec_calls = [str(c) for c in self.mpy._mpy_comm.exec.call_args_list]
+        self.assertTrue(
+            any("os.chdir('/lib')" in c for c in exec_calls),
+            f"Expected os.chdir('/lib') in {exec_calls}")
+
+    def test_remount_restores_syspath(self):
+        """_do_remount_all() restores _custom_syspath"""
+        self.mpy.mount(self.temp_dir, '/remote')
+        self.mpy._custom_syspath = ['/lib', '/app']
+        self.mpy._mpy_comm.reset_mock()
+
+        self.mpy._do_remount_all()
+
+        # Check that sys.path was restored
+        exec_calls = [str(c) for c in self.mpy._mpy_comm.exec.call_args_list]
+        self.assertTrue(
+            any("sys.path[:] = ['/lib', '/app']" in c for c in exec_calls),
+            f"Expected sys.path restore in {exec_calls}")
+
+    def test_remount_no_restore_if_none(self):
+        """_do_remount_all() skips restore if state is None"""
+        self.mpy.mount(self.temp_dir, '/remote')
+        self.mpy._custom_cwd = None
+        self.mpy._custom_syspath = None
+        self.mpy._mpy_comm.reset_mock()
+
+        self.mpy._do_remount_all()
+
+        # Check that os.chdir and sys.path were NOT called
+        exec_calls = [str(c) for c in self.mpy._mpy_comm.exec.call_args_list]
+        self.assertFalse(
+            any("os.chdir" in c for c in exec_calls),
+            f"os.chdir should not be called when _custom_cwd is None")
+        self.assertFalse(
+            any("sys.path[:] =" in c for c in exec_calls),
+            f"sys.path should not be restored when _custom_syspath is None")
+
+
 if __name__ == '__main__':
     unittest.main()
