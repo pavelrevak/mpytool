@@ -38,8 +38,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | RTC control | 🔴 | 🟢 `rtc`, `rtc --set` |
 | ROMFS manage | 🔴 | 🟢 `romfs` |
 | Edit remote file | 🟢 `edit :file` | 🟢 `edit :file` |
-| Flash read/write | 🟢 `flash r/w/erase` | 🔴 |
-| OTA update | 🟢 `ota firmware.app-bin` | 🔴 |
+| Flash read/write/ota | 🟢 `flash r/w/erase/ota` | 🔴 |
 | Print CWD | 🟢 `pwd` | 🔴 use `exec` |
 | Change CWD | 🟢 `cd :path` | 🔴 use `exec` |
 | Manage sys.path | 🟢 `path` | 🔴 use `exec` |

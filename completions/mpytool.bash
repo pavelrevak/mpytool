@@ -307,7 +307,14 @@ _mpytool() {
         flash)
             local flash_subcmd="${COMP_WORDS[cmd_start+1]}"
             if [[ $pos -eq 2 ]]; then
-                COMPREPLY=($(compgen -W "read write erase" -- "$cur"))
+                COMPREPLY=($(compgen -W "read write erase ota" -- "$cur"))
+            elif [[ "$flash_subcmd" == "ota" ]]; then
+                # ota: 1 firmware file, -- after it
+                if [[ $pos -eq 3 ]]; then
+                    COMPREPLY=($(compgen -f -X '!*.bin' -- "$cur"))
+                else
+                    [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+                fi
             elif [[ $pos -eq 3 && "$flash_subcmd" == "erase" ]]; then
                 COMPREPLY=($(compgen -W "--full" -- "$cur"))
                 [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
@@ -320,13 +327,10 @@ _mpytool() {
                 COMPREPLY=($(compgen -W "--full" -- "$cur"))
                 [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             fi
-            [[ "$flash_subcmd" != "erase" && $pos -ge 5 && ( -z "$cur" || "--" == "$cur"* ) ]] && COMPREPLY+=("--")
-            ;;
-        ota)
-            # 1 firmware file, -- after it
-            if [[ $pos -eq 2 ]]; then
-                COMPREPLY=($(compgen -f -X '!*.bin' -- "$cur"))
-            else
+            # -- after complete subcommand
+            if [[ "$flash_subcmd" == "ota" && $pos -ge 4 ]]; then
+                [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
+            elif [[ "$flash_subcmd" != "erase" && "$flash_subcmd" != "ota" && $pos -ge 5 ]]; then
                 [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             fi
             ;;

@@ -31,7 +31,7 @@ else:
 _CMD_ORDER = [
     'ls', 'tree', 'cat', 'cp', 'mv', 'mkdir', 'rm', 'pwd', 'cd', 'path',
     'stop', 'reset', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
-    'flash', 'ota', 'mount', 'ln', 'speedtest', 'sleep',
+    'flash', 'mount', 'ln', 'speedtest', 'sleep',
 ]
 
 
@@ -963,7 +963,7 @@ class MpyTool():
             commands)
         self.cmd_info()
 
-    @command('flash', 'Flash/partition ops. Without args, show info.')
+    @command('flash', 'Flash/partition ops (read/write/erase/ota).')
     def _dispatch_flash(self, commands, is_last_group):
         # Flash has subcommands, build parser manually
         parser = _make_parser(self._dispatch_flash)
@@ -981,6 +981,9 @@ class MpyTool():
             'label', nargs='?', help='partition label (ESP32)')
         flash_erase.add_argument(
             '--full', action='store_true', help='full erase (slow)')
+        flash_ota = flash_sub.add_parser('ota', help='OTA firmware update')
+        flash_ota.add_argument(
+            'firmware', help='firmware .app-bin file')
         args = parser.parse_args(commands)
         commands.clear()
         if args.operation == 'read':
@@ -999,14 +1002,11 @@ class MpyTool():
                 raise ParamsError('flash write: [label] file')
         elif args.operation == 'erase':
             self.cmd_flash_erase(label=args.label, full=args.full)
+        elif args.operation == 'ota':
+            self.cmd_ota(args.firmware)
         else:
             self.cmd_flash()
 
-    @command('ota', 'Perform OTA firmware update (ESP32).')
-    @argument('firmware', help='firmware .app-bin file')
-    def _dispatch_ota(self, commands, is_last_group):
-        args = _make_parser(self._dispatch_ota).parse_args([commands.pop(0)])
-        self.cmd_ota(args.firmware)
 
     @command('sleep', 'Pause for specified number of seconds.')
     @argument('seconds', type=float, help='seconds to sleep')
@@ -1274,7 +1274,7 @@ class MpyTool():
     _COMMANDS = frozenset({
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd', 'path',
         'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
-        'flash', 'ota', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
+        'flash', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
         '_paths', '_ports', '_commands', '_options', '_args',
     })
 

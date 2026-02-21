@@ -378,9 +378,9 @@ $ mpytool flash erase vfs --full           # full erase partition
 
 ### OTA firmware update (ESP32)
 ```
-$ mpytool ota firmware.app-bin                    # flash to next OTA partition
-$ mpytool ota firmware.app-bin -- reset --machine          # flash and reboot
-$ mpytool ota firmware.app-bin -- reset --machine -t 30    # flash and reboot with 30s timeout
+$ mpytool flash ota firmware.app-bin                    # flash to next OTA partition
+$ mpytool flash ota firmware.app-bin -- reset --machine          # flash and reboot
+$ mpytool flash ota firmware.app-bin -- reset --machine -t 30    # flash and reboot with 30s timeout
 ```
 
 ### Multiple commands separated by `--`

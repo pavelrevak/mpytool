@@ -295,15 +295,23 @@ _mpytool() {
                     # Interactive, no chaining
                     ;;
                 flash)
-                    # flash [read|write|erase] [label] [file]
+                    # flash [read|write|erase|ota] [label] [file]
                     local flash_subcmd="${words[cmd_start+1]}"
                     if [[ $pos -eq 2 ]]; then
                         local -a subcmds=(
                             'read:read flash/partition to file'
                             'write:write file to flash/partition'
                             'erase:erase flash/partition'
+                            'ota:OTA firmware update'
                         )
                         _describe -t subcmds 'flash subcommand' subcmds
+                    elif [[ "$flash_subcmd" == "ota" ]]; then
+                        # ota: 1 firmware file, -- after it
+                        if [[ $pos -eq 3 ]]; then
+                            _files -g "*.bin"
+                        else
+                            compadd -- '--'
+                        fi
                     elif [[ $pos -eq 3 && "$flash_subcmd" == "erase" ]]; then
                         compadd -- '--full'
                         compadd -- '--'
@@ -319,15 +327,9 @@ _mpytool() {
                     # -- after complete subcommand
                     if [[ "$flash_subcmd" == "erase" && $pos -ge 3 ]]; then
                         :  # already handled above
-                    elif [[ "$flash_subcmd" != "erase" && $pos -ge 5 ]]; then
+                    elif [[ "$flash_subcmd" == "ota" && $pos -ge 4 ]]; then
                         compadd -- '--'
-                    fi
-                    ;;
-                ota)
-                    # 1 firmware file, -- after it
-                    if [[ $pos -eq 2 ]]; then
-                        _files -g "*.bin"
-                    else
+                    elif [[ "$flash_subcmd" != "erase" && "$flash_subcmd" != "ota" && $pos -ge 5 ]]; then
                         compadd -- '--'
                     fi
                     ;;
