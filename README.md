@@ -497,7 +497,7 @@ For reporting bugs, please include `-ddd` output in the issue.
 
 ## Performance
 
-`mpytool` uses optimized chunked transfer with automatic compression, which allows copying files very quickly. See [README_BENCH.md](README_BENCH.md) for detailed benchmarks.
+`mpytool` uses optimized chunked transfer with automatic compression, which allows copying files very quickly. See [README_bench.md](README_bench.md) for detailed benchmarks.
 
 ### Summary
 

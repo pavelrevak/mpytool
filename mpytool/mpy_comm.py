@@ -182,12 +182,12 @@ class MpyComm():
         self._repl_mode = None
         self._raw_paste_supported = None
 
-    def exec(self, command, timeout=5):
+    def exec(self, command, timeout=None):
         """Execute command
 
         Arguments:
             command: command to execute
-            timeout: maximum waiting time for result,
+            timeout: maximum waiting time for result (None = wait forever),
                 0 = submit only (send code, don't wait for output)
 
         Returns:

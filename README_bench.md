@@ -66,3 +66,25 @@ Higher speed achieved by automatic compression of text-based files during transf
 - **Skip unchanged: 1.5x - 2.9x faster** than mpremote
 
 Many more test scenarios could be designed (different file types, sizes, mixed workloads), but in most cases mpytool would be **at least 2x faster** than mpremote.
+
+## Mount VFS Benchmark
+
+Reading files from mounted VFS (PC filesystem accessible on device).
+
+### RP2040 - USB-CDC - MacOS
+
+| Test | mpytool | mpremote | Speedup |
+|------|---------|----------|---------|
+| Read 50 x 2KB files | **1.5s** | 3.9s | **2.5x** |
+| Read 1 x 100KB file | **1.0s** | 1.1s | **1.1x** |
+
+### ESP32-C6 - USB-CDC - MacOS
+
+| Test | mpytool | mpremote | Speedup |
+|------|---------|----------|---------|
+| Read 50 x 2KB files | **0.6s** | 3.2s | **5.6x** |
+| Read 1 x 100KB file | **0.3s** | 0.5s | **1.8x** |
+
+### Summary
+
+Batch LISTDIR (1 RTT) vs iterative ilistdir (N+1 RTT) makes significant difference when opening many files. The speedup is more pronounced on faster CPUs (ESP32-C6 160MHz vs RP2040 133MHz).

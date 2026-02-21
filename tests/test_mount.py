@@ -713,61 +713,6 @@ class TestVfsProtocolSoftReboot(unittest.TestCase):
         self.assertTrue(intercept._needs_remount)
 
 
-class TestMountAutoRepl(unittest.TestCase):
-    """Tests for auto-REPL logic with mount command"""
-
-    def test_mount_only(self):
-        """mount without repl/monitor appends repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['mount', './src']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 2)
-        self.assertEqual(groups[1], ['repl'])
-
-    def test_mount_with_repl(self):
-        """mount -- repl does not append extra repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['mount', './src'], ['repl']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 2)
-
-    def test_mount_with_monitor(self):
-        """mount -- monitor does not append repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['mount', './src'], ['monitor']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 2)
-
-    def test_mount_with_exec(self):
-        """mount -- exec "..." appends repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['mount', './src'], ['exec', 'import app']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 3)
-        self.assertEqual(groups[2], ['repl'])
-
-    def test_mount_exec_monitor(self):
-        """mount -- exec -- monitor does not append repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['mount', './src'], ['exec', 'import app'], ['monitor']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 3)
-
-    def test_no_mount(self):
-        """Without mount, no auto-repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['exec', 'print(1)']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 1)
-
-    def test_mount_list_no_auto_repl(self):
-        """mount without args (listing) does not append repl"""
-        from mpytool.mpytool import _mount_auto_repl
-        groups = [['mount']]
-        _mount_auto_repl(groups)
-        self.assertEqual(len(groups), 1)
-
-
 class TestMountDispatch(unittest.TestCase):
     """Tests for mount command dispatch"""
 

@@ -4,6 +4,7 @@ import argparse as _argparse
 import fnmatch as _fnmatch
 import importlib.metadata as _metadata
 import os as _os
+import sys as _sys
 import time as _time
 
 import mpytool as _mpytool
@@ -409,6 +410,9 @@ class MpyTool():
         self.mpy.comm.exit_raw_repl()
         if not _terminal.AVAILABLE:
             self._log.error("REPL not available on this platform")
+            return
+        if not _sys.stdin.isatty():
+            self._log.error("REPL requires interactive terminal")
             return
         self.verbose("REPL (Ctrl+] to exit)", 1)
         terminal = _terminal.Terminal(self.conn, self._log)
@@ -1316,26 +1320,6 @@ def _parse_chunk_size(value):
     return num
 
 
-def _mount_auto_repl(command_groups):
-    """Append repl to command groups if mount is used without terminal command.
-
-    mount requires mpytool to stay alive (PC handles FS requests).
-    If the last command after mount is not repl or monitor, auto-append repl.
-    """
-    # mount with args = real mount (needs repl to stay alive)
-    # mount without args = listing only (no repl needed)
-    has_mount = any(
-        group[0] == 'mount' and len(group) > 1
-        for group in command_groups if group)
-    if not has_mount:
-        return
-    # Check first item (command name) of last group
-    last_group = command_groups[-1] if command_groups else []
-    last_cmd = last_group[0] if last_group else None
-    if last_cmd not in ('repl', 'monitor'):
-        command_groups.append(['repl'])
-
-
 def _build_main_parser():
     """Build the main argument parser."""
     _description = _about["Summary"] if _about else None
@@ -1402,8 +1386,6 @@ def main():
         force=args.force, compress=compress, chunk_size=args.chunk_size,
         port=args.port, address=args.address, baudrate=args.baud)
     command_groups = _utils.split_commands(args.commands)
-    # Auto-REPL for mount: if mount is used and last command is not repl/monitor
-    _mount_auto_repl(command_groups)
     try:
         with_progress = args.verbose >= 1
         _run_commands(mpy_tool, command_groups, with_progress=with_progress)
