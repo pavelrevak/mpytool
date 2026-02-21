@@ -216,10 +216,7 @@ class CopyCommand:
         else:
             self._progress_src = self._format_local_path(src)
         if is_dst_remote:
-            if dst.startswith('/'):
-                self._progress_dst = ':' + dst
-            else:
-                self._progress_dst = ':/' + dst
+            self._progress_dst = ':' + dst
         else:
             self._progress_dst = self._format_local_path(dst)
         if len(self._progress_dst) > self._progress_max_dst_len:
