@@ -1525,7 +1525,7 @@ def main():
     log = SimpleColorLogger(args.debug + 1, verbose_level=args.verbose)
     if args.port and args.address:
         log.error("You can select only serial port or network address")
-        return
+        _sys.exit(1)
     # Determine compression setting: None=auto, True=force, False=disable
     compress = None
     if args.no_compress:
@@ -1543,9 +1543,11 @@ def main():
         _run_commands(mpy_tool, command_groups, with_progress=with_progress)
     except (_mpytool.MpyError, _mpytool.ConnError, _mpytool.Timeout) as err:
         log.error(err)
+        _sys.exit(1)
     except KeyboardInterrupt:
         # Clear partial progress line and show clean message
         log.verbose('Interrupted', level=0, overwrite=True)
+        _sys.exit(130)  # 128 + SIGINT(2)
 
 
 if __name__ == '__main__':
