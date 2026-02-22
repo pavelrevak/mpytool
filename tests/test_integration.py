@@ -1,21 +1,49 @@
 """Integration tests requiring connected MicroPython device
 
-Set MPYTOOL_TEST_PORT environment variable to run these tests:
+Test categories:
+- Read-only tests (MPYTOOL_TEST_PORT): safe on any device, no filesystem changes
+- All tests (MPYTOOL_TEST_PORT_RW): includes write and flash operations
+
+Run read-only tests only (safe on production device):
     MPYTOOL_TEST_PORT=/dev/ttyACM0 python -m unittest tests.test_integration -v
+
+Run all tests (dedicated test device):
+    MPYTOOL_TEST_PORT_RW=/dev/ttyACM0 python -m unittest tests.test_integration -v
 """
 
 import os
 import unittest
 
-# Skip all tests if no device connected
-DEVICE_PORT = os.environ.get("MPYTOOL_TEST_PORT")
+# Test ports for different test levels
+PORT_RO = os.environ.get("MPYTOOL_TEST_PORT")
+PORT_RW = os.environ.get("MPYTOOL_TEST_PORT_RW")
+
+# RW implies RO
+if PORT_RW:
+    PORT_RO = PORT_RO or PORT_RW
+
+# Legacy compatibility
+DEVICE_PORT = PORT_RO
 
 
 def requires_device(cls):
-    """Decorator to skip test class if no device is connected"""
-    if not DEVICE_PORT:
+    """Read-only tests - safe on any device, no filesystem changes"""
+    if not PORT_RO:
         return unittest.skip("MPYTOOL_TEST_PORT not set")(cls)
+    cls.DEVICE_PORT = PORT_RO
     return cls
+
+
+def requires_device_rw(cls):
+    """Write/destructive tests - isolated to /_mpytool_*/ directories"""
+    if not PORT_RW:
+        return unittest.skip("MPYTOOL_TEST_PORT_RW not set")(cls)
+    cls.DEVICE_PORT = PORT_RW
+    return cls
+
+
+# Alias for consistency
+requires_device_wipe = requires_device_rw
 
 
 @requires_device
@@ -43,7 +71,7 @@ class TestDeviceConnection(unittest.TestCase):
         self.assertTrue(self.mpy.comm._repl_mode)
 
 
-@requires_device
+@requires_device_rw
 class TestFileOperations(unittest.TestCase):
     """Test file operations on device"""
 
@@ -242,7 +270,7 @@ class TestDeviceInfo(unittest.TestCase):
         self.assertGreater(mem_free, 0)
 
 
-@requires_device
+@requires_device_rw
 class TestCwdOperations(unittest.TestCase):
     """Test current working directory operations (pwd, cd)"""
 
@@ -388,7 +416,7 @@ class TestCwdOperations(unittest.TestCase):
         self.mpy.delete(self.TEST_DIR + '/cwd_put.txt')
 
 
-@requires_device
+@requires_device_rw
 class TestCpCommand(unittest.TestCase):
     """Test cp command for file copying"""
 
@@ -505,7 +533,7 @@ class TestCpCommand(unittest.TestCase):
         self.assertEqual(content, b"subdir file")
 
 
-@requires_device
+@requires_device_rw
 class TestMvCommand(unittest.TestCase):
     """Test mv command for moving/renaming files on device"""
 
@@ -565,7 +593,7 @@ class TestMvCommand(unittest.TestCase):
         self.assertEqual(self.mpy.get(dst_dir + "/multi2.txt"), b"multi2")
 
 
-@requires_device
+@requires_device_rw
 class TestDeleteCommand(unittest.TestCase):
     """Test delete command with trailing / behavior"""
 
@@ -632,7 +660,7 @@ class TestDeleteCommand(unittest.TestCase):
         self.assertEqual(self.mpy.ls(subdir), [])
 
 
-@requires_device
+@requires_device_rw
 class TestSkipUnchangedFiles(unittest.TestCase):
     """Test skip unchanged files feature"""
 
@@ -712,7 +740,7 @@ class TestSkipUnchangedFiles(unittest.TestCase):
         self.assertTrue(needs_update)
 
 
-@requires_device
+@requires_device_rw
 class TestEncodingAndCompression(unittest.TestCase):
     """Test encoding selection and compression"""
 
@@ -789,7 +817,7 @@ class TestEncodingAndCompression(unittest.TestCase):
         self.assertIn(MpyClass._CHUNK_AUTO_DETECTED, [512, 1024, 2048, 4096, 8192, 16384, 32768])
 
 
-@requires_device
+@requires_device_rw
 class TestCpWithFlags(unittest.TestCase):
     """Test cp command with -f and -z flags"""
 
@@ -879,7 +907,7 @@ class TestSleepCommand(unittest.TestCase):
         self.assertLess(elapsed, 1.0)
 
 
-@requires_device
+@requires_device_rw
 class TestSpecialCharacterFilenames(unittest.TestCase):
     """Test file operations with special characters in filenames
 
@@ -973,7 +1001,7 @@ class TestSpecialCharacterFilenames(unittest.TestCase):
         self.mpy.delete(dir_path)
 
 
-@requires_device
+@requires_device_rw
 class TestUnicodeFilenames(unittest.TestCase):
     """Test file operations with unicode filenames
 
@@ -1065,7 +1093,7 @@ class TestUnicodeFilenames(unittest.TestCase):
         self.mpy.delete(path)
 
 
-@requires_device
+@requires_device_rw
 class TestCpSpecialFilenames(unittest.TestCase):
     """Test cp command with special character filenames
 
@@ -1175,7 +1203,7 @@ class TestCpSpecialFilenames(unittest.TestCase):
         self.assertEqual(content, "unicode download test")
 
 
-@requires_device
+@requires_device_rw
 class TestErrorMessages(unittest.TestCase):
     """Test error messages for various failure cases
 
@@ -1236,7 +1264,7 @@ class TestErrorMessages(unittest.TestCase):
             self.mpy.tree(self.TEST_DIR + "/nonexistent_path")
 
 
-@requires_device
+@requires_device_rw
 class TestLargeFileTransfer(unittest.TestCase):
     """Test large file transfers with chunking
 
@@ -1366,7 +1394,7 @@ class TestPartitions(unittest.TestCase):
         self.assertEqual(len(data), phy['size'])
 
 
-@requires_device
+@requires_device_wipe
 class TestFlashRP2(unittest.TestCase):
     """Test flash operations (RP2 only)"""
 
@@ -1514,7 +1542,7 @@ class TestRawPasteMode(unittest.TestCase):
         self.assertEqual(result, bytearray(b'recovered\r\n'))
 
 
-@requires_device
+@requires_device_rw
 class TestRunCommand(unittest.TestCase):
     """Test run command"""
 
@@ -1606,7 +1634,7 @@ class TestRunCommand(unittest.TestCase):
         self.assertIn('RUN_TEST_2', output)
 
 
-@requires_device
+@requires_device_rw
 class TestMount(unittest.TestCase):
     """Test mount command: local directory as VFS on device"""
 
@@ -1917,7 +1945,7 @@ class TestMount(unittest.TestCase):
         self.assertEqual(result, ['Line 1\n', 'Line 2\n', 'Line 3\n', 'Line 4\n'])
 
 
-@requires_device
+@requires_device_rw
 class TestMountLn(unittest.TestCase):
     """Test ln command: virtual submounts into mounted VFS"""
 
@@ -2071,7 +2099,7 @@ class TestMountLn(unittest.TestCase):
         self.assertIn('single.py', result)
 
 
-@requires_device
+@requires_device_rw
 class TestMountMpyCross(unittest.TestCase):
     """Test mount -m command: transparent .mpy compilation"""
 
@@ -2243,7 +2271,7 @@ class TestMountMpyCross(unittest.TestCase):
         self.assertIn('__pycache__', result)
 
 
-@requires_device
+@requires_device_rw
 class TestMountWrite(unittest.TestCase):
     """Test mount write support (Phase 3)"""
 
@@ -2504,7 +2532,7 @@ class TestMountWrite(unittest.TestCase):
         self.assertEqual(result, ('FGH', 'KLM', 'NOP'))
 
 
-@requires_device
+@requires_device_rw
 class TestMountReadonly(unittest.TestCase):
     """Test readonly mount (default behavior)"""
 
@@ -2587,7 +2615,7 @@ class TestMountReadonly(unittest.TestCase):
         self.assertIn('OSError', ctx.exception.error)
 
 
-@requires_device
+@requires_device_rw
 class TestPathOperations(unittest.TestCase):
     """Test sys.path operations"""
 

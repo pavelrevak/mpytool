@@ -678,6 +678,38 @@ exec bash
 - Support for `--` command separator
 - Works with both relative and absolute paths
 
+## Development
+
+### Running tests
+
+```bash
+# Unit tests (no device needed)
+python -m unittest discover tests/ -v
+
+# Read-only integration tests (safe on production device)
+MPYTOOL_TEST_PORT=/dev/ttyACM0 python -m unittest tests.test_integration -v
+
+# All integration tests (dedicated test device)
+MPYTOOL_TEST_PORT_RW=/dev/ttyACM0 python -m unittest tests.test_integration -v
+
+# CLI tests (no device needed for basic tests)
+python -m unittest tests.test_cli -v
+
+# All CLI tests with device
+MPYTOOL_TEST_PORT_RW=/dev/ttyACM0 python -m unittest tests.test_cli -v
+```
+
+Test categories:
+- **Unit tests** (`test_*.py` except `test_integration.py`, `test_cli.py`) - no device needed
+- **Read-only tests** (`MPYTOOL_TEST_PORT`) - safe on any device, no filesystem changes
+- **All tests** (`MPYTOOL_TEST_PORT_RW`) - includes write and flash operations, use dedicated test device
+
+### Install from source
+
+```bash
+pip install -e .
+```
+
 ## Requirements
 
 Working only with MicroPython boards, not with CircuitPython
