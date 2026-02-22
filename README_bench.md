@@ -71,27 +71,45 @@ Many more test scenarios could be designed (different file types, sizes, mixed w
 
 Reading files from mounted VFS (PC filesystem accessible on device).
 
-### RP2040 - USB-CDC - MacOS
+### MacOS
 
-| Test | mpytool | mpremote | Speedup |
-|------|---------|----------|---------|
-| Read 50 x 2KB files | **1.5s** | 3.9s | **2.5x** |
-| Read 1 x 100KB file | **1.0s** | 1.1s | **1.1x** |
+| Device | Test | mpytool | mpremote | Speedup |
+|--------|------|---------|----------|---------|
+| ESP32-C6 USB-CDC | 50 x 2KB | **0.6s** | 3.2s | **5.6x** |
+| | 1 x 100KB | **0.3s** | 0.5s | **1.8x** |
+| ESP32-S3 USB-CDC | 50 x 2KB | **1.6s** | 3.9s | **2.3x** |
+| | 1 x 100KB | **0.6s** | 1.0s | **1.7x** |
+| RP2040 USB-CDC | 50 x 2KB | **1.5s** | 3.9s | **2.5x** |
+| | 1 x 100KB | **1.0s** | 1.1s | **1.1x** |
 
-### ESP32-C6 - USB-CDC - MacOS
+### Linux
 
-| Test | mpytool | mpremote | Speedup |
-|------|---------|----------|---------|
-| Read 50 x 2KB files | **0.6s** | 3.2s | **5.6x** |
-| Read 1 x 100KB file | **0.3s** | 0.5s | **1.8x** |
+| Device | Test | mpytool | mpremote | Speedup |
+|--------|------|---------|----------|---------|
+| ESP32-C6 USB-CDC | 50 x 2KB | **1.2s** | 3.3s | **2.8x** |
+| | 1 x 100KB | **0.3s** | 0.6s | **2.0x** |
+| ESP32-S3 USB-CDC | 50 x 2KB | **2.2s** | 4.4s | **2.0x** |
+| | 1 x 100KB | **0.6s** | 1.1s | **1.9x** |
+| RP2040 USB-CDC | 50 x 2KB | **1.9s** | 3.9s | **2.1x** |
+| | 1 x 100KB | **1.0s** | 1.2s | **1.3x** |
+| ESP32-WROOM UART | 50 x 2KB | 14.1s | 13.6s | 1.0x |
+| | 1 x 100KB | 9.2s | 9.4s | 1.0x |
 
-### ESP32-S3 - USB-CDC - MacOS
+### Windows
 
-| Test | mpytool | mpremote | Speedup |
-|------|---------|----------|---------|
-| Read 50 x 2KB files | **1.6s** | 3.9s | **2.3x** |
-| Read 1 x 100KB file | **0.6s** | 1.0s | **1.7x** |
+| Device | Test | mpytool | mpremote | Speedup |
+|--------|------|---------|----------|---------|
+| ESP32-C6 USB-CDC | 50 x 2KB | **2.9s** | 3.2s | **1.1x** |
+| | 1 x 100KB | **0.4s** | 0.6s | **1.5x** |
+| ESP32-S3 USB-CDC | 50 x 2KB | **2.3s** | 4.0s | **1.7x** |
+| | 1 x 100KB | **0.6s** | 1.1s | **1.8x** |
+| RP2040 USB-CDC | 50 x 2KB | **2.2s** | 3.8s | **1.7x** |
+| | 1 x 100KB | **1.1s** | 1.2s | **1.1x** |
+| ESP32-WROOM UART | 50 x 2KB | 14.4s | **13.8s** | 1.0x |
+| | 1 x 100KB | **9.8s** | 10.1s | 1.0x |
 
 ### Summary
 
 Batch LISTDIR (1 RTT) vs iterative ilistdir (N+1 RTT) makes significant difference when opening many files. The speedup is more pronounced on faster CPUs (ESP32-C6 160MHz vs RP2040 133MHz).
+
+On slow UART connections (ESP32-WROOM 115200 baud), serial throughput becomes the bottleneck and both tools perform equally.
