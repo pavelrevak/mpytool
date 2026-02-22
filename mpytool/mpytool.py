@@ -57,6 +57,13 @@ def _remote_basename(path):
     return path.rstrip('/').split('/')[-1]
 
 
+def _normalize_path_arg(value):
+    """Argparse type for path arguments - normalize Windows backslashes"""
+    if _sys.platform == 'win32' and value.startswith(':'):
+        return ':' + value[1:].replace('\\', '/')
+    return value
+
+
 def _parse_device_path(path, cmd_name):
     """Parse device path with : prefix, raise ParamsError if missing
 
@@ -65,12 +72,17 @@ def _parse_device_path(path, cmd_name):
         cmd_name: command name for error message
 
     Returns:
-        path without : prefix
+        path without : prefix (normalized on Windows)
     """
     if not path.startswith(':'):
         raise ParamsError(
             f'{cmd_name} requires device path (: prefix): {path}')
-    return path[1:]
+    # Normalize backslashes on Windows (handled by argparse type for most
+    # commands, but _paths doesn't use argparse)
+    result = path[1:]
+    if _sys.platform == 'win32':
+        result = result.replace('\\', '/')
+    return result
 
 
 # Command argument subparsers
@@ -752,7 +764,7 @@ class MpyTool():
 
     @command('ls', 'List files and directories on device.')
     @argument('path', nargs='?', default=':', metavar='remote',
-        help='device path (default: CWD)')
+        type=_normalize_path_arg, help='device path (default: CWD)')
     def _dispatch_ls(self, commands, is_last_group):
         args = _make_parser(self._dispatch_ls).parse_args(commands[:1])
         del commands[:1]
@@ -776,7 +788,7 @@ class MpyTool():
 
     @command('tree', 'Show directory tree on device.')
     @argument('path', nargs='?', default=':', metavar='remote',
-        help='device path (default: CWD)')
+        type=_normalize_path_arg, help='device path (default: CWD)')
     def _dispatch_tree(self, commands, is_last_group):
         args = _make_parser(self._dispatch_tree).parse_args(commands[:1])
         del commands[:1]
@@ -790,7 +802,7 @@ class MpyTool():
 
     @command('cat', 'Print file content from device to stdout.')
     @argument('paths', nargs='+', metavar='remote',
-        help='device path(s) to print')
+        type=_normalize_path_arg, help='device path(s) to print')
     def _dispatch_cat(self, commands, is_last_group):
         args = _make_parser(self._dispatch_cat).parse_args(commands)
         commands.clear()
@@ -802,7 +814,7 @@ class MpyTool():
 
     @command('mkdir', 'Create directory (with parents if needed).')
     @argument('paths', nargs='+', metavar='remote',
-        help='device path(s) to create')
+        type=_normalize_path_arg, help='device path(s) to create')
     def _dispatch_mkdir(self, commands, is_last_group):
         args = _make_parser(self._dispatch_mkdir).parse_args(commands)
         commands.clear()
@@ -813,7 +825,7 @@ class MpyTool():
 
     @command('rm', 'Delete files/dirs. Use :path/ for contents only.')
     @argument('paths', nargs='+', metavar='remote',
-        help='device path(s) to delete')
+        type=_normalize_path_arg, help='device path(s) to delete')
     def _dispatch_rm(self, commands, is_last_group):
         args = _make_parser(self._dispatch_rm).parse_args(commands)
         commands.clear()
@@ -828,7 +840,8 @@ class MpyTool():
         print(cwd)
 
     @command('cd', 'Change current working directory on device.')
-    @argument('path', metavar='remote', help='device path')
+    @argument('path', metavar='remote', type=_normalize_path_arg,
+        help='device path')
     def _dispatch_cd(self, commands, is_last_group):
         args = _make_parser(self._dispatch_cd).parse_args([commands.pop(0)])
         path = _parse_device_path(args.path, 'cd')
@@ -844,7 +857,7 @@ class MpyTool():
     @option('-d', '--delete', action='store_const', const='delete',
         dest='mode', help='delete from sys.path')
     @argument('paths', nargs='*', metavar='remote',
-        help='paths to add/remove (: prefix required)')
+        type=_normalize_path_arg, help='paths to add/remove (: prefix required)')
     def _dispatch_path(self, commands, is_last_group):
         args = _make_parser(self._dispatch_path).parse_args(commands)
         commands.clear()
@@ -984,7 +997,8 @@ class MpyTool():
 
     @command('edit', 'Edit file on device in local editor.')
     @option('--editor', metavar='CMD', help='editor command')
-    @argument('path', metavar='remote', help='device file to edit (: prefix)')
+    @argument('path', metavar='remote', type=_normalize_path_arg,
+        help='device file to edit (: prefix)')
     def _dispatch_edit(self, commands, is_last_group):
         args = _make_parser(self._dispatch_edit).parse_args(commands)
         commands.clear()
@@ -1115,14 +1129,14 @@ class MpyTool():
     @option('-Z', '--no-compress', dest='no_compress', action='store_true',
         help='disable compression')
     @argument('paths', nargs='*', metavar='local_or_remote',
-        help='source(s) and dest (: prefix for device)')
+        type=_normalize_path_arg, help='source(s) and dest (: prefix for device)')
     def _dispatch_cp(self, commands, is_last_group):
         self.cmd_cp(commands)
         commands.clear()
 
     @command('mv', 'Move or rename files on device.')
     @argument('paths', nargs='+', metavar='remote',
-        help='source(s) and destination (all with : prefix)')
+        type=_normalize_path_arg, help='source(s) and destination (all with : prefix)')
     def _dispatch_mv(self, commands, is_last_group):
         args = _make_parser(self._dispatch_mv).parse_args(commands)
         commands.clear()
@@ -1177,7 +1191,7 @@ class MpyTool():
         help='compile .py to .mpy on-the-fly')
     @option('-w', '--writable', action='store_true', help='mount as writable')
     @argument('paths', nargs='*', metavar='local_and_remote',
-        help='local_dir [:mount_point] (default: /remote)')
+        type=_normalize_path_arg, help='local_dir [:mount_point] (default: /remote)')
     def _dispatch_mount(self, commands, is_last_group):
         if not commands:
             self._list_mounts()
@@ -1219,7 +1233,7 @@ class MpyTool():
 
     @command('ln', 'Link local file/directory into mounted VFS.')
     @argument('paths', nargs='+', metavar='local_and_remote',
-        help='local source(s) and device destination')
+        type=_normalize_path_arg, help='local source(s) and device destination')
     def _dispatch_ln(self, commands, is_last_group):
         args = _make_parser(self._dispatch_ln).parse_args(commands)
         commands.clear()
