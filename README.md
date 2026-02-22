@@ -28,6 +28,7 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
   RAM usage (API)
 - **Shell completion** - ZSH and Bash with remote path completion
 - **Network support** - connect over TCP
+- **Full Unicode support** - handles Unicode in file names and content
 
 See [README_mpremote.md](README_mpremote.md) for detailed comparison with mpremote.
 
@@ -83,13 +84,34 @@ $ mpytool --help
 
 ### List files
 ```
-$ mpytool -p /dev/ttyACM0 ls         # list CWD (default)
-$ mpytool -p /dev/ttyACM0 ls :/lib   # list /lib
+$ mpytool -p /dev/ttyACM0 ls         # Linux: list CWD (default)
+LS: /
+     215B boot.py
+    3.03K main.py
+          lib/
+
+$ mpytool ls :/lib                   # list /lib (auto-detect port)
+LS: /lib
+          uhttp/
+    23.1K wlan.py
+
+$ mpytool ls :/data                  # Unicode file names supported
+LS: /data
+       64B データ.csv
+       32B 🍅.py
+      128B súbor.txt
+      256B 配置.json
 ```
 
 ### Tree
 ```
-$ mpytool -p /dev/ttyACM0 tree       # tree of CWD (default)
+$ mpytool -p /dev/cu.usbmodem1101 tree    # macOS: tree of CWD
+TREE: /
+     142K ./
+    97.7K ├─ lib/
+    69.6K │  └─ uhttp/
+       23 ├─ boot.py
+    3.03K └─ main.py
 ```
 
 ### Copy files (: prefix = device path)
@@ -139,40 +161,70 @@ $ mpytool mv :/a.py :/b.py :/lib/   # move multiple files to directory
 ### View file contents
 ```
 $ mpytool cat :boot.py            # print file from CWD
+CAT: /boot.py
+import machine
+...
+
 $ mpytool cat :/lib/module.py     # print file with absolute path
+CAT: /lib/module.py
+def hello():
+    print("Hello!")
 ```
 
 ### Make directory, delete files (: prefix = device path)
 ```
 $ mpytool mkdir :lib :data        # create directories in CWD
+MKDIR: /lib
+MKDIR: /data
+
 $ mpytool mkdir :/lib/subdir      # create with absolute path
+MKDIR: /lib/subdir
+
 $ mpytool rm :old.py              # delete file in CWD
+RM: /old.py
+
 $ mpytool rm :mydir               # delete directory and contents
+RM: /mydir
+
 $ mpytool rm :mydir/              # delete contents only, keep directory
-$ mpytool rm :                    # delete everything in CWD
-$ mpytool rm :/                   # delete everything on device (root)
+RM contents: /mydir
 ```
 
 ### Current working directory
 ```
 $ mpytool pwd                     # print current directory
+PWD
 /
+
 $ mpytool cd :/lib                # change to /lib
+CD: /lib
+
 $ mpytool cd :subdir              # change to relative path (from CWD)
-$ mpytool cd :..                  # change to parent directory
+CD: /lib/subdir
+
 $ mpytool cd :/lib -- ls          # change directory and list files
+CD: /lib
+LS: /lib
+          uhttp/
+    23.1K wlan.py
 ```
 
 ### Module search path (sys.path)
 ```
 $ mpytool path                    # show current sys.path
-'', '/lib'
+: :/lib
+
 $ mpytool path : :/lib            # replace entire sys.path
+PATH set to 2 entries
+
 $ mpytool path -f :/custom        # prepend to sys.path (remove duplicates)
+PATH prepended 1 entries
+
 $ mpytool path -a :/sdcard/lib    # append to sys.path (remove duplicates)
+PATH appended 1 entries
+
 $ mpytool path -d :/custom        # delete from sys.path
-$ mpytool path -f : :/lib :/extra # prepend multiple paths
-$ mpytool cd :/app -- path -f :   # combine with cd to set working dir
+PATH removed 1 entries
 ```
 
 Path semantics: `:` = empty string (CWD) in sys.path, `:/` = root directory. The `-f` and `-a` flags automatically remove duplicates (move existing paths to new position).
@@ -180,17 +232,23 @@ Path semantics: `:` = empty string (CWD) in sys.path, `:/` = root directory. The
 ### Stop, reset and REPL
 ```
 $ mpytool stop               # stop running program (Ctrl-C)
-$ mpytool stop -- repl       # stop and enter REPL
+STOP
+
 $ mpytool reset              # soft reset (Ctrl-D, runs boot.py/main.py)
-$ mpytool reset --raw        # soft reset in raw REPL (clears RAM only)
+RESET soft
+
 $ mpytool reset --machine    # MCU reset (machine.reset, auto-reconnect)
-$ mpytool reset --machine -t 30  # MCU reset with 30s reconnect timeout
-$ mpytool reset --rts        # hardware reset via RTS signal (serial only)
-$ mpytool reset --boot       # enter bootloader (machine.bootloader)
-$ mpytool reset --dtr-boot   # enter bootloader via DTR/RTS (ESP32 only)
+RESET machine
+
 $ mpytool reset -- monitor   # reset and monitor output
+RESET soft
+MONITOR (Ctrl+C to stop)
+
 $ mpytool repl               # enter REPL mode
+REPL (Ctrl+] to exit)
+
 $ mpytool sleep 2            # sleep for 2 seconds (useful between commands)
+SLEEP 2.0s
 ```
 
 ### Serial terminal and monitor (general purpose)
@@ -213,21 +271,35 @@ Both `repl` and `monitor` can be used as general-purpose serial tools - not just
 ### Execute Python code on device
 ```
 $ mpytool exec "print('Hello!')"
+EXEC: print('Hello!')
+Hello!
+
 $ mpytool exec "import sys; print(sys.version)"
+EXEC: import sys; print(sys.version)
+3.4.0; MicroPython v1.24.0
 ```
 
 ### Run local Python file on device
 ```
 $ mpytool run script.py                  # run script (fire-and-forget)
+RUN: script.py (128 bytes)
+
 $ mpytool run script.py -- monitor       # run script and capture output
+RUN: script.py (128 bytes)
+MONITOR (Ctrl+C to stop)
+Hello from script!
 ```
 
 ### Edit file on device
 ```
 $ mpytool edit :boot.py              # edit file (uses $VISUAL or $EDITOR)
+EDIT: /boot.py
+
 $ mpytool edit :/lib/config.py       # absolute path
-$ mpytool edit --editor vim :main.py # explicit editor
+EDIT: /lib/config.py
+
 $ mpytool edit :newfile.py           # create new file if doesn't exist
+EDIT: /newfile.py (new file)
 ```
 
 Downloads file to a temp file, opens in editor, uploads back if changed.
@@ -236,6 +308,7 @@ Editor priority: `--editor` > `$VISUAL` > `$EDITOR` > error.
 ### Device RTC (real-time clock)
 ```
 $ mpytool rtc                        # display current RTC
+RTC
 2026-02-21 15:30:45
 
 $ mpytool rtc --set                  # set RTC to local PC time
@@ -352,7 +425,8 @@ SPEEDTEST
 
 ### Show device information
 ```
-$ mpytool info
+$ mpytool -p COM3 info               # Windows
+INFO
 Platform:    rp2
 Version:     3.4.0; MicroPython v1.27.0 on 2025-12-09
 Impl:        micropython
@@ -409,28 +483,30 @@ $ mpytool rm :old.py -- cp new.py : -- reset
 
 ### Auto-detect serial port (if only one device is connected)
 ```
-$ mpytool ls lib/
+$ mpytool ls :/lib
+LS: /lib
           uhttp/
-  23.2 KB wlan.py
-  4.95 KB wlan_http.py
+    23.1K wlan.py
+    4.95K wlan_http.py
 ```
 
 ### Tree view
 ```
 $ mpytool tree
-   142 KB ./
-  41.3 KB ├─ html/
-    587 B │  ├─ index.html
-  40.8 KB │  └─ wlan.html
-  97.7 KB ├─ lib/
-  69.6 KB │  ├─ uhttp/
-     93 B │  │  ├─ __init__.py
-  26.3 KB │  │  ├─ client.py
-  43.2 KB │  │  └─ server.py
-  23.2 KB │  ├─ wlan.py
-  4.95 KB │  └─ wlan_http.py
-     23 B ├─ boot.py
-  3.03 KB └─ main.py
+TREE: /
+     142K ./
+    41.3K ├─ html/
+      587 │  ├─ index.html
+    40.8K │  └─ wlan.html
+    97.7K ├─ lib/
+    69.6K │  ├─ uhttp/
+       93 │  │  ├─ __init__.py
+    26.3K │  │  ├─ client.py
+    43.2K │  │  └─ server.py
+    23.1K │  ├─ wlan.py
+    4.95K │  └─ wlan_http.py
+       23 ├─ boot.py
+    3.03K └─ main.py
 ```
 
 ### Connect over network (TCP, default port 23)

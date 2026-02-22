@@ -245,6 +245,26 @@ class MpyTool():
         if self._verbose_out is not None:
             self._verbose_out.verbose(msg, level, color, end, overwrite)
 
+    def colorize(self, text, color):
+        """Return text with color if colors are enabled"""
+        if self._verbose_out is not None:
+            return self._verbose_out.colorize(text, color)
+        return text
+
+    def _verbose_path(self, cmd, path):
+        """Print verbose message for path-based commands (LS, TREE, etc.)"""
+        if path.startswith('/'):
+            msg = f"{self.colorize(cmd + ':', 'green')} {self.colorize(path, 'cyan')}"
+        else:
+            cwd = self.mpy.getcwd()
+            cwd_colored = self.colorize(cwd, 'yellow')
+            if path in ('', '.'):
+                msg = f"{self.colorize(cmd + ':', 'green')} {cwd_colored}"
+            else:
+                path_colored = self.colorize('/' + path, 'cyan')
+                msg = f"{self.colorize(cmd + ':', 'green')} {cwd_colored}{path_colored}"
+        self.verbose(msg, 1, color=None)
+
     def _get_copy_cmd(self):
         """Get or create CopyCommand instance"""
         if self._copy_cmd is None:
@@ -283,11 +303,16 @@ class MpyTool():
                 this_prefix = cls.LAST
             else:
                 this_prefix = cls.TEE
-        sufix = ''
-        if sub_tree is not None and name != '/':
+        # For root, display '.' for CWD, no trailing / for root
+        if first and name in ('', '.'):
+            display_name = '.'
             sufix = '/'
-        # For root, display './' only for empty path (CWD)
-        display_name = '.' if first and name in ('', '.') else name
+        elif name == '/':
+            display_name = '/'
+            sufix = ''
+        else:
+            display_name = name
+            sufix = '/' if sub_tree is not None else ''
         line = ''
         if print_size:
             line += f'{_utils.format_size(size):>9} '
@@ -628,7 +653,7 @@ class MpyTool():
             print(f"Next OTA:       {info['next_ota']}")
 
     def cmd_info(self):
-        self.verbose("INFO", 2)
+        self.verbose("INFO", 1)
         plat = self.mpy.platform()
         print(f"Platform:    {plat['platform']}")
         print(f"Version:     {plat['version']}")
@@ -736,12 +761,18 @@ class MpyTool():
         if dir_name not in (':', ':/'):
             dir_name = dir_name.rstrip('/')
         path = _parse_device_path(dir_name, 'ls')
+        self._verbose_path('LS', path)
         result = self.mpy.ls(path)
+        print_size = self._verbose >= 1
         for name, size in result:
-            if size is not None:
-                print(f'{_utils.format_size(size):>9} {name}')
+            if print_size:
+                if size is not None:
+                    print(f'{_utils.format_size(size):>9} {name}')
+                else:
+                    print(f'{"":9} {name}/')
             else:
-                print(f'{"":9} {name}/')
+                # Quiet mode - just names
+                print(f'{name}/' if size is None else name)
 
     @command('tree', 'Show directory tree on device.')
     @argument('path', nargs='?', default=':', metavar='remote',
@@ -753,8 +784,9 @@ class MpyTool():
         if dir_name not in (':', ':/'):
             dir_name = dir_name.rstrip('/')
         path = _parse_device_path(dir_name, 'tree')
+        self._verbose_path('TREE', path)
         tree = self.mpy.tree(path)
-        self.print_tree(tree)
+        self.print_tree(tree, print_size=self._verbose >= 1)
 
     @command('cat', 'Print file content from device to stdout.')
     @argument('paths', nargs='+', metavar='remote',
@@ -764,7 +796,7 @@ class MpyTool():
         commands.clear()
         for file_name in args.paths:
             path = _parse_device_path(file_name, 'cat')
-            self.verbose(f"CAT: {path}", 2)
+            self._verbose_path('CAT', path)
             data = self.mpy.get(path)
             print(data.decode('utf-8'))
 
@@ -791,6 +823,7 @@ class MpyTool():
     def _dispatch_pwd(self, commands, is_last_group):
         _, commands[:] = _make_parser(self._dispatch_pwd).parse_known_args(
             commands)
+        self.verbose("PWD", 1)
         cwd = self.mpy.getcwd()
         print(cwd)
 
@@ -799,7 +832,7 @@ class MpyTool():
     def _dispatch_cd(self, commands, is_last_group):
         args = _make_parser(self._dispatch_cd).parse_args([commands.pop(0)])
         path = _parse_device_path(args.path, 'cd')
-        self.verbose(f"CD: {path}", 2)
+        self._verbose_path('CD', path)
         self.mpy.chdir(path)
 
     @command('path', 'Manage sys.path. Without args, show current path.')
@@ -995,6 +1028,7 @@ class MpyTool():
             self.verbose(
                 f"RTC set to {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)", 1)
         else:
+            self.verbose("RTC", 1)
             rtc = self._get_rtc()
             print(
                 f"{rtc[0]:04d}-{rtc[1]:02d}-{rtc[2]:02d} "

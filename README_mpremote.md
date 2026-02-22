@@ -73,6 +73,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Quiet mode | 🟢 `-q` | 🔴 |
 | Debug levels | 🟢 `-d/-dd/-ddd` | 🔴 |
 | Color output | 🟢 NO_COLOR aware | 🟢 |
+| Unicode support | 🟢 names + content | 🔴 issues |
 | **REPL** | | |
 | Session capture | 🔴 | 🟢 `--capture` |
 | Code injection | 🔴 | 🟢 Ctrl-J |
@@ -141,6 +142,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 - No auto soft-reset (preserves device state between commands)
 - Smaller VFS agent (4.3KB vs 5.5KB) — 22% less RAM, faster mount
 - Batch directory listing (1 RTT) — mpremote has recursion bug with shared state
+- Full Unicode support in file names and content
 - Minimalist design (blocking I/O, simpler code)
 
 **mpremote advantages:**
@@ -150,3 +152,8 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 - User config file and custom aliases
 - VFS timeout protection (polling)
 - Connect by device serial ID
+
+**mpremote known issues:**
+- Unicode in file names and content may cause errors or corruption
+- VFS directory listing has recursion bug (shared `data_ilistdir` state)
+- Fixed 256B chunk size limits transfer speed

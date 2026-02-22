@@ -314,6 +314,7 @@ class TestLsCommand(unittest.TestCase):
         self.tool = MpyTool(self.mock_conn, verbose=None, force=True)
         self.tool._mpy = Mock()
         self.tool._mpy.ls.return_value = [('file.py', 100), ('dir', None)]
+        self.tool._mpy.getcwd.return_value = '/'
         self.tool._log = Mock()
 
     def test_ls_cwd(self, mock_stdout):
@@ -352,6 +353,7 @@ class TestTreeCommand(unittest.TestCase):
         self.tool._mpy = Mock()
         # tree returns (name, size, sub_tree) where sub_tree is list of same structure or None
         self.tool._mpy.tree.return_value = ('./', 100, [('file.py', 50, None)])
+        self.tool._mpy.getcwd.return_value = '/'
         self.tool._log = Mock()
 
     def test_tree_cwd(self, mock_stdout):

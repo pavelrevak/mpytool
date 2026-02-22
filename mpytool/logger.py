@@ -43,6 +43,15 @@ class SimpleColorLogger():
         """Return current log level (1=error, 2=warning, 3=info, 4=debug)"""
         return self._loglevel
 
+    def colorize(self, text, color):
+        """Return text wrapped in color codes if colors are enabled"""
+        if not self._color:
+            return text
+        color_code = self.COLORS.get(color, '')
+        if not color_code:
+            return text
+        return f"{color_code}{text}{self._RESET}"
+
     def _clear_pending(self):
         """End pending progress line before printing a new message"""
         if self._pending_line:
@@ -100,8 +109,13 @@ class SimpleColorLogger():
             return
         if not overwrite:
             self._clear_pending()
-        color_code = self.COLORS.get(color, self._BOLD_GREEN) if self._color else ''
-        reset_code = self._RESET if self._color else ''
+        if color is None:
+            # No wrapper color - message may contain embedded colors
+            color_code = ''
+            reset_code = self._RESET if self._color else ''
+        else:
+            color_code = self.COLORS.get(color, self._BOLD_GREEN) if self._color else ''
+            reset_code = self._RESET if self._color else ''
         clear = f'\r{self._CLEAR_LINE}' if self._color and overwrite else ('\r' if self._is_tty and overwrite else '')
         print(f"{clear}{color_code}{msg}{reset_code}", end=end, file=_sys.stderr, flush=True)
         self._pending_line = (end != '\n')

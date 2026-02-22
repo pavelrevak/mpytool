@@ -2752,12 +2752,10 @@ class TestRtc(unittest.TestCase):
         test_dt = datetime.datetime(2025, 6, 15, 12, 30, 45)
         self.tool._set_rtc(test_dt)
         rtc = self.tool._get_rtc()
-        self.assertEqual(rtc[0], 2025)
-        self.assertEqual(rtc[1], 6)
-        self.assertEqual(rtc[2], 15)
-        self.assertEqual(rtc[4], 12)
-        self.assertEqual(rtc[5], 30)
-        self.assertEqual(rtc[6], 45)
+        # rtc: (year, month, day, weekday, hour, minute, second, subsecond)
+        rtc_dt = datetime.datetime(rtc[0], rtc[1], rtc[2], rtc[4], rtc[5], rtc[6])
+        diff = abs((rtc_dt - test_dt).total_seconds())
+        self.assertLess(diff, 5)  # Allow up to 5 seconds for timing
 
 
 if __name__ == "__main__":
