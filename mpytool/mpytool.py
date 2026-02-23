@@ -217,7 +217,6 @@ class MpyTool():
                         f"Multiple serial ports found: {ports_str}. "
                         "Use -p to specify one.")
                 port = ports[0]
-                self.verbose(f"Using {port}", level=2)
             if port:
                 self._conn = _mpytool.ConnSerial(
                     port=port, baudrate=self._baudrate, log=self._log)
@@ -739,28 +738,18 @@ class MpyTool():
         elif mode == 'rts':
             try:
                 self.mpy.hard_reset()
-                if reconnect:
-                    self.verbose(
-                        "  reconnecting...", 1, color='yellow')
-                    _time.sleep(1.0)  # Wait for device to boot
-                    self.mpy._conn.reconnect()
-                    self.verbose("  connected", 1, color='green')
-            except NotImplementedError:
-                raise _mpytool.MpyError(
-                    "Hardware reset not available (serial only)")
-            except (_mpytool.ConnError, OSError) as err:
-                self.verbose(
-                    f"  reconnect failed: {err}", 1, color='red')
-                raise _mpytool.ConnError(
-                    f"Reconnect failed: {err}")
+            except (NotImplementedError, _mpytool.ConnError) as err:
+                raise _mpytool.MpyError(f"Hardware reset failed: {err}")
+            # USB stays connected, just wait for device to boot
+            if reconnect:
+                _time.sleep(0.5)
         elif mode == 'boot':
             self.mpy.machine_bootloader()
         elif mode == 'dtr-boot':
             try:
                 self.mpy.reset_to_bootloader()
-            except NotImplementedError:
-                raise _mpytool.MpyError(
-                    "DTR boot not available (serial only)")
+            except (NotImplementedError, _mpytool.ConnError) as err:
+                raise _mpytool.MpyError(f"Bootloader reset failed: {err}")
 
     @command('ls', 'List files and directories on device.')
     @argument('path', nargs='?', default=':', metavar='remote',

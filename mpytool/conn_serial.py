@@ -3,6 +3,7 @@
 import time as _time
 import serial as _serial
 import mpytool.conn as _conn
+import mpytool.utils as _utils
 
 
 class ConnSerial(_conn.Conn):
@@ -11,6 +12,7 @@ class ConnSerial(_conn.Conn):
     def __init__(self, log=None, **serial_config):
         super().__init__(log)
         self._serial_config = serial_config
+        self._port_info = _utils.get_port_info(serial_config.get('port', ''))
         try:
             self._serial = _serial.Serial(**serial_config)
         except _serial.serialutil.SerialException as err:
@@ -20,6 +22,17 @@ class ConnSerial(_conn.Conn):
         # Windows: pyserial has no fd, select() works only with sockets
         if not hasattr(self._serial, 'fd'):
             self._has_data = self._has_data_polling
+        # Debug info about port type
+        if self._log:
+            port = serial_config.get('port', '')
+            if self._port_info and self._port_info.vid:
+                vid = self._port_info.vid
+                pid = self._port_info.pid
+                self._log.info(
+                    "Connected to %s [%04X:%04X %s]",
+                    port, vid, pid, self.port_type)
+            else:
+                self._log.info("Connected to %s [unknown serial port]", port)
 
     def close(self):
         if self._serial:
@@ -74,13 +87,38 @@ class ConnSerial(_conn.Conn):
         except OSError as err:
             raise _conn.ConnError(f"Connection lost: {err}") from err
 
-    def _is_usb_cdc(self):
-        """Check if this is a USB-CDC port (native USB on ESP32-S/C)"""
-        port = self._serial.port or ''
-        return 'ACM' in port or 'usbmodem' in port
+    @property
+    def vid(self):
+        """USB Vendor ID or None if not available"""
+        return self._port_info.vid if self._port_info else None
+
+    @property
+    def pid(self):
+        """USB Product ID or None if not available"""
+        return self._port_info.pid if self._port_info else None
+
+    @property
+    def port_type(self):
+        """Return port type string for debug info"""
+        if self._is_usb_uart():
+            return "USB-UART"
+        if self.vid in _utils._MICROPYTHON_VIDS:
+            return "USB-CDC"
+        if self.vid:
+            return "USB (unknown)"
+        return "unknown"
+
+    def _is_usb_uart(self):
+        """Check if this is a USB-UART bridge (CP210x, CH340, FTDI, etc.)"""
+        return self.vid in _utils._USB_UART_VIDS
 
     def hard_reset(self):
-        """Hardware reset using DTR/RTS signals"""
+        """Hardware reset using DTR/RTS signals (USB-UART only)"""
+        if not self._is_usb_uart():
+            raise _conn.ConnError(
+                f"Hardware reset not supported on {self.port_type}")
+        if self._log:
+            self._log.info("hard_reset: using DTR/RTS")
         self._serial.setDTR(False)  # GPIO0 high (normal boot)
         self._serial.setRTS(True)   # Assert reset
         _time.sleep(0.1)
@@ -117,28 +155,12 @@ class ConnSerial(_conn.Conn):
         raise _conn.ConnError(f"Could not reconnect to {port} within {timeout}s")
 
     def reset_to_bootloader(self):
-        """Reset into bootloader mode (auto-detects USB-CDC vs USB-UART)"""
-        if self._is_usb_cdc():
-            self._reset_to_bootloader_usb_jtag()
-        else:
-            self._reset_to_bootloader_classic()
-
-    def _reset_to_bootloader_usb_jtag(self):
-        """Bootloader reset for USB-JTAG-Serial (esptool sequence)"""
-        self._serial.setRTS(False)
-        self._serial.setDTR(False)
-        _time.sleep(0.1)
-        self._serial.setDTR(True)
-        self._serial.setRTS(True)
-        _time.sleep(0.1)
-        self._serial.setDTR(False)
-        self._serial.setRTS(True)
-        _time.sleep(0.1)
-        self._serial.setDTR(False)
-        self._serial.setRTS(False)
-
-    def _reset_to_bootloader_classic(self):
-        """Bootloader reset for USB-UART (classic DTR/RTS circuit)"""
+        """Reset into bootloader mode (USB-UART only)"""
+        if not self._is_usb_uart():
+            raise _conn.ConnError(
+                f"Bootloader reset not supported on {self.port_type}")
+        if self._log:
+            self._log.info("reset_to_bootloader: using DTR/RTS")
         self._serial.setDTR(False)  # GPIO0 high
         self._serial.setRTS(True)   # Assert reset
         _time.sleep(0.1)
