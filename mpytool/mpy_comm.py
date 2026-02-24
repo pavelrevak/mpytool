@@ -4,6 +4,7 @@ import re as _re
 import time as _time
 
 import mpytool.conn as _conn
+from mpytool.logger import SimpleColorLogger as _SimpleColorLogger
 
 # REPL control characters
 CTRL_A = b'\x01'  # Enter raw REPL
@@ -81,7 +82,7 @@ class CmdError(MpyError):
 class MpyComm():
     def __init__(self, conn, log=None):
         self._conn = conn
-        self._log = log
+        self._log = log if log is not None else _SimpleColorLogger()
         self._repl_mode = None
         self._raw_paste_supported = None  # None = unknown, True/False = detected
 
@@ -101,8 +102,7 @@ class MpyComm():
         """
         if self._repl_mode is not None:
             return True
-        if self._log:
-            self._log.info('STOP CURRENT OPERATION')
+        self._log.info('STOP CURRENT OPERATION')
         self._conn.flush()
 
         # Try multiple attempts with short timeouts
@@ -127,8 +127,7 @@ class MpyComm():
             except _conn.Timeout:
                 pass
 
-        if self._log:
-            self._log.warning("Could not establish REPL state")
+        self._log.warning("Could not establish REPL state")
         return False
 
     def enter_raw_repl(self, max_retries=3):
@@ -139,10 +138,8 @@ class MpyComm():
             retries += 1
             if retries >= max_retries:
                 raise MpyError("Could not establish REPL connection")
-            if self._log:
-                self._log.warning('..retry %d/%d', retries, max_retries)
-        if self._log:
-            self._log.info('ENTER RAW REPL')
+            self._log.warning('..retry %d/%d', retries, max_retries)
+        self._log.info('ENTER RAW REPL')
         self._conn.write(CTRL_A)
         self._conn.read_until(b'\r\n>')
         self._repl_mode = True
@@ -150,8 +147,7 @@ class MpyComm():
     def exit_raw_repl(self):
         if not self._repl_mode:
             return
-        if self._log:
-            self._log.info('EXIT RAW REPL')
+        self._log.info('EXIT RAW REPL')
         self._conn.write(CTRL_B)
         self._conn.read_until(b'\r\n>>> ')
         self._repl_mode = False
@@ -159,8 +155,7 @@ class MpyComm():
     def soft_reset(self):
         self.stop_current_operation()
         self.exit_raw_repl()
-        if self._log:
-            self._log.info('SOFT RESET')
+        self._log.info('SOFT RESET')
         self._conn.write(CTRL_D)
         self._conn.read_until(b'soft reboot', timeout=1)
         self._repl_mode = None
@@ -169,8 +164,7 @@ class MpyComm():
     def soft_reset_raw(self):
         """Soft reset in raw REPL mode - clears RAM but doesn't run boot.py/main.py"""
         self.enter_raw_repl()
-        if self._log:
-            self._log.info('SOFT RESET (raw)')
+        self._log.info('SOFT RESET (raw)')
         self._conn.write(CTRL_D)
         self._conn.read_until(b'soft reboot', timeout=1)
         self._conn.read_until(b'>', timeout=1)
@@ -198,8 +192,7 @@ class MpyComm():
         """
         send_timeout = 5 if timeout == 0 else timeout
         self.enter_raw_repl()
-        if self._log:
-            self._log.info("CMD: %s", command)
+        self._log.info("CMD: %s", command)
         self._conn.write(bytes(command, 'utf-8'))
         self._conn.write(CTRL_D)
         self._conn.read_until(b'OK', send_timeout)
@@ -208,8 +201,7 @@ class MpyComm():
             return b''
         result = self._conn.read_until(CTRL_D, timeout)
         if result:
-            if self._log:
-                self._log.info('RES: %s', bytes(result))
+            self._log.info('RES: %s', bytes(result))
         err = self._conn.read_until(CTRL_D + b'>', timeout)
         if err:
             raise CmdError(command, result, err)
@@ -227,9 +219,8 @@ class MpyComm():
         Raises:
             MpyError if pattern not found
         """
-        if self._log:
-            self._log.warning(
-                "Raw-paste header mismatch (got %d) - scanning", first_byte)
+        self._log.warning(
+            "Raw-paste header mismatch (got %d) - scanning", first_byte)
 
         scanned = bytearray([first_byte, second_byte])
         max_scan = 50
@@ -239,10 +230,9 @@ class MpyComm():
             for pattern in [b'R\x01', b'R\x00']:
                 idx = scanned.find(pattern)
                 if idx != -1:
-                    if self._log:
-                        self._log.info(
-                            "Found header at offset %d (discarded %d garbage bytes)",
-                            idx, idx)
+                    self._log.info(
+                        "Found header at offset %d (discarded %d garbage bytes)",
+                        idx, idx)
                     return ord('R'), scanned[idx + 1]
 
             try:
@@ -258,8 +248,7 @@ class MpyComm():
         """Read raw-paste window size from device."""
         window_bytes = self._conn.read_bytes(2, timeout)
         window_size = int.from_bytes(window_bytes, 'little')
-        if self._log:
-            self._log.info("Raw-paste window size: %d", window_size)
+        self._log.info("Raw-paste window size: %d", window_size)
         return window_size
 
     def _send_data_with_flow_control(self, data, window_size, timeout):
@@ -294,7 +283,7 @@ class MpyComm():
     def _read_execution_result(self, command, timeout):
         """Read and parse execution result."""
         result = self._conn.read_until(CTRL_D, timeout)
-        if result and self._log:
+        if result:
             self._log.info('RES: %s', bytes(result))
         err = self._conn.read_until(CTRL_D + b'>', timeout)
         if err:
@@ -321,8 +310,7 @@ class MpyComm():
         if isinstance(command, str):
             command = command.encode('utf-8')
 
-        if self._log:
-            self._log.info("CMD (raw-paste, %d bytes)", len(command))
+        self._log.info("CMD (raw-paste, %d bytes)", len(command))
 
         self._conn.write(RAW_PASTE_ENTER)
 
@@ -370,7 +358,6 @@ class MpyComm():
             return self.exec_raw_paste(command, timeout)
         except MpyError as e:
             if "not supported" in str(e):
-                if self._log:
-                    self._log.info("Raw-paste not supported, using regular exec")
+                self._log.info("Raw-paste not supported, using regular exec")
                 return self.exec(command, timeout)
             raise

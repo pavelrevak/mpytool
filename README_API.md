@@ -41,6 +41,39 @@ mpy.mkdir('mydir/subdir')
 mpy.delete('old_file.py')
 ```
 
+### Logging
+
+All classes accept optional `log` parameter. Without it, default `SimpleColorLogger(WARNING)` is used:
+
+```python
+# Without log parameter - uses default SimpleColorLogger(WARNING)
+conn = mpytool.ConnSerial('/dev/ttyACM0')
+mpy = mpytool.Mpy(conn)
+```
+
+For custom logging, use Python `logging` or `SimpleColorLogger`:
+
+```python
+import logging
+import mpytool
+
+# Use Python standard logging
+log = logging.getLogger('mpytool')
+log.setLevel(logging.DEBUG)
+
+conn = mpytool.ConnSerial('/dev/ttyACM0', log=log)
+mpy = mpytool.Mpy(conn, log=log)
+```
+
+Or use built-in `SimpleColorLogger` with same levels (DEBUG=10, INFO=20, WARNING=30, ERROR=40):
+
+```python
+from mpytool.logger import SimpleColorLogger
+
+log = SimpleColorLogger(loglevel=SimpleColorLogger.DEBUG)
+conn = mpytool.ConnSerial('/dev/ttyACM0', log=log)
+```
+
 ## Connection Classes
 
 ### ConnSerial

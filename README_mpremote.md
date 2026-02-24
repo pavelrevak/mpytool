@@ -71,7 +71,7 @@ Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and
 | Progress bar | 🟢 | 🟢 |
 | Verbose output | 🟢 `-v` | 🟢 `-v` |
 | Quiet mode | 🟢 `-q` | 🔴 |
-| Debug levels | 🟢 `-d/-dd/-ddd` | 🔴 |
+| Debug levels | 🟢 `-d/-dd` | 🔴 |
 | Color output | 🟢 NO_COLOR aware | 🟢 |
 | Unicode support | 🟢 names + content | 🔴 issues |
 | **REPL** | | |

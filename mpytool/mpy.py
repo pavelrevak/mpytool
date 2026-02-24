@@ -8,6 +8,7 @@ import zlib as _zlib
 import mpytool.conn as _conn
 import mpytool.mount as _mount
 import mpytool.mpy_comm as _mpy_comm
+from mpytool.logger import SimpleColorLogger as _SimpleColorLogger
 
 # Timeout for flash I/O operations (open/close/gc) - some FLASH GC can block >5s
 FLASH_IO_TIMEOUT = 20
@@ -135,8 +136,8 @@ def _mt_pfind(label):
 
     def __init__(self, conn, log=None, chunk_size=None):
         self._conn = conn
-        self._log = log
-        self._mpy_comm = _mpy_comm.MpyComm(conn, log=log)
+        self._log = log if log is not None else _SimpleColorLogger()
+        self._mpy_comm = _mpy_comm.MpyComm(conn, log=self._log)
         self._imported = []
         self._load_helpers = []
         self._chunk_size = chunk_size  # None = auto-detect
@@ -148,7 +149,7 @@ def _mt_pfind(label):
         self._custom_syspath = None  # sys.path to restore after soft reset
         # VfsProtocol always registered - handles stale VFS and all mounts
         self._vfs_protocol = _mount.VfsProtocol(
-            conn, remount_fn=self._do_remount_all, log=log)
+            conn, remount_fn=self._do_remount_all, log=self._log)
 
     @property
     def conn(self):

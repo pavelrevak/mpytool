@@ -594,11 +594,12 @@ Scanning...
 
 ## Debug output
 
-- `-d` print warnings (yellow)
-- `-dd` print info messages (purple)
-- `-ddd` print debug messages (blue)
+By default, errors and warnings are shown.
 
-For reporting bugs, please include `-ddd` output in the issue.
+- `-d` also print info messages (purple)
+- `-dd` also print debug messages (blue)
+
+For reporting bugs, please include `-dd` output in the issue.
 
 ## Performance
 

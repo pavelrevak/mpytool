@@ -23,16 +23,15 @@ class ConnSerial(_conn.Conn):
         if not hasattr(self._serial, 'fd'):
             self._has_data = self._has_data_polling
         # Debug info about port type
-        if self._log:
-            port = serial_config.get('port', '')
-            if self._port_info and self._port_info.vid:
-                vid = self._port_info.vid
-                pid = self._port_info.pid
-                self._log.info(
-                    "Connected to %s [%04X:%04X %s]",
-                    port, vid, pid, self.port_type)
-            else:
-                self._log.info("Connected to %s [unknown serial port]", port)
+        port = serial_config.get('port', '')
+        if self._port_info and self._port_info.vid:
+            vid = self._port_info.vid
+            pid = self._port_info.pid
+            self._log.info(
+                "Connected to %s [%04X:%04X %s]",
+                port, vid, pid, self.port_type)
+        else:
+            self._log.info("Connected to %s [unknown serial port]", port)
 
     def close(self):
         if self._serial:
@@ -69,7 +68,7 @@ class ConnSerial(_conn.Conn):
             in_waiting = self._serial.in_waiting
             if in_waiting > 0:
                 data = self._serial.read(in_waiting)
-                if data and self._log:
+                if data:
                     self._log.debug("RX: %r", data)
                 return data
             return None
@@ -80,8 +79,7 @@ class ConnSerial(_conn.Conn):
         """Write data to serial port"""
         if self._serial is None:
             raise _conn.ConnError("Not connected")
-        if self._log:
-            self._log.debug("TX: %r", data)
+        self._log.debug("TX: %r", data)
         try:
             return self._serial.write(data)
         except OSError as err:
@@ -117,8 +115,7 @@ class ConnSerial(_conn.Conn):
         if not self._is_usb_uart():
             raise _conn.ConnError(
                 f"Hardware reset not supported on {self.port_type}")
-        if self._log:
-            self._log.info("hard_reset: using DTR/RTS")
+        self._log.info("hard_reset: using DTR/RTS")
         self._serial.setDTR(False)  # GPIO0 high (normal boot)
         self._serial.setRTS(True)   # Assert reset
         _time.sleep(0.1)
@@ -159,8 +156,7 @@ class ConnSerial(_conn.Conn):
         if not self._is_usb_uart():
             raise _conn.ConnError(
                 f"Bootloader reset not supported on {self.port_type}")
-        if self._log:
-            self._log.info("reset_to_bootloader: using DTR/RTS")
+        self._log.info("reset_to_bootloader: using DTR/RTS")
         self._serial.setDTR(False)  # GPIO0 high
         self._serial.setRTS(True)   # Assert reset
         _time.sleep(0.1)

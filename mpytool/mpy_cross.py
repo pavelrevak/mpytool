@@ -6,6 +6,8 @@ import re as _re
 import shutil as _shutil
 import subprocess as _subprocess
 
+from mpytool.logger import SimpleColorLogger as _SimpleColorLogger
+
 
 # Native arch index from sys.implementation._mpy bits 10-13
 _MPY_ARCH_NAMES = (
@@ -24,8 +26,8 @@ class MpyCross:
     Cached in __pycache__/name.mpy-X.Y-arch.mpy with mtime check.
     """
 
-    def __init__(self, log, verbose_fn=None):
-        self._log = log
+    def __init__(self, log=None, verbose_fn=None):
+        self._log = log if log is not None else _SimpleColorLogger()
         self._verbose_fn = verbose_fn
         self.active = False
         self._ver = None  # (major, sub) device mpy version

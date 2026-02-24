@@ -3,6 +3,8 @@
 import time as _time
 import select as _select
 
+from mpytool.logger import SimpleColorLogger as _SimpleColorLogger
+
 # VFS escape byte - signals start of VFS command from device
 ESCAPE = 0x18
 
@@ -17,7 +19,7 @@ class Timeout(ConnError):
 
 class Conn():
     def __init__(self, log=None):
-        self._log = log
+        self._log = log if log is not None else _SimpleColorLogger()
         self._buffer = bytearray()
         self._escape_handlers = {}  # {escape_byte: handler}
         self._active_handler = None  # Currently processing handler

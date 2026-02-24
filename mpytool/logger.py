@@ -5,6 +5,12 @@ import sys as _sys
 
 
 class SimpleColorLogger():
+    # Log levels (compatible with Python logging)
+    DEBUG = 10
+    INFO = 20
+    WARNING = 30
+    ERROR = 40
+
     # ANSI color codes
     _RESET = '\033[0m'
     _BOLD_RED = '\033[1;31m'
@@ -25,7 +31,7 @@ class SimpleColorLogger():
         'cyan': _BOLD_CYAN,
     }
 
-    def __init__(self, loglevel=1, verbose_level=0):
+    def __init__(self, loglevel=WARNING, verbose_level=0):
         self._loglevel = loglevel
         self._verbose_level = verbose_level
         self._is_tty = _sys.stderr.isatty()
@@ -40,7 +46,7 @@ class SimpleColorLogger():
 
     @property
     def loglevel(self):
-        """Return current log level (1=error, 2=warning, 3=info, 4=debug)"""
+        """Return current log level (DEBUG=10, INFO=20, WARNING=30, ERROR=40)"""
         return self._loglevel
 
     def colorize(self, text, color):
@@ -67,7 +73,7 @@ class SimpleColorLogger():
     def error(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel >= 1:
+        if self._loglevel <= self.ERROR:
             if self._color:
                 self.log(f"{self._BOLD_RED}{msg}{self._RESET}")
             else:
@@ -76,7 +82,7 @@ class SimpleColorLogger():
     def warning(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel >= 2:
+        if self._loglevel <= self.WARNING:
             if self._color:
                 self.log(f"{self._BOLD_YELLOW}{msg}{self._RESET}")
             else:
@@ -85,7 +91,7 @@ class SimpleColorLogger():
     def info(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel >= 3:
+        if self._loglevel <= self.INFO:
             if self._color:
                 self.log(f"{self._BOLD_MAGENTA}{msg}{self._RESET}")
             else:
@@ -94,7 +100,7 @@ class SimpleColorLogger():
     def debug(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel >= 4:
+        if self._loglevel <= self.DEBUG:
             if self._color:
                 self.log(f"{self._BOLD_BLUE}{msg}{self._RESET}")
             else:

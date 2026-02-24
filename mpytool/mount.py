@@ -155,6 +155,7 @@ import struct as _struct
 
 from mpytool.mpy_comm import MpyError
 from mpytool.mpy_cross import BOOT_FILES
+from mpytool.logger import SimpleColorLogger as _SimpleColorLogger
 
 # Protocol constants
 ESCAPE = 0x18  # CAN / Ctrl+X
@@ -416,7 +417,7 @@ class MountHandler:
             self._root = _os.path.realpath(root)
         else:
             self._root = None
-        self._log = log
+        self._log = log if log is not None else _SimpleColorLogger()
         self._writable = writable
         self._mpy_cross = mpy_cross
         self._files = {}
@@ -480,7 +481,7 @@ class MountHandler:
         self._wr_u32(mode)  # type bits only
         self._wr_u32(st.st_size)
         self._wr_u32(int(st.st_mtime))
-        if self._log and path:
+        if path:
             self._log.info(
                 "MOUNT: STAT: '%s' -> mode=0x%04x size=%d",
                 path, mode, st.st_size)
@@ -536,8 +537,7 @@ class MountHandler:
         return self._mpy_cross.find_compiled(local_py)
 
     def _log_stat_err(self, path, err):
-        if self._log:
-            self._log.info("MOUNT: STAT: '%s' -> %s", path, err)
+        self._log.info("MOUNT: STAT: '%s' -> %s", path, err)
 
     def _do_stat_py_compile(self, path, local):
         """Handle .py stat with mpy-cross compilation."""
@@ -601,9 +601,8 @@ class MountHandler:
                 self._wr_u32(0x4000)  # S_IFDIR
                 self._wr_u32(0)
                 self._wr_u32(0)
-                if self._log:
-                    self._log.info(
-                        "MOUNT: STAT: '%s' -> mode=0x4000 (vdir)", path)
+                self._log.info(
+                    "MOUNT: STAT: '%s' -> mode=0x4000 (vdir)", path)
             else:
                 self._wr_s8(-_errno.ENOENT)
                 self._log_stat_err(path, 'ENOENT')
@@ -663,8 +662,7 @@ class MountHandler:
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(self._path_error())
-            if self._log:
-                self._log.info("MOUNT: LISTDIR: '%s' -> ENOENT", path)
+            self._log.info("MOUNT: LISTDIR: '%s' -> ENOENT", path)
             return
         # Check if path exists (real dir, virtual dir, or has submount entries)
         exists = False
@@ -688,8 +686,7 @@ class MountHandler:
                     break
         if not exists:
             self._wr_s8(-_errno.ENOENT)
-            if self._log:
-                self._log.info("MOUNT: LISTDIR: '%s' -> ENOENT", path)
+            self._log.info("MOUNT: LISTDIR: '%s' -> ENOENT", path)
             return
         # Collect entries (with limit)
         entries = []
@@ -704,9 +701,8 @@ class MountHandler:
             self._wr_bytes(name.encode('utf-8'))
             self._wr_u32(mode)
             self._wr_u32(size)
-        if self._log:
-            self._log.info(
-                "MOUNT: LISTDIR: '%s' -> %d entries", path, len(entries))
+        self._log.info(
+            "MOUNT: LISTDIR: '%s' -> %d entries", path, len(entries))
 
     def _do_open(self):
         path = self._rd_str()
@@ -714,16 +710,14 @@ class MountHandler:
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(self._path_error())
-            if self._log:
-                self._log.info(
-                    "MOUNT: OPEN: '%s' mode=%s -> ENOENT", path, mode)
+            self._log.info(
+                "MOUNT: OPEN: '%s' mode=%s -> ENOENT", path, mode)
             return
 
         if ('w' in mode or 'a' in mode or '+' in mode) and not self._writable:
             self._wr_s8(-_errno.EROFS)
-            if self._log:
-                self._log.info(
-                    "MOUNT: OPEN: '%s' mode=%s -> EROFS", path, mode)
+            self._log.info(
+                "MOUNT: OPEN: '%s' mode=%s -> EROFS", path, mode)
             return
 
         # .mpy file with -m mode: redirect to prebuilt or cache
@@ -743,15 +737,13 @@ class MountHandler:
                 self._next_fd += 1
             self._files[fd] = f
             self._wr_s8(fd)
-            if self._log:
-                self._log.info(
-                    "MOUNT: OPEN: '%s' mode=%s -> fd=%d", path, mode, fd)
+            self._log.info(
+                "MOUNT: OPEN: '%s' mode=%s -> fd=%d", path, mode, fd)
         except OSError as e:
             self._wr_s8(-e.errno if e.errno else -_errno.EIO)
-            if self._log:
-                self._log.info(
-                    "MOUNT: OPEN: '%s' mode=%s -> errno=%d",
-                    path, mode, e.errno)
+            self._log.info(
+                "MOUNT: OPEN: '%s' mode=%s -> errno=%d",
+                path, mode, e.errno)
 
     def _do_close(self):
         fd = self._rd_s8()
@@ -761,17 +753,14 @@ class MountHandler:
                 f.close()
                 self._free_fds.append(fd)
                 self._wr_s8(0)  # success
-                if self._log:
-                    self._log.info("MOUNT: CLOSE: fd=%d -> OK", fd)
+                self._log.info("MOUNT: CLOSE: fd=%d -> OK", fd)
             except OSError as e:
                 self._wr_s8(-e.errno)
-                if self._log:
-                    self._log.info(
-                        "MOUNT: CLOSE: fd=%d -> errno=%d", fd, e.errno)
+                self._log.info(
+                    "MOUNT: CLOSE: fd=%d -> errno=%d", fd, e.errno)
         else:
             self._wr_s8(-_errno.EBADF)  # invalid fd
-            if self._log:
-                self._log.info("MOUNT: CLOSE: fd=%d -> EBADF", fd)
+            self._log.info("MOUNT: CLOSE: fd=%d -> EBADF", fd)
 
     def _do_read(self):
         fd = self._rd_s8()
@@ -779,21 +768,18 @@ class MountHandler:
         f = self._files.get(fd)
         if f is None:
             self._wr_s32(-_errno.EBADF)
-            if self._log:
-                self._log.info("MOUNT: READ: fd=%d n=%d -> EBADF", fd, n)
+            self._log.info("MOUNT: READ: fd=%d n=%d -> EBADF", fd, n)
             return
         try:
             data = f.read(n)
             self._wr_bytes(data if data else b'')
-            if self._log:
-                self._log.info(
-                    "MOUNT: READ: fd=%d n=%d -> %dB", fd, n,
-                    len(data) if data else 0)
+            self._log.info(
+                "MOUNT: READ: fd=%d n=%d -> %dB", fd, n,
+                len(data) if data else 0)
         except OSError as e:
             self._wr_s32(-e.errno if e.errno else -_errno.EIO)
-            if self._log:
-                self._log.info(
-                    "MOUNT: READ: fd=%d n=%d -> errno=%d", fd, n, e.errno)
+            self._log.info(
+                "MOUNT: READ: fd=%d n=%d -> errno=%d", fd, n, e.errno)
 
     def _do_write(self):
         fd = self._rd_s8()
@@ -801,65 +787,55 @@ class MountHandler:
         n = len(data)
         if not self._writable:
             self._wr_s8(-_errno.EROFS)
-            if self._log:
-                self._log.info("MOUNT: WRITE: fd=%d n=%d -> EROFS", fd, n)
+            self._log.info("MOUNT: WRITE: fd=%d n=%d -> EROFS", fd, n)
             return
         f = self._files.get(fd)
         if f is None:
             self._wr_s8(-_errno.EBADF)
-            if self._log:
-                self._log.info("MOUNT: WRITE: fd=%d n=%d -> EBADF", fd, n)
+            self._log.info("MOUNT: WRITE: fd=%d n=%d -> EBADF", fd, n)
             return
         try:
             f.write(data)
             self._wr_s8(0)
-            if self._log:
-                self._log.info("MOUNT: WRITE: fd=%d n=%d -> OK", fd, n)
+            self._log.info("MOUNT: WRITE: fd=%d n=%d -> OK", fd, n)
         except OSError as e:
             self._wr_s8(-e.errno)
-            if self._log:
-                self._log.info(
-                    "MOUNT: WRITE: fd=%d n=%d -> errno=%d", fd, n, e.errno)
+            self._log.info(
+                "MOUNT: WRITE: fd=%d n=%d -> errno=%d", fd, n, e.errno)
 
     def _do_mkdir(self):
         path = self._rd_str()
         if not self._writable:
             self._wr_s8(-_errno.EROFS)
-            if self._log:
-                self._log.info("MOUNT: MKDIR: '%s' -> EROFS", path)
+            self._log.info("MOUNT: MKDIR: '%s' -> EROFS", path)
             return
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(self._path_error())
-            if self._log:
-                self._log.info("MOUNT: MKDIR: '%s' -> ENOENT", path)
+            self._log.info("MOUNT: MKDIR: '%s' -> ENOENT", path)
             return
         try:
             _os.makedirs(local, exist_ok=True)
             self._wr_s8(0)
-            if self._log:
-                self._log.info("MOUNT: MKDIR: '%s' -> OK", path)
+            self._log.info("MOUNT: MKDIR: '%s' -> OK", path)
         except OSError as e:
             self._wr_s8(-e.errno)
-            if self._log:
-                self._log.info(
-                    "MOUNT: MKDIR: '%s' -> errno=%d", path, e.errno)
+            self._log.info(
+                "MOUNT: MKDIR: '%s' -> errno=%d", path, e.errno)
 
     def _do_remove(self):
         path = self._rd_str()
         recursive = self._rd_s8()
         if not self._writable:
             self._wr_s8(-_errno.EROFS)
-            if self._log:
-                self._log.info(
-                    "MOUNT: REMOVE: '%s' rec=%d -> EROFS", path, recursive)
+            self._log.info(
+                "MOUNT: REMOVE: '%s' rec=%d -> EROFS", path, recursive)
             return
         local = self._resolve_path(path)
         if local is None:
             self._wr_s8(self._path_error())
-            if self._log:
-                self._log.info(
-                    "MOUNT: REMOVE: '%s' rec=%d -> ENOENT", path, recursive)
+            self._log.info(
+                "MOUNT: REMOVE: '%s' rec=%d -> ENOENT", path, recursive)
             return
         try:
             if recursive:
@@ -873,45 +849,39 @@ class MountHandler:
                 else:
                     _os.remove(local)
             self._wr_s8(0)
-            if self._log:
-                self._log.info(
-                    "MOUNT: REMOVE: '%s' rec=%d -> OK", path, recursive)
+            self._log.info(
+                "MOUNT: REMOVE: '%s' rec=%d -> OK", path, recursive)
         except OSError as e:
             self._wr_s8(-e.errno)
-            if self._log:
-                self._log.info(
-                    "MOUNT: REMOVE: '%s' rec=%d -> errno=%d",
-                    path, recursive, e.errno)
+            self._log.info(
+                "MOUNT: REMOVE: '%s' rec=%d -> errno=%d",
+                path, recursive, e.errno)
 
     def _do_rename(self):
         old_path = self._rd_str()
         new_path = self._rd_str()
         if not self._writable:
             self._wr_s8(-_errno.EROFS)
-            if self._log:
-                self._log.info(
-                    "MOUNT: RENAME: '%s' -> '%s' EROFS", old_path, new_path)
+            self._log.info(
+                "MOUNT: RENAME: '%s' -> '%s' EROFS", old_path, new_path)
             return
         old_local = self._resolve_path(old_path)
         new_local = self._resolve_path(new_path)
         if old_local is None or new_local is None:
             self._wr_s8(self._path_error())
-            if self._log:
-                self._log.info(
-                    "MOUNT: RENAME: '%s' -> '%s' ENOENT", old_path, new_path)
+            self._log.info(
+                "MOUNT: RENAME: '%s' -> '%s' ENOENT", old_path, new_path)
             return
         try:
             _os.replace(old_local, new_local)
             self._wr_s8(0)
-            if self._log:
-                self._log.info(
-                    "MOUNT: RENAME: '%s' -> '%s' OK", old_path, new_path)
+            self._log.info(
+                "MOUNT: RENAME: '%s' -> '%s' OK", old_path, new_path)
         except OSError as e:
             self._wr_s8(-e.errno)
-            if self._log:
-                self._log.info(
-                    "MOUNT: RENAME: '%s' -> '%s' errno=%d",
-                    old_path, new_path, e.errno)
+            self._log.info(
+                "MOUNT: RENAME: '%s' -> '%s' errno=%d",
+                old_path, new_path, e.errno)
 
     def _do_seek(self):
         fd = self._rd_s8()
@@ -920,44 +890,38 @@ class MountHandler:
         f = self._files.get(fd)
         if not f:
             self._wr_s32(-_errno.EBADF)
-            if self._log:
-                self._log.info(
-                    "MOUNT: SEEK: fd=%d off=%d wh=%d -> EBADF",
-                    fd, offset, whence)
+            self._log.info(
+                "MOUNT: SEEK: fd=%d off=%d wh=%d -> EBADF",
+                fd, offset, whence)
             return
         try:
             pos = f.seek(offset, whence)
             self._wr_s32(pos)
-            if self._log:
-                self._log.info(
-                    "MOUNT: SEEK: fd=%d off=%d wh=%d -> pos=%d",
-                    fd, offset, whence, pos)
+            self._log.info(
+                "MOUNT: SEEK: fd=%d off=%d wh=%d -> pos=%d",
+                fd, offset, whence, pos)
         except OSError as e:
             self._wr_s32(-e.errno)
-            if self._log:
-                self._log.info(
-                    "MOUNT: SEEK: fd=%d off=%d wh=%d -> errno=%d",
-                    fd, offset, whence, e.errno)
+            self._log.info(
+                "MOUNT: SEEK: fd=%d off=%d wh=%d -> errno=%d",
+                fd, offset, whence, e.errno)
 
     def _do_readline(self):
         fd = self._rd_s8()
         f = self._files.get(fd)
         if f is None:
             self._wr_s32(-_errno.EBADF)
-            if self._log:
-                self._log.info("MOUNT: READLINE: fd=%d -> EBADF", fd)
+            self._log.info("MOUNT: READLINE: fd=%d -> EBADF", fd)
             return
         try:
             line = f.readline()
             self._wr_bytes(line if line else b'')
-            if self._log:
-                self._log.info(
-                    "MOUNT: READLINE: fd=%d -> %dB", fd, len(line) if line else 0)
+            self._log.info(
+                "MOUNT: READLINE: fd=%d -> %dB", fd, len(line) if line else 0)
         except OSError as e:
             self._wr_s32(-e.errno if e.errno else -_errno.EIO)
-            if self._log:
-                self._log.info(
-                    "MOUNT: READLINE: fd=%d -> errno=%d", fd, e.errno)
+            self._log.info(
+                "MOUNT: READLINE: fd=%d -> errno=%d", fd, e.errno)
 
     def close_all(self):
         """Close all open file handles"""
@@ -1002,7 +966,7 @@ class VfsProtocol:
         self._conn = conn
         self._handlers = {}  # {mid: MountHandler}
         self._remount_fn = remount_fn
-        self._log = log
+        self._log = log if log is not None else _SimpleColorLogger()
         self._buf = b''
         self._state = self.STATE_ESCAPE
         self._cmd = None
@@ -1058,9 +1022,8 @@ class VfsProtocol:
             if self._state == self.STATE_ESCAPE:
                 if self._buf[0] != ESCAPE:
                     # Not our ESCAPE - return all data back
-                    if self._log:
-                        self._log.debug(
-                            "VFS: expected ESCAPE, got 0x%02x", self._buf[0])
+                    self._log.warning(
+                        "VFS: expected ESCAPE, got 0x%02x", self._buf[0])
                     result = self._buf
                     self._buf = b''
                     return result
@@ -1071,8 +1034,7 @@ class VfsProtocol:
                 cmd = self._buf[0]
                 if cmd < CMD_MIN or cmd > CMD_MAX:
                     # Invalid CMD - return ESCAPE + data back to REPL
-                    if self._log:
-                        self._log.debug("VFS: invalid cmd=%d", cmd)
+                    self._log.warning("VFS: invalid cmd=%d", cmd)
                     result = bytes([ESCAPE]) + self._buf
                     self._buf = b''
                     self._state = self.STATE_ESCAPE

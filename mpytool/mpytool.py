@@ -1525,7 +1525,9 @@ def main():
     else:
         args.verbose = 1
 
-    log = SimpleColorLogger(args.debug + 1, verbose_level=args.verbose)
+    log = SimpleColorLogger(
+        SimpleColorLogger.WARNING - args.debug * 10,
+        verbose_level=args.verbose)
     if args.port and args.address:
         log.error("You can select only serial port or network address")
         _sys.exit(1)

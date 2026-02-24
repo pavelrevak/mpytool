@@ -49,8 +49,7 @@ class ConnSocket(_conn.Conn):
         try:
             data = self._socket.recv(4096)
             if data:
-                if self._log:
-                    self._log.debug("RX: %r", data)
+                self._log.debug("RX: %r", data)
                 return data
         except BlockingIOError:
             pass
@@ -62,8 +61,7 @@ class ConnSocket(_conn.Conn):
         """Write data to socket"""
         if self._socket is None:
             raise _conn.ConnError("Not connected")
-        if self._log:
-            self._log.debug("TX: %r", data)
+        self._log.debug("TX: %r", data)
         try:
             return self._socket.send(data)
         except OSError as err:
