@@ -26,18 +26,23 @@ class MpyCross:
     Cached in __pycache__/name.mpy-X.Y-arch.mpy with mtime check.
     """
 
-    def __init__(self, log=None, verbose_fn=None):
+    def __init__(self, log=None):
         self._log = log if log is not None else _SimpleColorLogger()
-        self._verbose_fn = verbose_fn
         self.active = False
         self._ver = None  # (major, sub) device mpy version
         self._arch = None  # architecture name for cache key
         self._args = []  # extra mpy-cross args (-b, -march)
         self.compiled = {}  # {src_path: cache_path}
 
-    def _verbose(self, msg, level=1):
-        if self._verbose_fn:
-            self._verbose_fn(msg, level)
+    @property
+    def ver(self):
+        """Device mpy version as (major, sub) tuple or None"""
+        return self._ver
+
+    @property
+    def arch(self):
+        """Device architecture name or None"""
+        return self._arch
 
     def init(self, platform_info):
         """Initialize: find mpy-cross, check version, detect arch
@@ -91,9 +96,9 @@ class MpyCross:
             self._args.append('-march=' + arch_name)
         dev_version = platform_info.get('version', '')
         arch_str = f' arch {arch_name}' if arch_name else ''
-        self._verbose(
-            f'device v{dev_version} mpy v{dev_ver}.{dev_sub}{arch_str},'
-            f' mpy-cross {cross_str}', 2)
+        self._log.debug(
+            'device v%s mpy v%d.%d%s, mpy-cross %s',
+            dev_version, dev_ver, dev_sub, arch_str, cross_str)
         self.active = True
 
     def compile(self, src_path):
@@ -104,7 +109,7 @@ class MpyCross:
         """
         basename = _os.path.basename(src_path)
         if basename in BOOT_FILES:
-            self._verbose(f'mpy: skip {basename} (boot file)', 2)
+            self._log.debug('mpy: skip %s (boot file)', basename)
             return None
         if not basename.endswith('.py'):
             return None
@@ -122,7 +127,7 @@ class MpyCross:
         # Compile
         _os.makedirs(cache_dir, exist_ok=True)
         cmd = ['mpy-cross'] + self._args + ['-o', cache_path, src_path]
-        self._log.warning('$ %s', ' '.join(cmd))
+        self._log.info('$ %s', ' '.join(cmd))
         result = _subprocess.run(
             cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:

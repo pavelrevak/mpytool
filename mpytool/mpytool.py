@@ -1190,9 +1190,16 @@ class MpyTool():
         # Initialize mpy-cross if requested
         mpy_cross = None
         if args.mpy:
-            mpy_cross = MpyCross(self._log, self.verbose)
-            mpy_cross.init(self.mpy.platform())
-            if not mpy_cross.active:
+            mpy_cross = MpyCross(self._log)
+            platform = self.mpy.platform()
+            mpy_cross.init(platform)
+            if mpy_cross.active:
+                arch_str = f' arch {mpy_cross.arch}' if mpy_cross.arch else ''
+                self.verbose(
+                    f"mpy: device v{platform.get('version', '')} "
+                    f"mpy v{mpy_cross.ver[0]}.{mpy_cross.ver[1]}{arch_str}",
+                    level=2)
+            else:
                 mpy_cross = None
         # Parse mount pairs from paths
         pairs = self._parse_mount_pairs(list(args.paths))

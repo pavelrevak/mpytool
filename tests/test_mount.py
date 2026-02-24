@@ -8,6 +8,7 @@ import shutil
 import unittest
 from unittest.mock import Mock, patch
 
+from mpytool.logger import SimpleColorLogger
 from mpytool.mount import (
     MountHandler, VfsProtocol,
     ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN,
@@ -483,13 +484,17 @@ class TestVfsProtocol(unittest.TestCase):
     So process() gets [ESCAPE, CMD, MID, ...].
     """
 
+    # Quiet logger for tests (suppress warnings)
+    _quiet_log = SimpleColorLogger(loglevel=SimpleColorLogger.ERROR)
+
     def setUp(self):
         self.mock_conn = Mock()
         self.mock_conn._buffer = bytearray()
         self.mock_handler = Mock()
 
     def _make_intercept(self, remount_fn=None):
-        intercept = VfsProtocol(self.mock_conn, remount_fn=remount_fn)
+        intercept = VfsProtocol(
+            self.mock_conn, remount_fn=remount_fn, log=self._quiet_log)
         intercept.add_handler(0, self.mock_handler)
         return intercept
 
@@ -941,6 +946,9 @@ class TestVfsProtocolMultiHandler(unittest.TestCase):
 class TestStaleVfsRecovery(unittest.TestCase):
     """Tests for stale VFS recovery in stop_current_operation"""
 
+    # Quiet logger for tests (suppress warnings)
+    _quiet_log = SimpleColorLogger(loglevel=SimpleColorLogger.ERROR)
+
     def test_stop_sends_escape_after_failures(self):
         """stop_current_operation sends 0x18 after attempt 4"""
         from mpytool.mpy_comm import MpyComm
@@ -950,7 +958,7 @@ class TestStaleVfsRecovery(unittest.TestCase):
         mock_conn.flush.return_value = b''
         mock_conn.read_until.side_effect = Timeout("no data")
 
-        comm = MpyComm(mock_conn)
+        comm = MpyComm(mock_conn, log=self._quiet_log)
         comm.stop_current_operation()
 
         writes = [call.args[0] for call in mock_conn.write.call_args_list]
@@ -979,7 +987,7 @@ class TestStaleVfsRecovery(unittest.TestCase):
             raise Timeout("no data")
 
         mock_conn.read_until.side_effect = read_side_effect
-        comm = MpyComm(mock_conn)
+        comm = MpyComm(mock_conn, log=self._quiet_log)
         comm.stop_current_operation()
 
 

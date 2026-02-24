@@ -14,6 +14,11 @@ Run all tests (dedicated test device):
 import os
 import unittest
 
+from mpytool.logger import SimpleColorLogger
+
+# Quiet logger for tests (ERROR level only)
+_QUIET_LOG = SimpleColorLogger(loglevel=SimpleColorLogger.ERROR)
+
 # Test ports for different test levels
 PORT_RO = os.environ.get("MPYTOOL_TEST_PORT")
 PORT_RW = os.environ.get("MPYTOOL_TEST_PORT_RW")
@@ -31,6 +36,7 @@ def requires_device(cls):
     if not PORT_RO:
         return unittest.skip("MPYTOOL_TEST_PORT not set")(cls)
     cls.DEVICE_PORT = PORT_RO
+    cls.QUIET_LOG = _QUIET_LOG
     return cls
 
 
@@ -39,6 +45,7 @@ def requires_device_rw(cls):
     if not PORT_RW:
         return unittest.skip("MPYTOOL_TEST_PORT_RW not set")(cls)
     cls.DEVICE_PORT = PORT_RW
+    cls.QUIET_LOG = _QUIET_LOG
     return cls
 
 
@@ -211,8 +218,8 @@ class TestReplRecovery(unittest.TestCase):
         from mpytool import ConnSerial, Mpy
 
         # First connection - enter raw REPL and disconnect without exiting
-        conn1 = ConnSerial(port=DEVICE_PORT, baudrate=115200)
-        mpy1 = Mpy(conn1)
+        conn1 = ConnSerial(port=DEVICE_PORT, baudrate=115200, log=self.QUIET_LOG)
+        mpy1 = Mpy(conn1, log=self.QUIET_LOG)
         mpy1.comm.enter_raw_repl()
         self.assertTrue(mpy1.comm._repl_mode)
 
@@ -222,8 +229,8 @@ class TestReplRecovery(unittest.TestCase):
         conn1.close()
 
         # Second connection - device is still in raw REPL mode
-        conn2 = ConnSerial(port=DEVICE_PORT, baudrate=115200)
-        mpy2 = Mpy(conn2)
+        conn2 = ConnSerial(port=DEVICE_PORT, baudrate=115200, log=self.QUIET_LOG)
+        mpy2 = Mpy(conn2, log=self.QUIET_LOG)
 
         # This should recover and work
         # With broken implementation, this will fail/timeout
@@ -1455,6 +1462,7 @@ class TestFlashRP2(unittest.TestCase):
 
 
 @requires_device
+@requires_device
 class TestRawPasteMode(unittest.TestCase):
     """Test raw-paste mode for code execution"""
 
@@ -1462,8 +1470,8 @@ class TestRawPasteMode(unittest.TestCase):
     def setUpClass(cls):
         from mpytool import ConnSerial
         from mpytool.mpy_comm import MpyComm
-        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
-        cls.comm = MpyComm(cls.conn)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200, log=cls.QUIET_LOG)
+        cls.comm = MpyComm(cls.conn, log=cls.QUIET_LOG)
 
     @classmethod
     def tearDownClass(cls):
@@ -1553,9 +1561,9 @@ class TestRunCommand(unittest.TestCase):
         import tempfile
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
-        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
-        cls.mpy = Mpy(cls.conn)
-        cls.tool = MpyTool(cls.conn)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200, log=cls.QUIET_LOG)
+        cls.mpy = Mpy(cls.conn, log=cls.QUIET_LOG)
+        cls.tool = MpyTool(cls.conn, log=cls.QUIET_LOG)
         cls.tool._mpy = cls.mpy
         cls.temp_dir = tempfile.mkdtemp()
         try:
@@ -1647,11 +1655,11 @@ class TestMount(unittest.TestCase):
 
         # Create local temp directory with test files
         cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_mount_test_')
-        # Simple text file
-        with open(os.path.join(cls.LOCAL_DIR, 'hello.txt'), 'w') as f:
+        # Simple text file (newline='' ensures \n not converted to \r\n on Windows)
+        with open(os.path.join(cls.LOCAL_DIR, 'hello.txt'), 'w', newline='') as f:
             f.write('Hello from mount test!')
         # Python module
-        with open(os.path.join(cls.LOCAL_DIR, 'testmod.py'), 'w') as f:
+        with open(os.path.join(cls.LOCAL_DIR, 'testmod.py'), 'w', newline='') as f:
             f.write('MOUNT_VALUE = 42\ndef double(x):\n    return x * 2\n')
         # Binary file
         with open(os.path.join(cls.LOCAL_DIR, 'data.bin'), 'wb') as f:
@@ -1659,18 +1667,18 @@ class TestMount(unittest.TestCase):
         # Subdirectory with file
         subdir = os.path.join(cls.LOCAL_DIR, 'subdir')
         os.makedirs(subdir)
-        with open(os.path.join(subdir, 'nested.txt'), 'w') as f:
+        with open(os.path.join(subdir, 'nested.txt'), 'w', newline='') as f:
             f.write('nested content')
         # lib directory with importable module
         libdir = os.path.join(cls.LOCAL_DIR, 'lib')
         os.makedirs(libdir)
-        with open(os.path.join(libdir, 'libmod.py'), 'w') as f:
+        with open(os.path.join(libdir, 'libmod.py'), 'w', newline='') as f:
             f.write('LIB_VALUE = 99\n')
         # Multi-line file for readline tests
-        with open(os.path.join(cls.LOCAL_DIR, 'lines.txt'), 'w') as f:
+        with open(os.path.join(cls.LOCAL_DIR, 'lines.txt'), 'w', newline='') as f:
             f.write('Line 1\nLine 2\nLine 3\nLine 4\n')
         # Long line file for readline tests (longer than typical chunk size)
-        with open(os.path.join(cls.LOCAL_DIR, 'longline.txt'), 'w') as f:
+        with open(os.path.join(cls.LOCAL_DIR, 'longline.txt'), 'w', newline='') as f:
             f.write('X' * 5000 + '\nShort\n')
 
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
@@ -1960,21 +1968,21 @@ class TestMountLn(unittest.TestCase):
 
         # Main mount directory with a root file
         cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_ln_root_')
-        with open(os.path.join(cls.LOCAL_DIR, 'root.txt'), 'w') as f:
+        with open(os.path.join(cls.LOCAL_DIR, 'root.txt'), 'w', newline='') as f:
             f.write('root file')
 
         # Separate directory to link as submount
         cls.LN_DIR = tempfile.mkdtemp(prefix='mpytool_ln_pkg_')
-        with open(os.path.join(cls.LN_DIR, 'mod.py'), 'w') as f:
+        with open(os.path.join(cls.LN_DIR, 'mod.py'), 'w', newline='') as f:
             f.write('LN_VALUE = 77\n')
         subpkg = os.path.join(cls.LN_DIR, 'inner')
         os.makedirs(subpkg)
-        with open(os.path.join(subpkg, 'deep.txt'), 'w') as f:
+        with open(os.path.join(subpkg, 'deep.txt'), 'w', newline='') as f:
             f.write('deep content')
 
         # Single file to link
         cls.LN_FILE_DIR = tempfile.mkdtemp(prefix='mpytool_ln_file_')
-        with open(os.path.join(cls.LN_FILE_DIR, 'single.py'), 'w') as f:
+        with open(os.path.join(cls.LN_FILE_DIR, 'single.py'), 'w', newline='') as f:
             f.write('SINGLE = 123\n')
 
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
@@ -2135,12 +2143,11 @@ class TestMountMpyCross(unittest.TestCase):
         with open(os.path.join(cls.LOCAL_DIR, 'prebuilt.mpy'), 'wb') as f:
             f.write(b'FAKE_MPY')
 
-        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
-        cls.mpy = Mpy(cls.conn)
+        cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200, log=cls.QUIET_LOG)
+        cls.mpy = Mpy(cls.conn, log=cls.QUIET_LOG)
 
         # Initialize MpyCross
-        log = SimpleColorLogger(loglevel=0)  # Quiet logger
-        cls.mpy_cross = MpyCross(log)
+        cls.mpy_cross = MpyCross(cls.QUIET_LOG)
         platform_info = cls.mpy.platform()
         cls.mpy_cross.init(platform_info)
 
@@ -2726,7 +2733,8 @@ class TestRtc(unittest.TestCase):
         from mpytool.logger import SimpleColorLogger
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
-        cls.log = SimpleColorLogger(loglevel=0, verbose_level=0)
+        cls.log = SimpleColorLogger(
+            loglevel=SimpleColorLogger.ERROR, verbose_level=0)
         cls.tool = MpyTool(cls.conn, log=cls.log, verbose=None)
         cls.tool._mpy = cls.mpy
 

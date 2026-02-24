@@ -673,7 +673,7 @@ class CopyCommand:
         self._force = force
         self._compress = compress
         if mpy:
-            self._mpy_cross = MpyCross(self._log, self.verbose)
+            self._mpy_cross = MpyCross(self._log)
 
         try:
             self._run_impl(paths)

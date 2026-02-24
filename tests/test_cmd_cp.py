@@ -709,7 +709,7 @@ class TestMpyCompilation(unittest.TestCase):
         self.mock_conn = Mock()
         self.tool = MpyTool(self.mock_conn, verbose=None)
         self.tool._mpy = Mock()
-        self.compiler = MpyCross(self.tool._log, self.tool.verbose)
+        self.compiler = MpyCross(self.tool._log)
         self.tool._mpy_cross = self.compiler
         self.temp_dir = tempfile.mkdtemp()
         # Create test .py files
