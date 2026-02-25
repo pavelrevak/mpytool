@@ -125,85 +125,52 @@ class TestFileInfo(unittest.TestCase):
         self.assertIn("200", call_args[0][0])
 
 
-class TestDetectChunkSize(unittest.TestCase):
-    """Tests for Mpy.detect_chunk_size method"""
+class TestChunkSize(unittest.TestCase):
+    """Tests for Mpy.chunk_size property (auto-detection based on RAM)"""
 
     def setUp(self):
         self.mock_conn = Mock()
         self.mpy = Mpy(self.mock_conn)
         self.mpy._mpy_comm = Mock()
-        # Reset class-level cache before each test
-        Mpy._CHUNK_AUTO_DETECTED = None
 
-    def tearDown(self):
-        # Reset class-level cache after each test
-        Mpy._CHUNK_AUTO_DETECTED = None
+    def test_formula_free_kb_squared_div_2(self):
+        """Test chunk_size uses formula: free_kb² // 2"""
+        # 100KB free → 100² // 2 = 5000
+        self.mpy._mpy_comm.exec_eval.return_value = 100 * 1024
+        self.assertEqual(self.mpy.chunk_size, 5000)
 
-    def test_large_ram_uses_32k_chunks(self):
-        """Test that devices with >320KB RAM use 32KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 350 * 1024  # 350KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 32768)
+    def test_clamp_max_32k(self):
+        """Test chunk_size is clamped to 32KB max"""
+        # 350KB → 350² // 2 = 61250, clamped to 32768
+        self.mpy._mpy_comm.exec_eval.return_value = 350 * 1024
+        self.assertEqual(self.mpy.chunk_size, 32768)
 
-    def test_medium_large_ram_uses_16k_chunks(self):
-        """Test that devices with >192KB RAM use 16KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 250 * 1024  # 250KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 16384)
-
-    def test_medium_ram_uses_8k_chunks(self):
-        """Test that devices with >128KB RAM use 8KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 150 * 1024  # 150KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 8192)
-
-    def test_small_ram_uses_4k_chunks(self):
-        """Test that devices with >92KB RAM use 4KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 100 * 1024  # 100KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 4096)
-
-    def test_smaller_ram_uses_2k_chunks(self):
-        """Test that devices with >64KB RAM use 2KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 70 * 1024  # 70KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 2048)
-
-    def test_small_ram_uses_1k_chunks(self):
-        """Test that devices with >48KB RAM use 1KB chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 55 * 1024  # 55KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 1024)
-
-    def test_tiny_ram_uses_512_chunks(self):
-        """Test that devices with >32KB RAM use 512B chunks"""
-        self.mpy._mpy_comm.exec_eval.return_value = 40 * 1024  # 40KB
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 512)
+    def test_clamp_min_256(self):
+        """Test chunk_size is clamped to 256B min"""
+        # 10KB → 10² // 2 = 50, clamped to 256
+        self.mpy._mpy_comm.exec_eval.return_value = 10 * 1024
+        self.assertEqual(self.mpy.chunk_size, 256)
 
     def test_error_defaults_to_256(self):
         """Test that errors default to 256B chunks"""
         from mpytool.mpy_comm import CmdError
         self.mpy._mpy_comm.exec_eval.side_effect = CmdError("cmd", b"", b"error")
-        chunk = self.mpy.detect_chunk_size()
-        self.assertEqual(chunk, 256)
+        self.assertEqual(self.mpy.chunk_size, 256)
 
     def test_caches_result(self):
         """Test that chunk size is cached after first detection"""
-        self.mpy._mpy_comm.exec_eval.return_value = 350 * 1024  # 350KB
-        chunk1 = self.mpy.detect_chunk_size()
+        self.mpy._mpy_comm.exec_eval.return_value = 100 * 1024
+        chunk1 = self.mpy.chunk_size
         # Change return value - should still use cached
-        self.mpy._mpy_comm.exec_eval.return_value = 20 * 1024  # 20KB
-        chunk2 = self.mpy.detect_chunk_size()
+        self.mpy._mpy_comm.exec_eval.return_value = 200 * 1024
+        chunk2 = self.mpy.chunk_size
         self.assertEqual(chunk1, chunk2)
-        self.assertEqual(chunk2, 32768)
 
     def test_user_specified_skips_detection(self):
         """Test that user-specified chunk size skips auto-detection"""
         mpy = Mpy(self.mock_conn, chunk_size=4096)
         mpy._mpy_comm = Mock()
-        chunk = mpy.detect_chunk_size()
-        self.assertEqual(chunk, 4096)
+        self.assertEqual(mpy.chunk_size, 4096)
         # exec_eval should not be called (no RAM detection)
         mpy._mpy_comm.exec_eval.assert_not_called()
 
@@ -266,14 +233,9 @@ class TestPut(unittest.TestCase):
 
     def setUp(self):
         self.mock_conn = Mock()
-        self.mpy = Mpy(self.mock_conn)
+        self.mpy = Mpy(self.mock_conn, chunk_size=512)
         self.mpy._mpy_comm = Mock()
         self.mpy._mpy_comm.exec_eval.return_value = 512  # Bytes written
-        # Set chunk size to avoid detection call
-        Mpy._CHUNK_AUTO_DETECTED = 512
-
-    def tearDown(self):
-        Mpy._CHUNK_AUTO_DETECTED = None
 
     def test_returns_encodings_and_wire_bytes(self):
         """Test that put returns encodings set and wire bytes"""
@@ -385,13 +347,9 @@ class TestFlashWriteWithLabel(unittest.TestCase):
         self.mpy = Mpy(self.mock_conn)
         self.mpy._mpy_comm = Mock()
         self.mpy._platform = 'esp32'  # Set platform for partition operations
+        self.mpy._chunk_size = 4096  # Set chunk size to avoid detection
         # Mock partition info
         self.mpy._mpy_comm.exec_eval.return_value = (0, 0, 0x10000, 8192, 'test', False)
-        # Mock chunk size detection
-        Mpy._CHUNK_AUTO_DETECTED = 4096
-
-    def tearDown(self):
-        Mpy._CHUNK_AUTO_DETECTED = None
 
     def test_flash_write_with_label_returns_dict(self):
         """Test that flash_write with label returns result dict"""

@@ -477,7 +477,7 @@ class MpyTool():
         ota_size = _utils.format_size(info['next_ota_size'])
         self.verbose(f"  Target: {info['next_ota']} ({ota_size})", 1)
         use_compress = self.mpy.detect_deflate()
-        chunk_size = self.mpy.detect_chunk_size()
+        chunk_size = self.mpy.chunk_size
         if chunk_size >= 1024:
             chunk_str = f"{chunk_size // 1024}K"
         else:
@@ -1459,9 +1459,10 @@ def _run_commands(mpy_tool, command_groups, with_progress=True):
 
 
 def _parse_chunk_size(value):
-    """Parse chunk size value (e.g., '1K', '2K', '4096')"""
-    valid = {512, 1024, 2048, 4096, 8192, 16384, 32768}
+    """Parse chunk size value (e.g., '1K', '4K', '4096')"""
     val = value.upper()
+    if val.endswith('B'):
+        val = val[:-1]
     if val.endswith('K'):
         try:
             num = int(val[:-1]) * 1024
@@ -1472,13 +1473,9 @@ def _parse_chunk_size(value):
             num = int(value)
         except ValueError:
             raise _argparse.ArgumentTypeError(f"invalid chunk size: {value}")
-    if num not in valid:
-        parts = []
-        for v in sorted(valid):
-            parts.append(f'{v//1024}K' if v >= 1024 else str(v))
-        valid_str = ', '.join(parts)
+    if num < 64 or num > 128 * 1024:
         raise _argparse.ArgumentTypeError(
-            f"chunk size must be one of: {valid_str}")
+            f"chunk size must be between 64B and 128K")
     return num
 
 
@@ -1513,7 +1510,7 @@ def _build_main_parser():
         '-Z', '--no-compress', action='store_true', help='disable compression')
     parser.add_argument(
         '-c', '--chunk-size', type=_parse_chunk_size, metavar='SIZE',
-        help='chunk size (512, 1K-32K, auto)')
+        help='chunk size (64B - 128K, default: auto)')
     parser.add_argument('commands', nargs=_argparse.REMAINDER, help='commands')
     return parser
 

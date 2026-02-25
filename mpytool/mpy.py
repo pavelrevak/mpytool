@@ -42,8 +42,6 @@ class DirNotFound(PathNotFound):
 
 
 class Mpy():
-    _CHUNK = 512
-    _CHUNK_AUTO_DETECTED = None  # Will be set on first put() if not overridden
     _DEFLATE_AVAILABLE = None  # None = not checked, True/False = result
     _ATTR_DIR = 0x4000
     _ATTR_FILE = 0x8000
@@ -140,7 +138,7 @@ def _mt_pfind(label):
         self._mpy_comm = _mpy_comm.MpyComm(conn, log=self._log)
         self._imported = []
         self._load_helpers = []
-        self._chunk_size = chunk_size  # None = auto-detect
+        self._chunk_size = chunk_size  # None = auto-detect on first use
         self._platform = None  # Cached platform name
         # Multi-mount state
         self._mounts = []  # [(mid, mount_point, local_path, handler), ...]
@@ -172,7 +170,6 @@ def _mt_pfind(label):
         self._load_helpers = []
         self._mpy_comm.reset_state()
         self._platform = None
-        Mpy._CHUNK_AUTO_DETECTED = None
         Mpy._DEFLATE_AVAILABLE = None
 
     def _get_platform(self):
@@ -456,9 +453,10 @@ def _mt_pfind(label):
             self._mpy_comm.exec(f"f = open('{_escape_path(path)}', 'rb')")
         except _mpy_comm.CmdError as err:
             raise FileNotFound(path) from err
+        chunk_size = self.chunk_size
         data = b''
         while True:
-            result = self._mpy_comm.exec_eval(f"f.read({self._CHUNK})")
+            result = self._mpy_comm.exec_eval(f"f.read({chunk_size})")
             if not result:
                 break
             data += result
@@ -507,41 +505,24 @@ def _mt_pfind(label):
 
         return best_cmd, chunk_size, best_type
 
-    def detect_chunk_size(self):
-        """Detect optimal chunk size based on device free RAM
+    @property
+    def chunk_size(self):
+        """Optimal chunk size based on device free RAM
 
-        Returns:
-            chunk size in bytes (512, 1024, 2048, 4096, 8192, 16384, or 32768)
+        Auto-detected on first access if not set explicitly.
+        Uses quadratic formula: (free_kb)² / 2, clamped to 256B - 32KB.
         """
         if self._chunk_size is not None:
             return self._chunk_size
-        if Mpy._CHUNK_AUTO_DETECTED is not None:
-            return Mpy._CHUNK_AUTO_DETECTED
         self.import_module('gc')
         self._mpy_comm.exec("gc.collect()")
         try:
             free = self._mpy_comm.exec_eval("gc.mem_free()")
         except _mpy_comm.CmdError:
             free = 0
-        # Select chunk size based on free RAM
-        if free > 320 * 1024:
-            chunk = 32768
-        elif free > 192 * 1024:
-            chunk = 16384
-        elif free > 128 * 1024:
-            chunk = 8192
-        elif free > 92 * 1024:
-            chunk = 4096
-        elif free > 64 * 1024:
-            chunk = 2048
-        elif free > 48 * 1024:
-            chunk = 1024
-        elif free > 32 * 1024:
-            chunk = 512
-        else:
-            chunk = 256
-        Mpy._CHUNK_AUTO_DETECTED = chunk
-        return chunk
+        free_kb = free // 1024
+        self._chunk_size = max(256, min(32768, free_kb * free_kb // 2))
+        return self._chunk_size
 
     def detect_deflate(self):
         """Detect if deflate module is available and device has enough RAM
@@ -551,7 +532,7 @@ def _mt_pfind(label):
         """
         if Mpy._DEFLATE_AVAILABLE is None:
             # Check RAM first - need at least 64KB for decompression
-            chunk = self.detect_chunk_size()
+            chunk = self.chunk_size
             if chunk < 8192:  # chunk < 8K means RAM <= 64KB
                 Mpy._DEFLATE_AVAILABLE = False
             else:
@@ -576,7 +557,7 @@ def _mt_pfind(label):
                 encodings_used: set of encoding types ('raw', 'base64', 'compressed')
                 wire_bytes: number of bytes sent over the wire (encoded size)
         """
-        chunk_size = self.detect_chunk_size()
+        chunk_size = self.chunk_size
         total_size = len(data)
         transferred = 0
         wire_bytes = 0
@@ -1135,8 +1116,8 @@ def _mt_pfind(label):
             total_size = block_count * block_size
 
         total_blocks = (total_size + block_size - 1) // block_size
-        # Use detect_chunk_size() which auto-detects based on free RAM
-        chunk_bytes = self.detect_chunk_size()
+        # Use chunk_size property which auto-detects based on free RAM
+        chunk_bytes = self.chunk_size
         chunk_blocks = max(1, chunk_bytes // block_size)
         data = bytearray()
         block_num = 0
@@ -1400,7 +1381,7 @@ def _mt_pfind(label):
             compress = self.detect_deflate()
 
         flash_block = 4096
-        chunk_size = self.detect_chunk_size()
+        chunk_size = self.chunk_size
         chunk_size = max(flash_block, (chunk_size // flash_block) * flash_block)
 
         self.import_module('ubinascii as ub')
@@ -1574,7 +1555,7 @@ def _mt_pfind(label):
 
         if not self._mounts:
             # First mount: inject agent and detect chunk size
-            self._chunk_size = self.detect_chunk_size()
+            self._chunk_size = self.chunk_size
             self._mpy_comm.exec(_mount.MOUNT_AGENT, timeout=10)
 
         # Mount on device and add handler

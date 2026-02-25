@@ -813,15 +813,13 @@ class TestEncodingAndCompression(unittest.TestCase):
     def test_05_auto_chunk_size_detection(self):
         """Test that chunk size is auto-detected based on RAM"""
         # Reset cache to force re-detection
-        from mpytool.mpy import Mpy as MpyClass
-        MpyClass._CHUNK_AUTO_DETECTED = None
-        # Upload triggers detection
-        data = b"test"
-        path = self.TEST_DIR + "/chunk_test.txt"
-        self.mpy.put(data, path)
+        self.mpy._chunk_size = None
+        # Access chunk_size triggers detection
+        chunk = self.mpy.chunk_size
         # Chunk size should be detected and cached
-        self.assertIsNotNone(MpyClass._CHUNK_AUTO_DETECTED)
-        self.assertIn(MpyClass._CHUNK_AUTO_DETECTED, [512, 1024, 2048, 4096, 8192, 16384, 32768])
+        self.assertIsNotNone(self.mpy._chunk_size)
+        self.assertGreaterEqual(chunk, 256)
+        self.assertLessEqual(chunk, 32768)
 
 
 @requires_device_rw

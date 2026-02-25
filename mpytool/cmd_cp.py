@@ -831,7 +831,7 @@ class CopyCommand:
 
     def print_transfer_info(self):
         """Print transfer settings (chunk size and compression)"""
-        chunk = self.mpy.detect_chunk_size()
+        chunk = self.mpy.chunk_size
         chunk_str = f"{chunk // 1024}K" if chunk >= 1024 else str(chunk)
         if self._compress is None:
             compress = self.mpy.detect_deflate()
