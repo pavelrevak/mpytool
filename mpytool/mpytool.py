@@ -1523,6 +1523,8 @@ _MAIN_PARSER = _build_main_parser()
 
 def main():
     """Main"""
+    _utils.setup_utf8_encoding()
+
     args = _MAIN_PARSER.parse_args()
     # Convert to numeric level: 0=quiet, 1=progress, 2=verbose
     if args.quiet:

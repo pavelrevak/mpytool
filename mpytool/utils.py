@@ -5,6 +5,18 @@ import sys as _sys
 from serial.tools.list_ports import comports as _comports
 
 
+def setup_utf8_encoding():
+    """Reconfigure stdout/stderr to UTF-8 on Windows.
+
+    Windows subprocess/pipe uses cp1252 by default which can't handle
+    Unicode characters (e.g. tree drawing chars). This ensures UTF-8
+    is always used.
+    """
+    if _sys.platform == 'win32' and hasattr(_sys.stdout, 'reconfigure'):
+        _sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        _sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+
 # Known USB Vendor IDs for MicroPython devices
 # Native USB-CDC (direct USB connection to microcontroller)
 VID_RASPBERRY_PI = 0x2E8A  # RP2040/RP2350 (Pico)
