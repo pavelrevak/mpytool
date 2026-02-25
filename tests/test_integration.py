@@ -2430,9 +2430,9 @@ class TestMountWrite(unittest.TestCase):
             f"f=open('/remote/cycle.txt','w')\n"
             f"f.write('{test_content}')\n"
             f"f.close()")
-        # Read back via mount
+        # Read back via mount (explicit close before delete)
         result = self.mpy.comm.exec_eval(
-            "repr(open('/remote/cycle.txt').read())")
+            "repr((lambda f:(f.read(),f.close())[0])(open('/remote/cycle.txt')))")
         self.assertEqual(result, test_content)
         # Modify
         self.mpy.comm.exec(
@@ -2440,7 +2440,7 @@ class TestMountWrite(unittest.TestCase):
             "f.write('Modified')\n"
             "f.close()")
         result = self.mpy.comm.exec_eval(
-            "repr(open('/remote/cycle.txt').read())")
+            "repr((lambda f:(f.read(),f.close())[0])(open('/remote/cycle.txt')))")
         self.assertEqual(result, 'Modified')
         # Delete
         self.mpy.comm.exec("__import__('os').remove('/remote/cycle.txt')")
