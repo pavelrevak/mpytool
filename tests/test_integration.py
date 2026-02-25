@@ -2795,5 +2795,20 @@ class TestRtc(unittest.TestCase):
         self.assertLess(diff, 5)  # Allow up to 5 seconds for timing
 
 
+def tearDownModule():
+    """Soft reset device after all tests"""
+    port = PORT_RW or PORT_RO
+    if not port:
+        return
+    try:
+        from mpytool import ConnSerial, Mpy
+        conn = ConnSerial(port=port, baudrate=115200)
+        mpy = Mpy(conn)
+        mpy.soft_reset()
+        conn.close()
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     unittest.main()

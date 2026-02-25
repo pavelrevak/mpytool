@@ -630,5 +630,20 @@ class TestCliRun(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
 
+def tearDownModule():
+    """Soft reset device after all tests"""
+    port = PORT_RW or PORT_RO
+    if not port:
+        return
+    try:
+        from mpytool import ConnSerial, Mpy
+        conn = ConnSerial(port=port, baudrate=115200)
+        mpy = Mpy(conn)
+        mpy.soft_reset()
+        conn.close()
+    except Exception:
+        pass
+
+
 if __name__ == '__main__':
     unittest.main()
