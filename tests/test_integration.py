@@ -2152,6 +2152,7 @@ class TestMountMpyCross(unittest.TestCase):
         cls.mpy_cross.init(platform_info)
 
         if not cls.mpy_cross.active:
+            cls.conn.close()
             raise unittest.SkipTest('mpy-cross not available or version mismatch')
 
         # Mount with -m flag
