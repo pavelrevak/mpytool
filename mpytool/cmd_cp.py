@@ -79,8 +79,8 @@ class CopyCommand:
         # Cache
         self._remote_file_cache = {}
 
-        # Debug mode
-        self._is_debug = getattr(self._log, 'loglevel', 1) >= 4
+        # Info mode disables progress overwrite (each update on new line)
+        self._is_info = self._log.is_info
 
     @property
     def _verbose(self):
@@ -196,7 +196,7 @@ class CopyCommand:
             line = self._format_progress_line(percent, total)
         else:
             line = self._format_compact_progress(f"{percent:3d}%", total)
-        if self._is_debug:
+        if self._is_info:
             self.verbose(line, color='cyan')
         else:
             self.verbose(line, color='cyan', end='', overwrite=True)
@@ -207,7 +207,7 @@ class CopyCommand:
             line = self._format_progress_line(100, total, encodings)
         else:
             line = self._format_compact_complete(total)
-        self.verbose(line, color='cyan', overwrite=not self._is_debug)
+        self.verbose(line, color='cyan', overwrite=not self._is_info)
 
     def _set_progress_info(self, src, dst, is_src_remote, is_dst_remote):
         """Set progress source and destination paths"""

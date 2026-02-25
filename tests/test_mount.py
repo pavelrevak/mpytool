@@ -8,7 +8,7 @@ import shutil
 import unittest
 from unittest.mock import Mock, patch
 
-from mpytool.logger import SimpleColorLogger
+import mpytool.logger as _logger
 from mpytool.mount import (
     MountHandler, VfsProtocol,
     ESCAPE, CMD_STAT, CMD_LISTDIR, CMD_OPEN,
@@ -485,7 +485,7 @@ class TestVfsProtocol(unittest.TestCase):
     """
 
     # Quiet logger for tests (suppress warnings)
-    _quiet_log = SimpleColorLogger(loglevel=SimpleColorLogger.ERROR)
+    _quiet_log = _logger.SimpleColorLogger(loglevel=_logger.ERROR)
 
     def setUp(self):
         self.mock_conn = Mock()
@@ -947,7 +947,7 @@ class TestStaleVfsRecovery(unittest.TestCase):
     """Tests for stale VFS recovery in stop_current_operation"""
 
     # Quiet logger for tests (suppress warnings)
-    _quiet_log = SimpleColorLogger(loglevel=SimpleColorLogger.ERROR)
+    _quiet_log = _logger.SimpleColorLogger(loglevel=_logger.ERROR)
 
     def test_stop_sends_escape_after_failures(self):
         """stop_current_operation sends 0x18 after attempt 4"""

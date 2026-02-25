@@ -4,13 +4,13 @@ import os as _os
 import sys as _sys
 
 
-class SimpleColorLogger():
-    # Log levels (compatible with Python logging)
-    DEBUG = 10
-    INFO = 20
-    WARNING = 30
-    ERROR = 40
+# Log levels (compatible with Python logging)
+DEBUG = 10
+INFO = 20
+WARNING = 30
+ERROR = 40
 
+class SimpleColorLogger():
     # ANSI color codes
     _RESET = '\033[0m'
     _BOLD_RED = '\033[1;31m'
@@ -49,6 +49,21 @@ class SimpleColorLogger():
         """Return current log level (DEBUG=10, INFO=20, WARNING=30, ERROR=40)"""
         return self._loglevel
 
+    @property
+    def is_debug(self):
+        """True if debug messages are enabled"""
+        return self._loglevel <= DEBUG
+
+    @property
+    def is_info(self):
+        """True if info messages are enabled"""
+        return self._loglevel <= INFO
+
+    @property
+    def is_warning(self):
+        """True if warning messages are enabled"""
+        return self._loglevel <= WARNING
+
     def colorize(self, text, color):
         """Return text wrapped in color codes if colors are enabled"""
         if not self._color:
@@ -73,7 +88,7 @@ class SimpleColorLogger():
     def error(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel <= self.ERROR:
+        if self._loglevel <= ERROR:
             if self._color:
                 self.log(f"{self._BOLD_RED}{msg}{self._RESET}")
             else:
@@ -82,7 +97,7 @@ class SimpleColorLogger():
     def warning(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel <= self.WARNING:
+        if self._loglevel <= WARNING:
             if self._color:
                 self.log(f"{self._BOLD_YELLOW}{msg}{self._RESET}")
             else:
@@ -91,7 +106,7 @@ class SimpleColorLogger():
     def info(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel <= self.INFO:
+        if self._loglevel <= INFO:
             if self._color:
                 self.log(f"{self._BOLD_MAGENTA}{msg}{self._RESET}")
             else:
@@ -100,7 +115,7 @@ class SimpleColorLogger():
     def debug(self, msg, *args):
         if args:
             msg = msg % args
-        if self._loglevel <= self.DEBUG:
+        if self._loglevel <= DEBUG:
             if self._color:
                 self.log(f"{self._BOLD_BLUE}{msg}{self._RESET}")
             else:

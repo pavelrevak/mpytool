@@ -14,10 +14,10 @@ Run all tests (dedicated test device):
 import os
 import unittest
 
-from mpytool.logger import SimpleColorLogger
+import mpytool.logger as _logger
 
 # Quiet logger for tests (ERROR level only)
-_QUIET_LOG = SimpleColorLogger(loglevel=SimpleColorLogger.ERROR)
+_QUIET_LOG = _logger.SimpleColorLogger(loglevel=_logger.ERROR)
 
 # Test ports for different test levels
 PORT_RO = os.environ.get("MPYTOOL_TEST_PORT")
@@ -680,11 +680,10 @@ class TestSkipUnchangedFiles(unittest.TestCase):
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
         from mpytool.cmd_cp import CopyCommand
-        from mpytool.logger import SimpleColorLogger
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
         cls.tool = MpyTool(cls.conn, force=False)
-        cls.log = SimpleColorLogger()
+        cls.log = _logger.SimpleColorLogger()
         # Create CopyCommand instances for testing
         cls.copy_cmd = CopyCommand(
             cls.mpy, cls.log,
@@ -2117,7 +2116,6 @@ class TestMountMpyCross(unittest.TestCase):
         import shutil
         from mpytool import ConnSerial, Mpy
         from mpytool.mpy_cross import MpyCross
-        from mpytool.logger import SimpleColorLogger
 
         # Create local temp directory with test files
         cls.LOCAL_DIR = tempfile.mkdtemp(prefix='mpytool_mount_mpy_test_')
@@ -2729,11 +2727,10 @@ class TestRtc(unittest.TestCase):
     def setUpClass(cls):
         from mpytool import ConnSerial, Mpy
         from mpytool.mpytool import MpyTool
-        from mpytool.logger import SimpleColorLogger
         cls.conn = ConnSerial(port=DEVICE_PORT, baudrate=115200)
         cls.mpy = Mpy(cls.conn)
-        cls.log = SimpleColorLogger(
-            loglevel=SimpleColorLogger.ERROR, verbose_level=0)
+        cls.log = _logger.SimpleColorLogger(
+            loglevel=_logger.ERROR, verbose_level=0)
         cls.tool = MpyTool(cls.conn, log=cls.log, verbose=None)
         cls.tool._mpy = cls.mpy
 

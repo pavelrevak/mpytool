@@ -14,7 +14,7 @@ import time as _time
 import mpytool as _mpytool
 import mpytool.terminal as _terminal
 import mpytool.utils as _utils
-from mpytool.logger import SimpleColorLogger
+import mpytool.logger as _logger
 from mpytool.mpy_cross import MpyCross
 
 try:
@@ -188,7 +188,7 @@ class MpyTool():
         self._port = port
         self._address = address
         self._baudrate = baudrate
-        self._log = log if log is not None else SimpleColorLogger()
+        self._log = log if log is not None else _logger.SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
         self._exclude_dirs = {'.*', '*.pyc', '__pycache__'}
         if exclude_dirs:
@@ -220,9 +220,13 @@ class MpyTool():
             if port:
                 self._conn = _mpytool.ConnSerial(
                     port=port, baudrate=self._baudrate, log=self._log)
+                self._log.verbose(
+                    f"Connected to {port} [{self._conn.port_type}]", level=2)
             elif self._address:
                 self._conn = _mpytool.ConnSocket(
                     address=self._address, log=self._log)
+                self._log.verbose(
+                    f"Connected to {self._address} [socket]", level=2)
         return self._conn
 
     @property
@@ -1531,8 +1535,8 @@ def main():
     else:
         args.verbose = 1
 
-    log = SimpleColorLogger(
-        SimpleColorLogger.WARNING - args.debug * 10,
+    log = _logger.SimpleColorLogger(
+        _logger.WARNING - args.debug * 10,
         verbose_level=args.verbose)
     if args.port and args.address:
         log.error("You can select only serial port or network address")
