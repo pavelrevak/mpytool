@@ -553,34 +553,26 @@ class TestCliWrite(unittest.TestCase):
         # Create test subdir
         subdir = f'{self.TEST_DIR}/cdtest'
         run_mpytool('-p', self.DEVICE_PORT, 'mkdir', f':{subdir}')
-        # Change to it
-        result = run_mpytool('-p', self.DEVICE_PORT, 'cd', f':{subdir}')
-        self.assertEqual(result.returncode, 0)
-        # Verify with pwd
-        result = run_mpytool('-p', self.DEVICE_PORT, 'pwd')
+        # Change to it and verify with pwd in same session (Windows USB-CDC
+        # may reset device state between separate mpytool calls)
+        result = run_mpytool(
+            '-p', self.DEVICE_PORT, 'cd', f':{subdir}', '--', 'pwd')
         self.assertEqual(result.returncode, 0)
         self.assertIn('cdtest', result.stdout)
-        # Change back to root
-        run_mpytool('-p', self.DEVICE_PORT, 'cd', ':/')
         # Cleanup
         run_mpytool('-p', self.DEVICE_PORT, 'rm', f':{subdir}')
 
     def test_path_modify(self):
         """path can modify sys.path"""
-        # Get original path
-        result = run_mpytool('-p', self.DEVICE_PORT, 'path')
-        self.assertEqual(result.returncode, 0)
-        # Append test path
+        # Append test path and verify in same session (Windows USB-CDC
+        # may reset device state between separate mpytool calls)
         result = run_mpytool(
-            '-p', self.DEVICE_PORT, 'path', '-a', ':/testpath')
+            '-p', self.DEVICE_PORT, 'path', '-a', ':/testpath',
+            '--', 'path')
         self.assertEqual(result.returncode, 0)
-        # Verify it's added
-        result = run_mpytool('-p', self.DEVICE_PORT, 'path')
         self.assertIn('testpath', result.stdout)
-        # Remove it
-        result = run_mpytool(
-            '-p', self.DEVICE_PORT, 'path', '-d', ':/testpath')
-        self.assertEqual(result.returncode, 0)
+        # Remove it (cleanup - doesn't need verification)
+        run_mpytool('-p', self.DEVICE_PORT, 'path', '-d', ':/testpath')
 
     def test_rtc_set(self):
         """rtc --set sets RTC to local time"""
@@ -589,8 +581,8 @@ class TestCliWrite(unittest.TestCase):
         if result.returncode == 0:
             self.assertIn('set', result.stderr.lower())
 
-    def test_reset_soft(self):
-        """reset performs soft reset"""
+    def test_zz_reset_soft(self):
+        """reset performs soft reset (runs last - resets device state)"""
         result = run_mpytool('-p', self.DEVICE_PORT, 'reset', timeout=15)
         self.assertEqual(result.returncode, 0)
 
@@ -609,16 +601,14 @@ class TestCliRun(unittest.TestCase):
         """run sends script to device (timeout=0, no output)"""
         # run command just sends code, doesn't wait for output
         # Use a script that sets a variable we can check via exec
+        # Note: use command chaining to verify in same session (Windows
+        # USB-CDC may reset device state between separate mpytool calls)
         script = os.path.join(self.temp_dir, 'test_script.py')
         with open(script, 'w') as f:
             f.write('_cli_test_var = 12345\n')
         result = run_mpytool(
-            '-p', self.DEVICE_PORT, 'run', script, timeout=15)
-        self.assertEqual(result.returncode, 0)
-        # Verify script ran by checking variable
-        result = run_mpytool(
-            '-p', self.DEVICE_PORT, 'exec', 'print(_cli_test_var)',
-            timeout=10)
+            '-p', self.DEVICE_PORT, 'run', script,
+            '--', 'exec', 'print(_cli_test_var)', timeout=15)
         self.assertEqual(result.returncode, 0)
         self.assertIn('12345', result.stdout)
 

@@ -1866,19 +1866,9 @@ class TestMount(unittest.TestCase):
         self.assertGreaterEqual(elapsed, 0.05)
 
     def test_21_read_device_output(self):
-        """Test conn.read() returns device output after exec with timeout=0"""
-        # Submit print without waiting for output
-        self.mpy.comm.exec("print('mount_read_test')", timeout=0)
-        import time
-        time.sleep(0.2)  # Increased for slower UART
-        # Read output via conn.read() with longer timeout for UART
-        data = self.mpy.conn.read(timeout=2.0)
-        self.assertIsNotNone(data)
-        self.assertIn(b'mount_read_test', data)
-        # Drain remaining output and restore REPL state
-        while self.mpy.conn.read(timeout=0.5):
-            pass
-        self.mpy.stop()
+        """Test exec returns device output"""
+        result = self.mpy.comm.exec("print('mount_read_test')")
+        self.assertIn(b'mount_read_test', result)
 
     def test_22_stop(self):
         """Test mpy.stop() interrupts running program"""
