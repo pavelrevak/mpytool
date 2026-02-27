@@ -23,18 +23,45 @@ jobs:
         device: [ESP32, ESP32S3]
     steps:
       - uses: actions/checkout@v4
+      - name: Load device config
+        run: source ~/bin/ci-load-env.sh
       - name: Setup venv
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -e .
-      - name: Load device config
-        run: |
-          # Load device paths from runner config
-          if [ -f ~/.config/mpytool/devices.env ]; then
-            cat ~/.config/mpytool/devices.env >> $GITHUB_ENV
-          fi
       - name: Integration tests (${{ matrix.device }})
         env:
           PATH: ${{ github.workspace }}/.venv/bin:$PATH
           MPYTOOL_TEST_PORT_RW: ${{ env[format('MPYTOOL_TEST_{0}', matrix.device)] }}
         run: python -m unittest tests.test_integration tests.test_cli -v
+
+  win-integration:
+    runs-on: [self-hosted, linux]
+    needs: unit-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [ESP32, ESP32S3]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load device config
+        run: source ~/bin/ci-load-env.sh
+      - name: Attach USB to Windows VM
+        run: |
+          dev=$(echo "${{ matrix.device }}" | tr '[:upper:]' '[:lower:]')
+          ~/bin/ci-usb.sh attach win10 "$dev"
+          sleep 3
+      - name: Sync code to Windows VM
+        run: |
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          ssh vlk@win10 "cd mpytool && git fetch origin && git checkout $BRANCH && git reset --hard origin/$BRANCH"
+      - name: Install and run tests
+        env:
+          MPYTOOL_WIN_PORT: ${{ env[format('MPYTOOL_WIN_PORT_{0}', matrix.device)] }}
+        run: |
+          ssh vlk@win10 "cd mpytool && C:\Users\vlk\.venv\Scripts\pip install -e . && set MPYTOOL_TEST_PORT_RW=$MPYTOOL_WIN_PORT&& C:\Users\vlk\.venv\Scripts\python -m unittest tests.test_integration tests.test_cli -v"
+      - name: Detach USB from Windows VM
+        if: always()
+        run: |
+          dev=$(echo "${{ matrix.device }}" | tr '[:upper:]' '[:lower:]')
+          ~/bin/ci-usb.sh detach win10 "$dev"
