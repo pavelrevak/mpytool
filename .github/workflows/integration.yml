@@ -37,7 +37,7 @@ jobs:
 
   win-integration:
     runs-on: [self-hosted, linux]
-    needs: unit-tests
+    needs: linux-integration
     strategy:
       fail-fast: false
       matrix:
