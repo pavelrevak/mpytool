@@ -45,10 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Load device port
-        run: |
-          $port = (Get-Content "$env:USERPROFILE\.config\mpytool\${{ matrix.device }}").Trim()
-          "MPYTOOL_TEST_PORT_RW=$port" | Out-File -Append $env:GITHUB_ENV
-        shell: pwsh
+        run: set /p PORT=<C:\Users\vlk\.config\mpytool\${{ matrix.device }} && echo MPYTOOL_TEST_PORT_RW=%PORT%>> %GITHUB_ENV%
+        shell: cmd
       - name: Install package
         run: C:\Users\vlk\.venv\Scripts\pip install -e .
         shell: cmd
