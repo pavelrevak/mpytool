@@ -1,5 +1,6 @@
 """Utility functions for mpytool"""
 
+import os as _os
 import sys as _sys
 
 from serial.tools.list_ports import comports as _comports
@@ -136,13 +137,18 @@ def get_port_info(port: str):
     """Get USB info for a serial port
 
     Args:
-        port: port path (e.g. /dev/ttyACM0, COM3)
+        port: port path (e.g. /dev/ttyACM0, COM3, /dev/serial/by-id/...)
 
     Returns:
         ListPortInfo object with vid, pid, manufacturer, product, etc.
         or None if port not found
     """
+    # Resolve symlinks (e.g. /dev/serial/by-id/... -> /dev/ttyUSB0)
+    try:
+        resolved = _os.path.realpath(port)
+    except OSError:
+        resolved = port
     for p in _comports():
-        if p.device == port:
+        if p.device == port or p.device == resolved:
             return p
     return None
