@@ -45,11 +45,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Load device port
-        run: set /p PORT=<C:\Users\vlk\.config\mpytool\${{ matrix.device }} && echo MPYTOOL_TEST_PORT_RW=%PORT%>> %GITHUB_ENV%
+        run: set /p PORT=<%USERPROFILE%\.config\mpytool\${{ matrix.device }} && echo MPYTOOL_TEST_PORT_RW=%PORT%>> %GITHUB_ENV%
         shell: cmd
       - name: Install package
-        run: C:\Users\vlk\.venv\Scripts\pip install -e .
+        run: "%USERPROFILE%\\.venv\\Scripts\\pip install -e ."
         shell: cmd
       - name: Integration tests (${{ matrix.device }})
-        run: C:\Users\vlk\.venv\Scripts\python -m unittest tests.test_integration tests.test_cli -v
+        run: |
+          set PATH=%USERPROFILE%\.venv\Scripts;%PATH%
+          python -m unittest tests.test_integration tests.test_cli -v
         shell: cmd
