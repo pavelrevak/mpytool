@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: [ESP32]
+        device: [ESP32, ESP32S3]
     steps:
       - uses: actions/checkout@v4
       - name: Setup venv
@@ -37,11 +37,4 @@ jobs:
         env:
           PATH: ${{ github.workspace }}/.venv/bin:$PATH
           MPYTOOL_TEST_PORT_RW: ${{ env[format('MPYTOOL_TEST_{0}', matrix.device)] }}
-        run: |
-          # Run subset of tests to verify connection works
-          python -m unittest \
-            tests.test_integration.TestDeviceConnection \
-            tests.test_integration.TestDeviceInfo \
-            tests.test_integration.TestExec \
-            tests.test_cli.TestCliHelp \
-            -v
+        run: python -m unittest tests.test_integration tests.test_cli -v
