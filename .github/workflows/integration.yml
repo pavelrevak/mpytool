@@ -1,0 +1,47 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -e .
+      - run: python -m unittest discover tests/ -v
+
+  linux-integration:
+    runs-on: [self-hosted, linux]
+    needs: unit-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [ESP32]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup venv
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -e .
+      - name: Load device config
+        run: |
+          # Load device paths from runner config
+          if [ -f ~/.config/mpytool/devices.env ]; then
+            cat ~/.config/mpytool/devices.env >> $GITHUB_ENV
+          fi
+      - name: Integration tests (${{ matrix.device }})
+        env:
+          PATH: ${{ github.workspace }}/.venv/bin:$PATH
+          MPYTOOL_TEST_PORT_RW: ${{ env[format('MPYTOOL_TEST_{0}', matrix.device)] }}
+        run: |
+          # Run subset of tests to verify connection works
+          python -m unittest \
+            tests.test_integration.TestDeviceConnection \
+            tests.test_integration.TestDeviceInfo \
+            tests.test_integration.TestExec \
+            tests.test_cli.TestCliHelp \
+            -v
