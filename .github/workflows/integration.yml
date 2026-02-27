@@ -24,11 +24,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install package
-        run: ~/actions-runner/.venv/bin/pip install -e .
+        run: $HOME/actions-runner/.venv/bin/pip install -e .
       - name: Integration tests (${{ matrix.device }})
-        env:
-          PATH: $HOME/actions-runner/.venv/bin:$PATH
         run: |
+          export PATH="$HOME/actions-runner/.venv/bin:$PATH"
           export MPYTOOL_TEST_PORT_RW="$(cat ~/actions-runner/.config/mpytool/${{ matrix.device }})"
           python -m unittest tests.test_integration tests.test_cli -v
 
@@ -41,14 +40,12 @@ jobs:
         device: [ESP32]
     steps:
       - uses: actions/checkout@v4
-      - name: Load device port
-        run: set /p PORT=<C:\actions-runner\.config\mpytool\${{ matrix.device }} && echo MPYTOOL_TEST_PORT_RW=%PORT%>> %GITHUB_ENV%
-        shell: cmd
       - name: Install package
         run: C:\actions-runner\.venv\Scripts\pip install -e .
         shell: cmd
       - name: Integration tests (${{ matrix.device }})
         run: |
           set PATH=C:\actions-runner\.venv\Scripts;%PATH%
+          set /p MPYTOOL_TEST_PORT_RW=<C:\actions-runner\.config\mpytool\${{ matrix.device }}
           python -m unittest tests.test_integration tests.test_cli -v
         shell: cmd
