@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: [ESP32S3]
+        device: [ESP32]
     steps:
       - uses: actions/checkout@v4
       - name: Install package
@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: [ESP32]
+        device: [ESP32S3]
     steps:
       - uses: actions/checkout@v4
       - name: Install package
