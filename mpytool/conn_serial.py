@@ -35,6 +35,14 @@ class ConnSerial(_conn.Conn):
 
     def close(self):
         if self._serial:
+            # Prevent ESP32 reset when driver clears DTR/RTS on close
+            # Only for USB-UART bridges (CP2102, CH340, etc.), not USB-CDC
+            if self._is_usb_uart():
+                try:
+                    self._serial.rts = False
+                    self._serial.dtr = False
+                except OSError:
+                    pass
             self._serial.close()
             self._serial = None
 
