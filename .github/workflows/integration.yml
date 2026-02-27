@@ -23,8 +23,6 @@ jobs:
         device: [ESP32S3]
     steps:
       - uses: actions/checkout@v4
-      - name: Load device config
-        run: source ~/bin/ci-load-env.sh
       - name: Setup venv
         run: |
           python3 -m venv .venv
@@ -32,8 +30,10 @@ jobs:
       - name: Integration tests (${{ matrix.device }})
         env:
           PATH: ${{ github.workspace }}/.venv/bin:$PATH
-          MPYTOOL_TEST_PORT_RW: ${{ env[format('MPYTOOL_TEST_{0}', matrix.device)] }}
-        run: python -m unittest tests.test_integration tests.test_cli -v
+          MPYTOOL_TEST_PORT_RW: ${{ matrix.device }}
+        run: |
+          export MPYTOOL_TEST_PORT_RW="$(cat ~/.config/mpytool/${{ matrix.device }})"
+          python -m unittest tests.test_integration tests.test_cli -v
 
   win-integration:
     runs-on: [self-hosted, windows]
@@ -44,25 +44,14 @@ jobs:
         device: [ESP32]
     steps:
       - uses: actions/checkout@v4
-      - name: Load device config
+      - name: Load device port
         run: |
-          $conf = Get-Content "$env:USERPROFILE\.config\mpytool\devices.conf" -Raw
-          $device = "${{ matrix.device }}".ToLower()
-          $inSection = $false
-          foreach ($line in $conf -split "`n") {
-            $line = $line.Trim()
-            if ($line -match "^\[$device\]$") { $inSection = $true; continue }
-            if ($line -match "^\[") { $inSection = $false; continue }
-            if ($inSection -and $line -match "^win_port\s*=\s*(.+)$") {
-              "MPYTOOL_TEST_PORT_RW=$($Matches[1].Trim())" | Out-File -Append $env:GITHUB_ENV
-            }
-          }
+          $port = (Get-Content "$env:USERPROFILE\.config\mpytool\${{ matrix.device }}").Trim()
+          "MPYTOOL_TEST_PORT_RW=$port" | Out-File -Append $env:GITHUB_ENV
         shell: pwsh
       - name: Install package
-        run: |
-          C:\Users\vlk\.venv\Scripts\pip install -e .
+        run: C:\Users\vlk\.venv\Scripts\pip install -e .
         shell: cmd
       - name: Integration tests (${{ matrix.device }})
-        run: |
-          C:\Users\vlk\.venv\Scripts\python -m unittest tests.test_integration tests.test_cli -v
+        run: C:\Users\vlk\.venv\Scripts\python -m unittest tests.test_integration tests.test_cli -v
         shell: cmd
