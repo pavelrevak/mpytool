@@ -3,6 +3,7 @@ build
 dist
 .*
 !.gitignore
+!.github
 !.mpyproject
 *.egg-info
 *.md
