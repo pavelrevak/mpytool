@@ -921,24 +921,39 @@ class MpyTool():
 
     @command('exec', 'Execute Python code on device.')
     @argument('code', help='Python code to execute')
+    @option('-t', '--timeout', type=float, default=None,
+        help='timeout in seconds (0 = fire-and-forget)')
     def _dispatch_exec(self, commands, is_last_group):
-        args = _make_parser(self._dispatch_exec).parse_args([commands.pop(0)])
+        args = _make_parser(self._dispatch_exec).parse_args(commands)
+        commands.clear()
         self.verbose(f"EXEC: {args.code}", 1)
-        result = self.mpy.comm.exec(args.code)
-        if result:
-            print(result.decode('utf-8', 'backslashreplace'), end='')
+        timeout = args.timeout
+        if timeout == 0:
+            self.mpy.comm.try_raw_paste(args.code, timeout=0)
+            return
+        out = getattr(_sys.stdout, 'buffer', _sys.stdout)
+        self.mpy.comm.try_raw_paste(
+            args.code, timeout=timeout, stream=out)
 
     @command('run', 'Run local Python file on device.')
     @argument('file', metavar='local_file', help='local .py file')
+    @option('-t', '--timeout', type=float, default=None,
+        help='timeout in seconds (0 = fire-and-forget)')
     def _dispatch_run(self, commands, is_last_group):
-        arg_list = [commands.pop(0)] if commands else []
-        args = _make_parser(self._dispatch_run).parse_args(arg_list)
+        args = _make_parser(self._dispatch_run).parse_args(commands)
+        commands.clear()
         if not _os.path.isfile(args.file):
             raise ParamsError(f"file not found: {args.file}")
         with open(args.file, 'rb') as f:
             code = f.read()
         self.verbose(f"RUN: {args.file} ({len(code)} bytes)", 1)
-        self.mpy.comm.try_raw_paste(code, timeout=0)
+        timeout = args.timeout
+        if timeout == 0:
+            self.mpy.comm.try_raw_paste(code, timeout=0)
+            return
+        out = getattr(_sys.stdout, 'buffer', _sys.stdout)
+        self.mpy.comm.try_raw_paste(
+            code, timeout=timeout, stream=out)
 
     def _get_editor(self, editor_arg=None):
         """Get editor from --editor, $VISUAL, or $EDITOR"""

@@ -176,16 +176,18 @@ class MpyComm():
         self._repl_mode = None
         self._raw_paste_supported = None
 
-    def exec(self, command, timeout=None):
+    def exec(self, command, timeout=None, stream=False):
         """Execute command
 
         Arguments:
             command: command to execute
             timeout: maximum waiting time for result (None = wait forever),
                 0 = submit only (send code, don't wait for output)
+            stream: False = return bytes, True = yield chunks,
+                file-like object = write chunks to it and return b''
 
         Returns:
-            command STDOUT result
+            bytes result, generator, or b'' (when stream is file-like)
 
         Raises:
             CmdError when command return error
@@ -199,6 +201,10 @@ class MpyComm():
         if timeout == 0:
             self._repl_mode = False
             return b''
+        if stream is True:
+            return self._exec_stream_result(command, timeout)
+        if stream:
+            return self._exec_stream_to(command, timeout, stream)
         result = self._conn.read_until(CTRL_D, timeout)
         if result:
             self._log.info('RES: %s', bytes(result))
@@ -280,6 +286,66 @@ class MpyComm():
             if byte == CTRL_D:
                 break
 
+    def _read_stdout_chunks(self, timeout):
+        """Read stdout chunks until CTRL_D marker.
+
+        Yields (chunk, is_last) tuples. Timeout is total wall time.
+        """
+        start_time = _time.time()
+        while True:
+            if timeout is not None:
+                remaining = timeout - (_time.time() - start_time)
+                if remaining <= 0:
+                    raise _conn.Timeout("Execution timeout")
+            self._conn._read_to_buffer(wait_timeout=0.001)
+            idx = self._conn._buffer.find(CTRL_D)
+            if idx != -1:
+                chunk = bytes(self._conn._buffer[:idx])
+                del self._conn._buffer[:idx + len(CTRL_D)]
+                if chunk:
+                    yield chunk
+                return
+            if self._conn._buffer:
+                yield bytes(self._conn._buffer)
+                self._conn._buffer.clear()
+
+    def _check_stderr(self, command, result, timeout, start_time):
+        """Read stderr and raise CmdError if non-empty."""
+        if result:
+            self._log.info('RES: %s', bytes(result))
+        err_timeout = 5 if timeout is None else max(
+            1, timeout - (_time.time() - start_time))
+        err = self._conn.read_until(CTRL_D + b'>', err_timeout)
+        if err:
+            raise CmdError(command, bytes(result), err)
+
+    def _exec_stream_result(self, command, timeout):
+        """Read execution result as streaming generator."""
+        start_time = _time.time()
+        result = bytearray()
+        for chunk in self._read_stdout_chunks(timeout):
+            result.extend(chunk)
+            yield chunk
+        self._check_stderr(command, result, timeout, start_time)
+
+    def _exec_stream_to(self, command, timeout, out):
+        """Read execution result, writing chunks to file-like object.
+
+        Supports both binary and text streams (io.TextIOBase).
+        """
+        import io as _io
+        start_time = _time.time()
+        result = bytearray()
+        text_mode = isinstance(out, _io.TextIOBase)
+        for chunk in self._read_stdout_chunks(timeout):
+            result.extend(chunk)
+            out.write(
+                chunk.decode('utf-8', 'backslashreplace')
+                if text_mode else chunk)
+            out.flush()
+        self._check_stderr(command, result, timeout, start_time)
+        return b''
+
     def _read_execution_result(self, command, timeout):
         """Read and parse execution result."""
         result = self._conn.read_until(CTRL_D, timeout)
@@ -290,15 +356,17 @@ class MpyComm():
             raise CmdError(command.decode('utf-8', errors='replace'), result, err)
         return result
 
-    def exec_raw_paste(self, command, timeout=5):
+    def exec_raw_paste(self, command, timeout=5, stream=False):
         """Execute code via raw-paste mode (flow-controlled, less RAM).
 
         Arguments:
             command: code to execute (str or bytes)
             timeout: max wait time (0 = submit only, don't wait for output)
+            stream: False = return bytes, True = yield chunks,
+                file-like object = write chunks to it and return b''
 
         Returns:
-            command STDOUT result
+            bytes result, generator, or b'' (when stream is file-like)
 
         Raises:
             CmdError: command execution error
@@ -338,26 +406,32 @@ class MpyComm():
             self._repl_mode = False
             return b''
 
+        if stream is True:
+            return self._exec_stream_result(command, timeout)
+        if stream:
+            return self._exec_stream_to(command, timeout, stream)
         return self._read_execution_result(command, timeout)
 
-    def try_raw_paste(self, command, timeout=5):
+    def try_raw_paste(self, command, timeout=5, stream=False):
         """Try raw-paste mode, fall back to regular exec if not supported.
 
         Arguments:
             command: command to execute
             timeout: maximum waiting time for result
+            stream: False = return bytes, True = yield chunks,
+                file-like object = write chunks to it and return b''
 
         Returns:
-            command STDOUT result
+            bytes result, generator, or b'' (when stream is file-like)
         """
         # If we know raw-paste is not supported, skip it
         if self._raw_paste_supported is False:
-            return self.exec(command, timeout)
+            return self.exec(command, timeout, stream=stream)
 
         try:
-            return self.exec_raw_paste(command, timeout)
+            return self.exec_raw_paste(command, timeout, stream=stream)
         except MpyError as e:
             if "not supported" in str(e):
                 self._log.info("Raw-paste not supported, using regular exec")
-                return self.exec(command, timeout)
+                return self.exec(command, timeout, stream=stream)
             raise

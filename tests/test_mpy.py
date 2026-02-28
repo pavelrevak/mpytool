@@ -562,6 +562,149 @@ class TestExecSubmitOnly(unittest.TestCase):
         self.assertFalse(self.comm._repl_mode)
 
 
+class TestExecStream(unittest.TestCase):
+    """Tests for exec() stream parameter (False, True, file-like object)"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn.read_until.return_value = b''
+        self.mock_conn.flush.return_value = None
+        self.comm = mpy_comm.MpyComm(self.mock_conn)
+        self.comm._repl_mode = True
+
+    def _setup_exec_response(self, stdout_data, stderr_data=b''):
+        """Configure mock_conn.read_until to return stdout then stderr."""
+        self.mock_conn.read_until.side_effect = [
+            b'',           # read_until(b'OK')
+            stdout_data,   # read_until(CTRL_D) - stdout
+            stderr_data,   # read_until(CTRL_D + b'>') - stderr
+        ]
+
+    def _setup_stream_buffer(self, data):
+        """Configure mock_conn._buffer for streaming reads.
+
+        Simulates data arriving in _buffer, terminated by CTRL_D + CTRL_D>.
+        """
+        buf = bytearray(data + mpy_comm.CTRL_D)
+        self.mock_conn._buffer = buf
+        self.mock_conn._read_to_buffer.return_value = False
+        # After stdout CTRL_D is consumed, read_until for stderr
+        self.mock_conn.read_until.side_effect = [
+            b'',   # read_until(b'OK')
+            b'',   # read_until(CTRL_D + b'>') - no error
+        ]
+
+    # --- stream=False (default) ---
+
+    def test_default_returns_bytes(self):
+        """exec(cmd) returns bytes result"""
+        self._setup_exec_response(b'hello\r\n')
+        result = self.comm.exec("print('hello')")
+        self.assertEqual(result, b'hello\r\n')
+
+    def test_default_returns_empty_bytes(self):
+        """exec(cmd) with no output returns empty bytes"""
+        self._setup_exec_response(b'')
+        result = self.comm.exec("x=1")
+        self.assertEqual(result, b'')
+
+    # --- stream=True (generator) ---
+
+    def test_yield_returns_generator(self):
+        """exec(cmd, stream=True) returns a generator"""
+        import types
+        self._setup_stream_buffer(b'data')
+        gen = self.comm.exec("print('data')", stream=True)
+        self.assertIsInstance(gen, types.GeneratorType)
+        # Consume to avoid ResourceWarning
+        list(gen)
+
+    def test_yield_produces_data(self):
+        """exec(cmd, stream=True) yields all data"""
+        self._setup_stream_buffer(b'hello world')
+        chunks = list(self.comm.exec("print('hello world')", stream=True))
+        self.assertEqual(b''.join(chunks), b'hello world')
+
+    def test_yield_empty_output(self):
+        """exec(cmd, stream=True) with no output yields nothing"""
+        self._setup_stream_buffer(b'')
+        chunks = list(self.comm.exec("x=1", stream=True))
+        self.assertEqual(chunks, [])
+
+    def test_yield_raises_cmd_error(self):
+        """exec(cmd, stream=True) raises CmdError on stderr"""
+        buf = bytearray(b'partial' + mpy_comm.CTRL_D)
+        self.mock_conn._buffer = buf
+        self.mock_conn._read_to_buffer.return_value = False
+        self.mock_conn.read_until.side_effect = [
+            b'',                    # read_until(b'OK')
+            b'NameError: xxx',      # read_until(CTRL_D + b'>') - error
+        ]
+        with self.assertRaises(mpy_comm.CmdError):
+            list(self.comm.exec("xxx", stream=True))
+
+    # --- stream=binary file object ---
+
+    def test_binary_stream_writes_bytes(self):
+        """exec(cmd, stream=BytesIO) writes bytes to stream"""
+        import io
+        self._setup_stream_buffer(b'binary output')
+        out = io.BytesIO()
+        result = self.comm.exec("print('binary output')", stream=out)
+        self.assertEqual(result, b'')
+        self.assertEqual(out.getvalue(), b'binary output')
+
+    def test_binary_stream_empty_output(self):
+        """exec(cmd, stream=BytesIO) with no output writes nothing"""
+        import io
+        self._setup_stream_buffer(b'')
+        out = io.BytesIO()
+        self.comm.exec("x=1", stream=out)
+        self.assertEqual(out.getvalue(), b'')
+
+    # --- stream=text file object ---
+
+    def test_text_stream_writes_str(self):
+        """exec(cmd, stream=StringIO) writes decoded str to stream"""
+        import io
+        self._setup_stream_buffer(b'text output')
+        out = io.StringIO()
+        result = self.comm.exec("print('text output')", stream=out)
+        self.assertEqual(result, b'')
+        self.assertEqual(out.getvalue(), 'text output')
+
+    def test_text_stream_decodes_utf8(self):
+        """exec(cmd, stream=StringIO) decodes UTF-8 correctly"""
+        import io
+        self._setup_stream_buffer('príliš žluťoučký'.encode('utf-8'))
+        out = io.StringIO()
+        self.comm.exec("print('...')", stream=out)
+        self.assertEqual(out.getvalue(), 'príliš žluťoučký')
+
+    def test_text_stream_handles_invalid_utf8(self):
+        """exec(cmd, stream=StringIO) uses backslashreplace for invalid bytes"""
+        import io
+        self._setup_stream_buffer(b'ok\xff\xfebad')
+        out = io.StringIO()
+        self.comm.exec("cmd", stream=out)
+        self.assertIn('ok', out.getvalue())
+        self.assertIn('bad', out.getvalue())
+
+    def test_text_stream_raises_cmd_error(self):
+        """exec(cmd, stream=StringIO) raises CmdError on stderr"""
+        import io
+        buf = bytearray(b'out' + mpy_comm.CTRL_D)
+        self.mock_conn._buffer = buf
+        self.mock_conn._read_to_buffer.return_value = False
+        self.mock_conn.read_until.side_effect = [
+            b'',
+            b'SyntaxError',
+        ]
+        out = io.StringIO()
+        with self.assertRaises(mpy_comm.CmdError):
+            self.comm.exec("bad", stream=out)
+
+
 class TestCwdAndPathTracking(unittest.TestCase):
     """Tests for CWD and sys.path tracking for soft reset restore"""
 

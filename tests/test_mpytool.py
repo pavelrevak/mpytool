@@ -712,10 +712,12 @@ class TestRunCommand(unittest.TestCase):
         self.assertIn('not found', str(ctx.exception).lower())
 
     def test_run_sends_file_content(self):
-        """'run script.py' -> reads file and sends via try_raw_paste"""
+        """'run script.py' -> reads file and sends via try_raw_paste (streaming)"""
         self.tool.process_commands(['run', self.test_file])
-        self.tool._mpy.comm.try_raw_paste.assert_called_once_with(
-            b"print('hello')\n", timeout=0)
+        args, kwargs = self.tool._mpy.comm.try_raw_paste.call_args
+        self.assertEqual(args[0], b"print('hello')\n")
+        self.assertIsNone(kwargs['timeout'])
+        self.assertNotIn(kwargs['stream'], (False, True))  # file-like object
 
     def test_run_reads_binary_mode(self):
         """run reads file as bytes (rb), preserving encoding"""
@@ -723,13 +725,19 @@ class TestRunCommand(unittest.TestCase):
         with open(utf8_file, 'wb') as f:
             f.write("print('súbor')\n".encode('utf-8'))
         self.tool.process_commands(['run', utf8_file])
-        self.tool._mpy.comm.try_raw_paste.assert_called_once_with(
-            "print('súbor')\n".encode('utf-8'), timeout=0)
+        args, kwargs = self.tool._mpy.comm.try_raw_paste.call_args
+        self.assertEqual(args[0], "print('súbor')\n".encode('utf-8'))
 
     def test_run_with_command_separator(self):
         """'run script.py -- ls' -> run then ls"""
         self.tool.process_commands(['run', self.test_file])
         self.tool._mpy.comm.try_raw_paste.assert_called_once()
+
+    def test_run_fire_and_forget(self):
+        """'run script.py -t 0' -> fire-and-forget (timeout=0)"""
+        self.tool.process_commands(['run', self.test_file, '-t', '0'])
+        self.tool._mpy.comm.try_raw_paste.assert_called_once_with(
+            b"print('hello')\n", timeout=0)
 
 
 class TestPathCommand(unittest.TestCase):
