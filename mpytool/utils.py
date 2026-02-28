@@ -112,13 +112,63 @@ def _port_sort_key(port_info):
     return (2, port_info.device)      # Other USB devices - third
 
 
-def detect_serial_ports() -> list[str]:
-    """Detect available serial ports for MicroPython devices
+# Known VID:PID combinations for MicroPython devices
+_VIDPID_NAMES = {
+    # Raspberry Pi
+    (VID_RASPBERRY_PI, 0x0003): "Raspberry Pi Pico",
+    (VID_RASPBERRY_PI, 0x0005): "Raspberry Pi Pico W",
+    (VID_RASPBERRY_PI, 0x000A): "Raspberry Pi Pico 2",
+    (VID_RASPBERRY_PI, 0x000B): "Raspberry Pi Pico 2 W",
+    (VID_RASPBERRY_PI, 0x000F): "Raspberry Pi RP2350",
+    # Espressif (built-in USB-JTAG-Serial)
+    (VID_ESPRESSIF, 0x0002): "Espressif ESP32-S2",
+    (VID_ESPRESSIF, 0x1001): "Espressif ESP32-C3/C6",
+    (VID_ESPRESSIF, 0x1002): "Espressif ESP32-S3",
+    # MicroPython official (Pyboard)
+    (VID_MICROPYTHON, 0x9800): "Pyboard",
+    (VID_MICROPYTHON, 0x9801): "Pyboard (CDC)",
+    (VID_MICROPYTHON, 0x9802): "Pyboard (CDC+MSC)",
+}
 
-    Returns:
-        list of port paths sorted by likelihood of being MicroPython device
-        (known MicroPython VIDs first, then USB-UART bridges, then others)
-    """
+# VID to manufacturer name fallback (when pyserial has no info)
+_VID_NAMES = {
+    VID_RASPBERRY_PI: "Raspberry Pi",
+    VID_ESPRESSIF: "Espressif",
+    VID_MICROPYTHON: "MicroPython",
+    VID_SILICON_LABS: "Silicon Labs CP210x",
+    VID_QINHENG: "QinHeng CH340",
+    VID_FTDI: "FTDI",
+    VID_PROLIFIC: "Prolific PL2303",
+}
+
+
+def _port_description(port_info):
+    """Get human-readable description for a serial port"""
+    # First try VID:PID lookup for known devices
+    if port_info.vid and port_info.pid:
+        name = _VIDPID_NAMES.get((port_info.vid, port_info.pid))
+        if name:
+            if port_info.serial_number:
+                return f"{name} [{port_info.serial_number}]"
+            return name
+    # Then try pyserial info
+    if port_info.product:
+        if port_info.serial_number:
+            return f"{port_info.product} [{port_info.serial_number}]"
+        return port_info.product
+    if port_info.manufacturer:
+        return port_info.manufacturer
+    # Fallback to VID name
+    if port_info.vid:
+        name = _VID_NAMES.get(port_info.vid)
+        if name:
+            return name
+        return f"USB {port_info.vid:04X}:{port_info.pid:04X}"
+    return ""
+
+
+def _filter_sort_ports():
+    """Filter and sort serial ports, return ListPortInfo objects"""
     ports = []
     for p in _comports():
         # Skip non-USB devices (Bluetooth, debug console, etc.)
@@ -130,7 +180,27 @@ def detect_serial_ports() -> list[str]:
         ports.append(p)
     # Sort by priority (known MicroPython VIDs first)
     ports.sort(key=_port_sort_key)
-    return [p.device for p in ports]
+    return ports
+
+
+def detect_serial_ports_info() -> list[tuple[str, str]]:
+    """Detect available serial ports with descriptions
+
+    Returns:
+        list of (device, description) tuples sorted by likelihood
+        of being MicroPython device
+    """
+    return [(p.device, _port_description(p)) for p in _filter_sort_ports()]
+
+
+def detect_serial_ports() -> list[str]:
+    """Detect available serial ports for MicroPython devices
+
+    Returns:
+        list of port paths sorted by likelihood of being MicroPython device
+        (known MicroPython VIDs first, then USB-UART bridges, then others)
+    """
+    return [p.device for p in _filter_sort_ports()]
 
 
 def get_port_info(port: str):

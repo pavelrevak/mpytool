@@ -23,15 +23,20 @@ _mpytool_options() {
 }
 
 _mpytool_detect_ports() {
-    # Use mpytool _ports for consistent detection across all platforms
-    mpytool _ports 2>/dev/null
+    # Use mpytool ports for consistent detection across all platforms
+    mpytool ports 2>/dev/null
 }
 
 _mpytool_ports() {
-    # Complete serial ports
-    local -a ports
-    ports=(${(f)"$(_mpytool_detect_ports)"})
-    [[ ${#ports[@]} -gt 0 ]] && compadd -a ports
+    # Complete serial ports with descriptions
+    local -a ports descs
+    local line
+    while IFS=$'\t' read -r port desc; do
+        [[ -z "$port" ]] && continue
+        ports+=("$port")
+        descs+=("$port -- $desc")
+    done <<< "$(_mpytool_detect_ports)"
+    [[ ${#ports[@]} -gt 0 ]] && compadd -l -d descs -a ports
 }
 
 _mpytool_get_port() {
@@ -43,7 +48,10 @@ _mpytool_get_port() {
 
     # Fallback: auto-detect only if single port available
     local -a ports
-    ports=(${(f)"$(_mpytool_detect_ports)"})
+    local line
+    while IFS=$'\t' read -r port desc; do
+        [[ -n "$port" ]] && ports+=("$port")
+    done <<< "$(_mpytool_detect_ports)"
     if [[ ${#ports[@]} -eq 1 ]]; then
         echo "${ports[1]}"
     fi
@@ -375,7 +383,7 @@ _mpytool() {
                         fi
                     fi
                     ;;
-                speedtest)
+                speedtest|ports)
                     # No arguments, -- immediately
                     compadd -- '--'
                     ;;

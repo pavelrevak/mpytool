@@ -470,45 +470,77 @@ class TestPathsCommand(unittest.TestCase):
 
 @patch('sys.stdout', new_callable=io.StringIO)
 class TestPortsCommand(unittest.TestCase):
-    """Tests for _ports helper command (shell completion)"""
+    """Tests for ports command"""
 
     def setUp(self):
-        # _ports doesn't need a connection - use None
+        # ports doesn't need a connection - use None
         self.tool = MpyTool(conn=None, verbose=None)
         self.tool._log = Mock()
 
-    @patch('mpytool.utils.detect_serial_ports')
+    @patch('mpytool.utils.detect_serial_ports_info')
     def test_ports_lists_detected(self, mock_detect, mock_stdout):
-        """_ports lists all detected serial ports"""
-        mock_detect.return_value = ['/dev/cu.usbmodem1101', '/dev/cu.usbmodem1103']
-        self.tool.process_commands(['_ports'])
+        """ports lists all detected serial ports with descriptions"""
+        mock_detect.return_value = [
+            ('/dev/cu.usbmodem1101', 'Raspberry Pi'),
+            ('/dev/cu.usbmodem1103', 'Espressif'),
+        ]
+        self.tool.process_commands(['ports'])
         output = mock_stdout.getvalue()
-        self.assertEqual(output, '/dev/cu.usbmodem1101\n/dev/cu.usbmodem1103\n')
+        self.assertIn('/dev/cu.usbmodem1101\tRaspberry Pi\n', output)
+        self.assertIn('/dev/cu.usbmodem1103\tEspressif\n', output)
 
-    @patch('mpytool.utils.detect_serial_ports')
+    @patch('mpytool.utils.detect_serial_ports_info')
     def test_ports_empty(self, mock_detect, mock_stdout):
-        """_ports with no ports available"""
+        """ports with no ports available"""
         mock_detect.return_value = []
-        self.tool.process_commands(['_ports'])
+        self.tool.process_commands(['ports'])
         self.assertEqual(mock_stdout.getvalue(), '')
 
-    @patch('mpytool.utils.detect_serial_ports')
+    @patch('mpytool.utils.detect_serial_ports_info')
     def test_ports_single(self, mock_detect, mock_stdout):
-        """_ports with single port"""
-        mock_detect.return_value = ['/dev/ttyACM0']
-        self.tool.process_commands(['_ports'])
-        self.assertEqual(mock_stdout.getvalue(), '/dev/ttyACM0\n')
+        """ports with single port"""
+        mock_detect.return_value = [('/dev/ttyACM0', 'MicroPython')]
+        self.tool.process_commands(['ports'])
+        self.assertEqual(mock_stdout.getvalue(), '/dev/ttyACM0\tMicroPython\n')
 
-    @patch('mpytool.utils.detect_serial_ports')
+    @patch('mpytool.utils.detect_serial_ports_info')
     def test_ports_no_connection_needed(self, mock_detect, mock_stdout):
-        """_ports works without device connection"""
-        mock_detect.return_value = ['/dev/cu.usbmodem1101']
-        # Create tool without any connection
+        """ports works without device connection"""
+        mock_detect.return_value = [('/dev/cu.usbmodem1101', 'Raspberry Pi')]
         tool = MpyTool(conn=None, verbose=None)
         tool._log = Mock()
-        # Should work without accessing mpy/conn
-        tool.process_commands(['_ports'])
-        self.assertEqual(mock_stdout.getvalue(), '/dev/cu.usbmodem1101\n')
+        tool.process_commands(['ports'])
+        self.assertEqual(
+            mock_stdout.getvalue(), '/dev/cu.usbmodem1101\tRaspberry Pi\n')
+
+    @patch('mpytool.ConnSerial')
+    @patch('mpytool.utils.detect_serial_ports_info')
+    def test_ports_info_flag(self, mock_detect, mock_conn_cls, mock_stdout):
+        """ports -i connects and shows device details"""
+        mock_detect.return_value = [('/dev/ttyACM0', 'Raspberry Pi')]
+        mock_conn = Mock()
+        mock_conn_cls.return_value = mock_conn
+        mock_comm = Mock()
+        mock_comm.try_raw_paste.return_value = b'rp2\t1.24.1\n'
+        with patch('mpytool.MpyComm', return_value=mock_comm):
+            self.tool.process_commands(['ports', '-i'])
+        output = mock_stdout.getvalue()
+        self.assertIn('/dev/ttyACM0\tRaspberry Pi\n', output)
+        self.assertIn('rp2, 1.24.1', output)
+        mock_conn.close.assert_called_once()
+        # Verify logger and port were passed
+        call_args = mock_conn_cls.call_args
+        self.assertEqual(call_args.kwargs['port'], '/dev/ttyACM0')
+
+    @patch('mpytool.ConnSerial', side_effect=Exception("busy"))
+    @patch('mpytool.utils.detect_serial_ports_info')
+    def test_ports_info_connection_error(
+            self, mock_detect, mock_conn_cls, mock_stdout):
+        """ports -i handles connection errors gracefully"""
+        mock_detect.return_value = [('/dev/ttyACM0', 'Raspberry Pi')]
+        self.tool.process_commands(['ports', '-i'])
+        output = mock_stdout.getvalue()
+        self.assertIn('(no response)', output)
 
 
 @patch('sys.stdout', new_callable=io.StringIO)
@@ -547,6 +579,8 @@ class TestCommandsCommand(unittest.TestCase):
         # Hidden commands start with _
         self.assertNotIn('_paths:', output)
         self.assertNotIn('_ports:', output)
+        # ports is a public command, should be listed
+        self.assertIn('ports:', output)
         self.assertNotIn('_commands:', output)
 
     def test_commands_no_connection_needed(self, mock_stdout):

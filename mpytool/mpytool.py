@@ -32,7 +32,7 @@ else:
 _CMD_ORDER = [
     'ls', 'tree', 'cat', 'cp', 'mv', 'mkdir', 'rm', 'pwd', 'cd', 'path',
     'stop', 'reset', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
-    'rtc', 'flash', 'mount', 'ln', 'speedtest', 'sleep',
+    'rtc', 'flash', 'mount', 'ln', 'speedtest', 'sleep', 'ports',
 ]
 
 
@@ -1333,10 +1333,39 @@ class MpyTool():
         for name, size in entries:
             print(name + '/' if size is None else name)
 
+    @command('ports', 'List available serial ports.')
+    @option('-i', '--info', action='store_true',
+        help='connect to each port and show device details')
     def _dispatch_ports(self, commands, is_last_group):
-        # For shell completion - list available serial ports (no device needed)
-        for port in _utils.detect_serial_ports():
-            print(port)
+        args, commands[:] = _make_parser(
+            self._dispatch_ports).parse_known_args(commands)
+        ports = _utils.detect_serial_ports_info()
+        if not ports:
+            return
+        if args.info:
+            for device, desc in ports:
+                print(f"{device}\t{desc}")
+                try:
+                    conn = _mpytool.ConnSerial(
+                        self._log, port=device, baudrate=self._baudrate)
+                    try:
+                        comm = _mpytool.MpyComm(conn, log=self._log)
+                        # USB-UART needs more retries (slow to wake up)
+                        retries = 2 if conn._is_usb_uart() else 1
+                        comm.enter_raw_repl(max_retries=retries)
+                        platform = comm.try_raw_paste(
+                            "import sys;print(sys.platform,sys.version,"
+                            "sep='\\t')", timeout=2).decode().strip()
+                        parts = platform.split('\t')
+                        print(f"  {parts[0]}, {parts[1]}" if len(parts) >= 2
+                            else f"  {platform}")
+                    finally:
+                        conn.close()
+                except Exception:
+                    print("  (no response)")
+        else:
+            for device, desc in ports:
+                print(f"{device}\t{desc}")
 
     def _dispatch_commands(self, commands, is_last_group):
         # For shell completion - list commands with descriptions
@@ -1399,7 +1428,7 @@ class MpyTool():
         'ls', 'tree', 'cat', 'mkdir', 'rm', 'pwd', 'cd', 'path',
         'reset', 'stop', 'monitor', 'repl', 'exec', 'run', 'edit', 'info',
         'rtc', 'flash', 'sleep', 'cp', 'mv', 'mount', 'ln', 'speedtest',
-        '_paths', '_ports', '_commands', '_options', '_args',
+        'ports', '_paths', '_commands', '_options', '_args',
     })
 
     def process_commands(self, commands, is_last_group=False):
@@ -1409,10 +1438,12 @@ class MpyTool():
                 raise ParamsError(f"unknown command: '{command}'")
             dispatch = getattr(self, f'_dispatch_{command.lstrip("_")}')
             dispatch(commands, is_last_group)
-        try:
-            self.mpy.comm.exit_raw_repl()
-        except _mpytool.ConnError:
-            pass  # connection already lost
+        # Only exit raw REPL if connection was established
+        if self._mpy is not None:
+            try:
+                self.mpy.comm.exit_raw_repl()
+            except _mpytool.ConnError:
+                pass  # connection already lost
 
 
 def _get_cmd_description(name):

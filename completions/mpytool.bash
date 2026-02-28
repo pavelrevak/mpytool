@@ -54,8 +54,8 @@ _mpytool_complete_argtype() {
 }
 
 _mpytool_detect_ports() {
-    # Use mpytool _ports for consistent detection across all platforms
-    mpytool _ports 2>/dev/null
+    # Use mpytool ports for consistent detection across all platforms
+    mpytool ports 2>/dev/null | cut -f1
 }
 
 _mpytool_get_port() {
@@ -375,7 +375,7 @@ _mpytool() {
                 fi
             fi
             ;;
-        speedtest)
+        speedtest|ports)
             # No arguments, -- immediately
             [[ -z "$cur" || "--" == "$cur"* ]] && COMPREPLY+=("--")
             ;;
