@@ -220,8 +220,10 @@ class MpyTool():
             if port:
                 self._conn = _mpytool.ConnSerial(
                     port=port, baudrate=self._baudrate, log=self._log)
-                self._log.verbose(
-                    f"Connected to {port} [{self._conn.port_type}]", level=2)
+                port_info = _utils.get_port_info(port)
+                desc = _utils._port_description(port_info) if port_info else "serial"
+                port_col = self._log.colorize(port, 'yellow')
+                self._log.verbose(f"Connected to {port_col} {desc}", level=2)
             elif self._address:
                 self._conn = _mpytool.ConnSocket(
                     address=self._address, log=self._log)
@@ -268,10 +270,11 @@ class MpyTool():
 
     def _verbose_path(self, cmd, path):
         """Print verbose message for path-based commands (LS, TREE, etc.)"""
+        # Always get CWD first to ensure connection happens before verbose output
+        cwd = self.mpy.getcwd()
         if path.startswith('/'):
             msg = f"{self.colorize(cmd + ':', 'green')} {self.colorize(path, 'cyan')}"
         else:
-            cwd = self.mpy.getcwd()
             cwd_colored = self.colorize(cwd, 'yellow')
             if path in ('', '.'):
                 msg = f"{self.colorize(cmd + ':', 'green')} {cwd_colored}"

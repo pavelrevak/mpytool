@@ -22,14 +22,11 @@ class ConnSerial(_conn.Conn):
         # Windows: pyserial has no fd, select() works only with sockets
         if not hasattr(self._serial, 'fd'):
             self._has_data = self._has_data_polling
-        # Debug info about port type
+        # Debug info about port
         port = serial_config.get('port', '')
         if self._port_info and self._port_info.vid:
-            vid = self._port_info.vid
-            pid = self._port_info.pid
-            self._log.info(
-                "Connected to %s [%04X:%04X %s]",
-                port, vid, pid, self.port_type)
+            desc = _utils._port_description(self._port_info)
+            self._log.info("Connected to %s [%s]", port, desc)
         else:
             self._log.info("Connected to %s [unknown serial port]", port)
 
