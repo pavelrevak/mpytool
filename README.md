@@ -240,7 +240,11 @@ RESET soft
 $ mpytool reset --machine    # MCU reset (machine.reset, auto-reconnect)
 RESET machine
 
-$ mpytool reset -- monitor   # reset and monitor output
+$ mpytool reset -- monitor   # reset and monitor until program ends
+RESET soft
+MONITOR (until program ends, -f to follow)
+
+$ mpytool reset -- monitor -f  # reset and monitor continuously
 RESET soft
 MONITOR (Ctrl+C to stop)
 
@@ -261,7 +265,8 @@ REPL (Ctrl+] to exit)  CWD: /  PATH: : :.frozen :/lib
 
 $ mpytool -p /dev/ttyUSB0 repl       # specify port
 $ mpytool -b 9600 repl               # specify baudrate
-$ mpytool -p /dev/ttyUSB0 -b 9600 monitor   # monitor at 9600 baud
+$ mpytool -p /dev/ttyUSB0 -b 9600 monitor   # monitor until program ends
+$ mpytool monitor -f                        # follow output continuously (Ctrl-C to stop)
 ```
 
 The `repl` command with `-v` flag displays current working directory (CWD) and `sys.path` before entering REPL, making it easy to see the device state after `mount`, `cd`, or `path` commands.
@@ -270,24 +275,30 @@ Both `repl` and `monitor` can be used as general-purpose serial tools - not just
 
 ### Execute Python code on device
 ```
-$ mpytool exec "print('Hello!')"
+$ mpytool exec "print('Hello!')"         # execute and stream output
 EXEC: print('Hello!')
 Hello!
 
 $ mpytool exec "import sys; print(sys.version)"
 EXEC: import sys; print(sys.version)
 3.4.0; MicroPython v1.24.0
+
+$ mpytool exec "long_task()" -t 30       # timeout after 30 seconds
+$ mpytool exec "start_server()" -t 0     # fire-and-forget (don't wait)
 ```
 
 ### Run local Python file on device
 ```
-$ mpytool run script.py                  # run script (fire-and-forget)
+$ mpytool run script.py                  # run and stream output
+RUN: script.py (128 bytes)
+Hello from script!
+
+$ mpytool run script.py -t 0             # fire-and-forget (don't wait)
 RUN: script.py (128 bytes)
 
-$ mpytool run script.py -- monitor       # run script and capture output
+$ mpytool run script.py -t 10            # timeout after 10 seconds
 RUN: script.py (128 bytes)
-MONITOR (Ctrl+C to stop)
-Hello from script!
+Done!
 ```
 
 ### Edit file on device

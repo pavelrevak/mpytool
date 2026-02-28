@@ -1045,20 +1045,24 @@ Low-level REPL communication. Usually accessed via `mpy.comm`.
 
 ### Methods
 
-#### exec(command, timeout=5)
+#### exec(command, timeout=None, stream=False)
 
 Execute Python command on device.
 
 ```python
-mpy.comm.exec(command, timeout=5)
+mpy.comm.exec(command, timeout=None, stream=False)
 ```
 
 **Parameters:**
 - `command` (str): Python code to execute
-- `timeout` (int): Maximum wait time in seconds. `0` = submit only (send code, don't wait for output)
+- `timeout` (float|None): Total wall time in seconds. `None` = wait forever, `0` = submit only (fire-and-forget)
+- `stream`: Output mode:
+  - `False` (default): Return all output as `bytes`
+  - `True`: Return a generator yielding `bytes` chunks
+  - file-like object: Write chunks to it (supports both binary and text streams via `io.TextIOBase` detection), return `b''`
 
 **Returns:**
-- `bytes`: Command stdout output (`b''` when timeout=0)
+- `bytes`, generator, or `b''` (when stream is file-like or timeout=0)
 
 **Example:**
 ```python
@@ -1066,6 +1070,15 @@ mpy.comm.exec(command, timeout=5)
 b'Hello\r\n'
 
 >>> mpy.comm.exec("import sys")
+b''
+
+# Streaming output (generator)
+>>> for chunk in mpy.comm.exec("print('Hello')", stream=True):
+...     print(chunk)
+
+# Stream to stdout
+>>> import sys
+>>> mpy.comm.exec("print('Hello')", stream=sys.stdout.buffer)
 b''
 
 # Submit code without waiting for output (fire-and-forget)
@@ -1132,7 +1145,7 @@ mpy.comm.enter_raw_repl()
 mpy.comm.exit_raw_repl()
 ```
 
-#### exec_raw_paste(command, timeout=5)
+#### exec_raw_paste(command, timeout=5, stream=False)
 
 Execute Python command using raw-paste mode with flow control.
 
@@ -1140,15 +1153,16 @@ Raw-paste mode compiles code as it receives it, using less RAM and providing
 better reliability for large code transfers. Requires MicroPython 1.17+.
 
 ```python
-mpy.comm.exec_raw_paste(command, timeout=5)
+mpy.comm.exec_raw_paste(command, timeout=5, stream=False)
 ```
 
 **Parameters:**
 - `command` (str or bytes): Python code to execute
-- `timeout` (int): Maximum wait time in seconds. `0` = submit only (send code, don't wait for output)
+- `timeout` (float|None): Total wall time in seconds. `0` = submit only (fire-and-forget)
+- `stream`: Output mode (same as `exec()`: `False`/`True`/file-like object)
 
 **Returns:**
-- `bytes`: Command stdout output (`b''` when timeout=0)
+- `bytes`, generator, or `b''` (depending on `stream` and `timeout`)
 
 **Example:**
 ```python
@@ -1165,20 +1179,21 @@ b'99\r\n'
 - `MpyError`: If raw-paste mode is not supported by device
 - `CmdError`: If command raises an exception on device
 
-#### try_raw_paste(command, timeout=5)
+#### try_raw_paste(command, timeout=5, stream=False)
 
 Try raw-paste mode, fall back to regular exec if not supported.
 
 ```python
-mpy.comm.try_raw_paste(command, timeout=5)
+mpy.comm.try_raw_paste(command, timeout=5, stream=False)
 ```
 
 **Parameters:**
 - `command` (str or bytes): Python code to execute
-- `timeout` (int): Maximum wait time in seconds. `0` = submit only (send code, don't wait for output)
+- `timeout` (float|None): Total wall time in seconds. `0` = submit only (fire-and-forget)
+- `stream`: Output mode (same as `exec()`: `False`/`True`/file-like object)
 
 **Returns:**
-- `bytes`: Command stdout output (`b''` when timeout=0)
+- `bytes`, generator, or `b''` (depending on `stream` and `timeout`)
 
 **Example:**
 ```python
@@ -1190,6 +1205,37 @@ b'2\r\n'
 This method automatically detects if raw-paste mode is supported and caches
 the result. On older MicroPython versions, it silently falls back to regular
 `exec()`.
+
+#### monitor(stream=False, follow=False)
+
+Monitor device output in normal REPL mode.
+
+By default, reads output until REPL prompt (`>>>`) is detected (program finished).
+With `follow=True`, reads indefinitely (Ctrl-C to stop).
+
+```python
+mpy.comm.monitor(stream=False, follow=False)
+```
+
+**Parameters:**
+- `stream`: Output mode (same as `exec()`: `False`/`True`/file-like object)
+- `follow` (bool): If `True`, don't stop at REPL prompt
+
+**Returns:**
+- `bytes`, generator, or `b''` (depending on `stream`)
+
+**Example:**
+```python
+# Capture output until program ends
+>>> output = mpy.comm.monitor()
+
+# Stream to stdout
+>>> import sys
+>>> mpy.comm.monitor(stream=sys.stdout.buffer)
+
+# Follow continuously
+>>> mpy.comm.monitor(stream=sys.stdout.buffer, follow=True)
+```
 
 ## Exception Classes
 

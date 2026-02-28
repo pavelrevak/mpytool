@@ -438,13 +438,14 @@ class MpyTool():
                 self.verbose(f"RM: {path}", 1)
                 self.mpy.delete(path)
 
-    def cmd_monitor(self):
-        self.verbose("MONITOR (Ctrl+C to stop)", 1)
+    def cmd_monitor(self, follow=False):
+        if follow:
+            self.verbose("MONITOR (Ctrl+C to stop)", 1)
+        else:
+            self.verbose("MONITOR (until program ends, -f to follow)", 1)
+        out = getattr(_sys.stdout, 'buffer', _sys.stdout)
         try:
-            while True:
-                line = self.conn.read_line()
-                line = line.decode('utf-8', 'backslashreplace')
-                print(line)
+            self.mpy.comm.monitor(stream=out, follow=follow)
         except KeyboardInterrupt:
             self.verbose('', level=0, overwrite=True)  # newline after ^C
         except (_mpytool.ConnError, OSError) as err:
@@ -907,11 +908,13 @@ class MpyTool():
         reconnect = has_more if mode in ('machine', 'rts') else True
         self.cmd_reset(mode=mode, reconnect=reconnect, timeout=args.timeout)
 
-    @command('monitor', 'Monitor device output. Press Ctrl-C to stop.')
+    @command('monitor', 'Monitor device output until program ends.')
+    @option('-f', '--follow', action='store_true',
+        help='follow output continuously (Ctrl-C to stop)')
     def _dispatch_monitor(self, commands, is_last_group):
-        _, commands[:] = _make_parser(
+        args, commands[:] = _make_parser(
             self._dispatch_monitor).parse_known_args(commands)
-        self.cmd_monitor()
+        self.cmd_monitor(follow=args.follow)
 
     @command('repl', 'Interactive REPL session. Press Ctrl-] to exit.')
     def _dispatch_repl(self, commands, is_last_group):

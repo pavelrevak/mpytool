@@ -1,5 +1,6 @@
 """MicroPython tool: MPY communication"""
 
+import io as _io
 import re as _re
 import time as _time
 
@@ -12,6 +13,10 @@ CTRL_B = b'\x02'  # Exit raw REPL
 CTRL_C = b'\x03'  # Interrupt
 CTRL_D = b'\x04'  # Execute / Soft reset / End raw-paste
 CTRL_E = b'\x05'  # Paste mode
+
+# REPL prompt
+REPL_PROMPT = b'>>> '
+REPL_PROMPT_LINE = b'\r\n' + REPL_PROMPT
 
 # Raw-paste mode
 RAW_PASTE_ENTER = CTRL_E + b'A' + CTRL_A  # Enter raw-paste mode sequence
@@ -121,7 +126,7 @@ class MpyComm():
             if attempt >= 4:
                 self._conn.write(b'\x18')
             try:
-                self._conn.read_until(b'\r\n>>> ', timeout=0.2)
+                self._conn.read_until(REPL_PROMPT_LINE, timeout=0.2)
                 self._repl_mode = False
                 return True
             except _conn.Timeout:
@@ -149,7 +154,7 @@ class MpyComm():
             return
         self._log.info('EXIT RAW REPL')
         self._conn.write(CTRL_B)
-        self._conn.read_until(b'\r\n>>> ')
+        self._conn.read_until(REPL_PROMPT_LINE)
         self._repl_mode = False
 
     def soft_reset(self):
@@ -175,6 +180,52 @@ class MpyComm():
         """Reset internal state (call after device reset)"""
         self._repl_mode = None
         self._raw_paste_supported = None
+
+    def monitor(self, stream=False, follow=False):
+        """Monitor device output in normal REPL mode.
+
+        Reads device output until REPL prompt (>>>) is detected,
+        or indefinitely if follow=True.
+
+        Arguments:
+            stream: False = return bytes, True = yield chunks,
+                file-like object = write chunks to it and return b''
+            follow: if True, don't stop at REPL prompt
+
+        Returns:
+            bytes result, generator, or b'' (when stream is file-like)
+        """
+        self.exit_raw_repl()
+        if stream is True:
+            return self._monitor_chunks(follow)
+        if stream:
+            return self._monitor_to(stream, follow)
+        return b''.join(self._monitor_chunks(follow))
+
+    def _monitor_chunks(self, follow):
+        """Yield output chunks until REPL prompt (or forever if follow)."""
+        prompt_len = len(REPL_PROMPT_LINE)
+        tail = b''
+        while True:
+            data = self._conn.read(timeout=0.1)
+            if data is None:
+                continue
+            yield data
+            if not follow:
+                # Keep enough bytes so prompt split across chunks is found
+                tail = tail[-(prompt_len - 1):] + data
+                if REPL_PROMPT_LINE in tail:
+                    return
+
+    def _monitor_to(self, out, follow):
+        """Write monitor output to file-like object."""
+        text_mode = isinstance(out, _io.TextIOBase)
+        for chunk in self._monitor_chunks(follow):
+            out.write(
+                chunk.decode('utf-8', 'backslashreplace')
+                if text_mode else chunk)
+            out.flush()
+        return b''
 
     def exec(self, command, timeout=None, stream=False):
         """Execute command
@@ -333,7 +384,6 @@ class MpyComm():
 
         Supports both binary and text streams (io.TextIOBase).
         """
-        import io as _io
         start_time = _time.time()
         result = bytearray()
         text_mode = isinstance(out, _io.TextIOBase)

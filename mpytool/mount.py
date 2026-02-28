@@ -179,7 +179,7 @@ CMD_MAX = CMD_READLINE
 _ESCAPE_BYTE = bytes([ESCAPE])
 
 _SOFT_REBOOT = b'soft reboot'
-_REPL_PROMPT = b'>>> '
+from mpytool.mpy_comm import REPL_PROMPT as _REPL_PROMPT
 _REBOOT_BUF_MAX = 256
 _REBOOT_BUF_KEEP = 64
 _LISTDIR_LIMIT = 1000  # max entries returned by CMD_LISTDIR

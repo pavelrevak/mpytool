@@ -705,6 +705,218 @@ class TestExecStream(unittest.TestCase):
             self.comm.exec("bad", stream=out)
 
 
+class TestExecRawPasteStream(unittest.TestCase):
+    """Tests for exec_raw_paste() stream parameter"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn.read_until.return_value = b''
+        self.mock_conn.flush.return_value = None
+        self.comm = mpy_comm.MpyComm(self.mock_conn)
+        self.comm._repl_mode = True
+
+    def _setup_raw_paste_handshake(self):
+        """Configure mock for raw-paste handshake + CTRL_D echo."""
+        self.mock_conn._has_data.return_value = False
+        self.mock_conn.read_bytes.side_effect = [
+            (ord('R'), 1),       # header + status
+            b'\x00\x01',         # window size = 256
+            mpy_comm.CTRL_D,     # CTRL_D echo after send
+        ]
+
+    def _setup_stream_after_handshake(self, data):
+        """Configure buffer for streaming reads after raw-paste handshake."""
+        self._setup_raw_paste_handshake()
+        buf = bytearray(data + mpy_comm.CTRL_D)
+        self.mock_conn._buffer = buf
+        self.mock_conn._read_to_buffer.return_value = False
+        # read_until for stderr (no error)
+        self.mock_conn.read_until.side_effect = [b'']
+
+    def test_default_returns_bytes(self):
+        """exec_raw_paste(cmd) returns bytes"""
+        self._setup_raw_paste_handshake()
+        self.mock_conn.read_until.side_effect = [
+            b'hello\r\n',   # stdout
+            b'',             # stderr
+        ]
+        result = self.comm.exec_raw_paste(b"print('hello')")
+        self.assertEqual(result, b'hello\r\n')
+
+    def test_yield_returns_generator(self):
+        """exec_raw_paste(cmd, stream=True) returns generator"""
+        import types
+        self._setup_stream_after_handshake(b'data')
+        gen = self.comm.exec_raw_paste(b"print('data')", stream=True)
+        self.assertIsInstance(gen, types.GeneratorType)
+        list(gen)
+
+    def test_yield_produces_data(self):
+        """exec_raw_paste(cmd, stream=True) yields all data"""
+        self._setup_stream_after_handshake(b'hello world')
+        chunks = list(self.comm.exec_raw_paste(
+            b"print('hello world')", stream=True))
+        self.assertEqual(b''.join(chunks), b'hello world')
+
+    def test_binary_stream_writes_bytes(self):
+        """exec_raw_paste(cmd, stream=BytesIO) writes to stream"""
+        import io
+        self._setup_stream_after_handshake(b'output')
+        out = io.BytesIO()
+        result = self.comm.exec_raw_paste(b"cmd", stream=out)
+        self.assertEqual(result, b'')
+        self.assertEqual(out.getvalue(), b'output')
+
+    def test_text_stream_writes_str(self):
+        """exec_raw_paste(cmd, stream=StringIO) writes decoded str"""
+        import io
+        self._setup_stream_after_handshake(b'text')
+        out = io.StringIO()
+        result = self.comm.exec_raw_paste(b"cmd", stream=out)
+        self.assertEqual(result, b'')
+        self.assertEqual(out.getvalue(), 'text')
+
+
+class TestTryRawPasteStream(unittest.TestCase):
+    """Tests for try_raw_paste() stream parameter delegation"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn.read_until.return_value = b''
+        self.mock_conn.flush.return_value = None
+        self.comm = mpy_comm.MpyComm(self.mock_conn)
+        self.comm._repl_mode = True
+
+    def test_stream_true_passed_to_raw_paste(self):
+        """try_raw_paste(cmd, stream=True) delegates stream to exec_raw_paste"""
+        self.mock_conn._has_data.return_value = False
+        self.mock_conn.read_bytes.side_effect = [
+            (ord('R'), 1), b'\x00\x01', mpy_comm.CTRL_D,
+        ]
+        buf = bytearray(b'out' + mpy_comm.CTRL_D)
+        self.mock_conn._buffer = buf
+        self.mock_conn._read_to_buffer.return_value = False
+        self.mock_conn.read_until.side_effect = [b'']
+        chunks = list(self.comm.try_raw_paste(
+            b"print(1)", stream=True))
+        self.assertEqual(b''.join(chunks), b'out')
+
+    def test_stream_fallback_to_exec(self):
+        """try_raw_paste with fallback passes stream to exec"""
+        import io
+        self.comm._raw_paste_supported = False
+        self.mock_conn.read_until.side_effect = [
+            b'',           # OK
+            b'result',     # stdout
+            b'',           # stderr
+        ]
+        result = self.comm.try_raw_paste("print(1)")
+        self.assertEqual(result, b'result')
+
+    def test_stream_file_fallback_to_exec(self):
+        """try_raw_paste with fallback passes file-like stream to exec"""
+        import io
+        self.comm._raw_paste_supported = False
+        buf = bytearray(b'out' + mpy_comm.CTRL_D)
+        self.mock_conn._buffer = buf
+        self.mock_conn._read_to_buffer.return_value = False
+        self.mock_conn.read_until.side_effect = [
+            b'',   # OK
+            b'',   # stderr
+        ]
+        out = io.BytesIO()
+        result = self.comm.try_raw_paste("cmd", stream=out)
+        self.assertEqual(result, b'')
+        self.assertEqual(out.getvalue(), b'out')
+
+
+class TestMonitor(unittest.TestCase):
+    """Tests for monitor() method"""
+
+    def setUp(self):
+        self.mock_conn = Mock()
+        self.mock_conn.read_until.return_value = b''
+        self.mock_conn.flush.return_value = None
+        self.comm = mpy_comm.MpyComm(self.mock_conn)
+        self.comm._repl_mode = False
+
+    def _mock_read_sequence(self, chunks):
+        """Configure conn.read() to return chunks then None forever."""
+        it = iter(chunks)
+        def read_side_effect(timeout=None):
+            return next(it, None)
+        self.mock_conn.read.side_effect = read_side_effect
+
+    def test_monitor_returns_bytes(self):
+        """monitor() returns concatenated output as bytes"""
+        self._mock_read_sequence([b'Hello\r\n', b'\r\n>>> '])
+        result = self.comm.monitor()
+        self.assertEqual(result, b'Hello\r\n' + b'\r\n>>> ')
+
+    def test_monitor_stops_at_prompt(self):
+        """monitor() stops when REPL prompt detected"""
+        self._mock_read_sequence([b'done\r\n', b'\r\n>>> ', b'EXTRA'])
+        result = self.comm.monitor()
+        self.assertNotIn(b'EXTRA', result)
+
+    def test_monitor_prompt_split_across_chunks(self):
+        """monitor() detects prompt split across chunks"""
+        self._mock_read_sequence([b'out\r\n>>', b'> '])
+        result = self.comm.monitor()
+        self.assertIn(b'out', result)
+
+    def test_monitor_stream_true_yields_chunks(self):
+        """monitor(stream=True) yields chunks"""
+        self._mock_read_sequence([b'A', b'B\r\n>>> '])
+        chunks = list(self.comm.monitor(stream=True))
+        self.assertEqual(b''.join(chunks), b'AB\r\n>>> ')
+
+    def test_monitor_stream_file(self):
+        """monitor(stream=BytesIO) writes to file-like object"""
+        import io
+        self._mock_read_sequence([b'hello\r\n>>> '])
+        out = io.BytesIO()
+        result = self.comm.monitor(stream=out)
+        self.assertEqual(result, b'')
+        self.assertEqual(out.getvalue(), b'hello\r\n>>> ')
+
+    def test_monitor_stream_text_file(self):
+        """monitor(stream=StringIO) writes decoded text"""
+        import io
+        self._mock_read_sequence([b'hi\r\n>>> '])
+        out = io.StringIO()
+        self.comm.monitor(stream=out)
+        self.assertEqual(out.getvalue(), 'hi\r\n>>> ')
+
+    def test_monitor_follow_ignores_prompt(self):
+        """monitor(follow=True) doesn't stop at prompt"""
+        call_count = [0]
+        def read_side_effect(timeout=None):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return b'\r\n>>> '
+            if call_count[0] == 2:
+                return b'more'
+            if call_count[0] == 3:
+                raise KeyboardInterrupt
+            return None
+        self.mock_conn.read.side_effect = read_side_effect
+        chunks = []
+        with self.assertRaises(KeyboardInterrupt):
+            for chunk in self.comm.monitor(stream=True, follow=True):
+                chunks.append(chunk)
+        self.assertIn(b'more', chunks)
+
+    def test_monitor_exits_raw_repl(self):
+        """monitor() exits raw REPL mode before reading"""
+        self.comm._repl_mode = True
+        self._mock_read_sequence([b'\r\n>>> '])
+        self.comm.monitor()
+        # Should have written CTRL_B to exit raw REPL
+        writes = [c[0][0] for c in self.mock_conn.write.call_args_list]
+        self.assertIn(mpy_comm.CTRL_B, writes)
+
+
 class TestCwdAndPathTracking(unittest.TestCase):
     """Tests for CWD and sys.path tracking for soft reset restore"""
 
