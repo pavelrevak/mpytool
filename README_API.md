@@ -1336,4 +1336,4 @@ except mpytool.ConnError as e:
 ## See Also
 
 - [README.md](README.md) - CLI documentation and examples
-- [GitHub Repository](https://github.com/pavelrevak/mpytool)
+- [GitHub Repository](https://github.com/cortexm/mpytool)

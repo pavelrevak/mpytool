@@ -41,7 +41,7 @@ pip3 install mpytool
 ### Installation from git (latest development version)
 
 ```bash
-pip3 install git+https://github.com/pavelrevak/mpytool.git
+pip3 install git+https://github.com/cortexm/mpytool.git
 ```
 
 ### Installation in virtualenv
@@ -647,7 +647,7 @@ autoload -Uz compinit && compinit
 **Quick install (or update):**
 ```bash
 mkdir -p ~/.zsh/completions
-curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/_mpytool -o ~/.zsh/completions/_mpytool
+curl -fsSL https://raw.githubusercontent.com/cortexm/mpytool/main/completions/_mpytool -o ~/.zsh/completions/_mpytool
 grep -q '\.zsh/completions' ~/.zshrc || echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc
 exec zsh
 ```
@@ -668,17 +668,17 @@ source ~/.mpytool-completion.bash
 
 **Quick install (Linux system-wide):**
 ```bash
-sudo curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o /etc/bash_completion.d/mpytool && exec bash
+sudo curl -fsSL https://raw.githubusercontent.com/cortexm/mpytool/main/completions/mpytool.bash -o /etc/bash_completion.d/mpytool && exec bash
 ```
 
 **Quick install (macOS Homebrew):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o /usr/local/etc/bash_completion.d/mpytool && exec bash
+curl -fsSL https://raw.githubusercontent.com/cortexm/mpytool/main/completions/mpytool.bash -o /usr/local/etc/bash_completion.d/mpytool && exec bash
 ```
 
 **Quick install (user directory):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pavelrevak/mpytool/main/completions/mpytool.bash -o ~/.mpytool-completion.bash
+curl -fsSL https://raw.githubusercontent.com/cortexm/mpytool/main/completions/mpytool.bash -o ~/.mpytool-completion.bash
 grep -q 'mpytool-completion' ~/.bashrc || echo 'source ~/.mpytool-completion.bash' >> ~/.bashrc
 exec bash
 ```
@@ -754,4 +754,4 @@ MIT
 ### Support
 
 - Basic support is free over GitHub issues.
-- Professional support is available over email: [Pavel Revak](mailto:pavel.revak@gmail.com?subject=[GitHub]%20mpytool).
+- Professional support is available over email: [Pavel Revak](mailto:pavelrevak@gmail.com?subject=[GitHub]%20mpytool).

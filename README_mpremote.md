@@ -1,6 +1,6 @@
 # mpytool vs mpremote Comparison
 
-Detailed comparison between [mpytool](https://github.com/pavelrevak/mpytool) and [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html).
+Detailed comparison between [mpytool](https://github.com/cortexm/mpytool) and [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html).
 
 ## Commands
 
