@@ -17,7 +17,7 @@ jobs:
       - run: python -m unittest discover tests/ -v
 
   linux-integration:
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, Linux]
     needs: unit-tests
     strategy:
       fail-fast: false
@@ -34,7 +34,7 @@ jobs:
           python -m unittest tests.test_integration tests.test_cli -v
 
   win-integration:
-    runs-on: [self-hosted, windows]
+    runs-on: [self-hosted, Windows]
     needs: unit-tests
     strategy:
       fail-fast: false
