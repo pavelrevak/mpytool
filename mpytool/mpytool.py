@@ -1362,6 +1362,7 @@ class MpyTool():
                         parts = platform.split('\t')
                         print(f"  {parts[0]}, {parts[1]}" if len(parts) >= 2
                             else f"  {platform}")
+                        comm.exit_raw_repl()
                     finally:
                         conn.close()
                 except Exception:
