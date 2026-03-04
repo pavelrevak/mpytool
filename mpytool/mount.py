@@ -175,6 +175,21 @@ CMD_READLINE = 12
 CMD_MIN = CMD_STAT
 CMD_MAX = CMD_READLINE
 
+# CMD names for diagnostic logging
+_CMD_NAMES = {
+    CMD_STAT: 'STAT',
+    CMD_LISTDIR: 'LISTDIR',
+    CMD_OPEN: 'OPEN',
+    CMD_CLOSE: 'CLOSE',
+    CMD_READ: 'READ',
+    CMD_WRITE: 'WRITE',
+    CMD_MKDIR: 'MKDIR',
+    CMD_REMOVE: 'REMOVE',
+    CMD_RENAME: 'RENAME',
+    CMD_SEEK: 'SEEK',
+    CMD_READLINE: 'READLINE',
+}
+
 # Prebuilt bytes for hot path
 _ESCAPE_BYTE = bytes([ESCAPE])
 
@@ -361,10 +376,14 @@ class _VFSReader:
     read from underlying connection if buffer is exhausted.
     """
 
-    def __init__(self, data, offset, underlying_conn):
+    # Diagnostic timeout - set to detect hangs (None = no timeout)
+    DIAG_TIMEOUT = 30  # seconds
+
+    def __init__(self, data, offset, underlying_conn, log=None):
         self._data = data
         self._offset = offset
         self._conn = underlying_conn
+        self._log = log
 
     def read_bytes(self, n, timeout=None):
         """Read n bytes from buffer + underlying connection"""
@@ -376,7 +395,11 @@ class _VFSReader:
             self._offset += chunk
             n -= chunk
         if n > 0:
-            result.extend(self._conn.read_bytes(n, timeout))
+            # Use diagnostic timeout if none specified
+            actual_timeout = timeout if timeout is not None else self.DIAG_TIMEOUT
+            if self._log:
+                self._log.debug("VFS read_bytes: waiting for %d bytes", n)
+            result.extend(self._conn.read_bytes(n, actual_timeout))
         return bytes(result)
 
     def write(self, data):
@@ -1057,13 +1080,25 @@ class VfsProtocol:
                 # Send ACK
                 self._conn.write(_ESCAPE_BYTE)
 
+                # Diagnostic logging
+                cmd_name = _CMD_NAMES.get(self._cmd, str(self._cmd))
+                self._log.debug(
+                    "VFS dispatch: CMD=%s MID=%d START", cmd_name, self._mid)
+
                 # Read params and dispatch using _VFSReader
-                reader = _VFSReader(self._buf, 0, self._conn)
+                reader = _VFSReader(self._buf, 0, self._conn, log=self._log)
                 orig_conn = handler._conn
                 handler._conn = reader
                 self._dispatching = True
                 try:
                     handler.dispatch(self._cmd)
+                    self._log.debug(
+                        "VFS dispatch: CMD=%s MID=%d DONE", cmd_name, self._mid)
+                except Exception as e:
+                    self._log.warning(
+                        "VFS dispatch: CMD=%s MID=%d FAILED: %s",
+                        cmd_name, self._mid, e)
+                    raise
                 finally:
                     self._dispatching = False
                     handler._conn = orig_conn

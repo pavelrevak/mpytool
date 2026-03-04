@@ -168,8 +168,9 @@ class Conn():
             if timeout is not None and start_time + timeout < _time.time():
                 if self._buffer:
                     raise Timeout(
-                        f"During timeout received: {bytes(self._buffer)}")
-                raise Timeout("No data received")
+                        f"Expected {count} bytes, got {len(self._buffer)}: "
+                        f"{bytes(self._buffer)[:64]!r}...")
+                raise Timeout(f"Expected {count} bytes, got nothing")
         data = bytes(self._buffer[:count])
         del self._buffer[:count]
         return data
