@@ -6,6 +6,7 @@ dist
 !.github
 !.mpyproject
 *.egg-info
+_version.py
 *.md
 !README*.md
 scripts/

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mpytool"
-version = "2.3.4"
+dynamic = ["version"]
 description = "MPY tool - manage files on devices running MicroPython"
 readme = "README.md"
 license = "MIT"
@@ -25,3 +25,9 @@ mpytool = "mpytool.mpytool:main"
 
 [tool.setuptools.packages.find]
 include = ["mpytool*"]
+
+[tool.setuptools_scm]
+# Generates mpytool/_version.py at build time
+write_to = "mpytool/_version.py"
+# Fallback for installs without git (e.g., downloaded ZIP)
+fallback_version = "0.0.0"
