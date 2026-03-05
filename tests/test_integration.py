@@ -53,6 +53,14 @@ def requires_device_rw(cls):
 requires_device_wipe = requires_device_rw
 
 
+def setUpModule():
+    """Reset device before running integration tests"""
+    if not PORT_RO:
+        return  # No device, tests will be skipped
+    from tests.test_helpers import reset_device
+    reset_device(PORT_RO)
+
+
 @requires_device
 class TestDeviceConnection(unittest.TestCase):
     """Test basic device connection"""

@@ -51,6 +51,14 @@ def requires_device_rw(cls):
     return cls
 
 
+def setUpModule():
+    """Reset device before running CLI tests"""
+    if not PORT_RO:
+        return  # No device, tests will be skipped
+    from tests.test_helpers import reset_device
+    reset_device(PORT_RO)
+
+
 # =============================================================================
 # Tests without device (always run)
 # =============================================================================
