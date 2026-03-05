@@ -5,6 +5,7 @@ import os as _os
 import re as _re
 import shutil as _shutil
 import subprocess as _subprocess
+import sys as _sys
 
 from mpytool.logger import SimpleColorLogger as _SimpleColorLogger
 
@@ -19,6 +20,21 @@ _MPY_ARCH_NAMES = (
 BOOT_FILES = frozenset(('boot.py', 'main.py'))
 
 
+def _find_mpy_cross():
+    """Find mpy-cross binary: first in same dir as Python, then in PATH"""
+    # Look next to current Python interpreter (same venv)
+    bin_dir = _os.path.dirname(_sys.executable)
+    local = _os.path.join(bin_dir, 'mpy-cross')
+    if _os.path.isfile(local) and _os.access(local, _os.X_OK):
+        return local
+    # Windows: mpy-cross.exe
+    local_exe = local + '.exe'
+    if _os.path.isfile(local_exe) and _os.access(local_exe, _os.X_OK):
+        return local_exe
+    # Fallback to PATH
+    return _shutil.which('mpy-cross')
+
+
 class MpyCross:
     """Mpy-cross compiler wrapper with caching
 
@@ -29,6 +45,7 @@ class MpyCross:
     def __init__(self, log=None):
         self._log = log if log is not None else _SimpleColorLogger()
         self.active = False
+        self._bin = None  # path to mpy-cross binary
         self._ver = None  # (major, sub) device mpy version
         self._arch = None  # architecture name for cache key
         self._args = []  # extra mpy-cross args (-b, -march)
@@ -53,7 +70,7 @@ class MpyCross:
         Sets self.active = True on success, False on failure.
         """
         self.active = False
-        mpy_cross_bin = _shutil.which('mpy-cross')
+        mpy_cross_bin = _find_mpy_cross()
         if not mpy_cross_bin:
             self._log.warning(
                 'mpy-cross not found in PATH (pip install mpy-cross),'
@@ -99,6 +116,7 @@ class MpyCross:
         self._log.debug(
             'device v%s mpy v%d.%d%s, mpy-cross %s',
             dev_version, dev_ver, dev_sub, arch_str, cross_str)
+        self._bin = mpy_cross_bin
         self.active = True
 
     def compile(self, src_path):
@@ -106,7 +124,10 @@ class MpyCross:
 
         Skips boot.py, main.py, and non-.py files.
         Uses cache if fresh (mtime check).
+        Returns None if not active (init() not called or failed).
         """
+        if not self.active:
+            return None
         basename = _os.path.basename(src_path)
         if basename in BOOT_FILES:
             self._log.debug('mpy: skip %s (boot file)', basename)
@@ -126,7 +147,7 @@ class MpyCross:
                 return cache_path
         # Compile
         _os.makedirs(cache_dir, exist_ok=True)
-        cmd = ['mpy-cross'] + self._args + ['-o', cache_path, src_path]
+        cmd = [self._bin] + self._args + ['-o', cache_path, src_path]
         self._log.info('$ %s', ' '.join(cmd))
         result = _subprocess.run(
             cmd, capture_output=True, text=True, timeout=30)

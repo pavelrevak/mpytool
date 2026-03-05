@@ -738,6 +738,7 @@ class TestMpyCompilation(unittest.TestCase):
     def _setup_compiler(self, arch=None):
         """Setup compiler with active state and fake version"""
         self.compiler.active = True
+        self.compiler._bin = 'mpy-cross'
         self.compiler._ver = (6, 3)
         self.compiler._arch = arch
         self.compiler._args = []
@@ -915,9 +916,9 @@ class TestMpyCompilation(unittest.TestCase):
         self.assertEqual(call_args[0][0], compiled_data)
         self.assertEqual(call_args[0][1], '/script.mpy')
 
-    @patch('mpytool.mpy_cross._shutil.which', return_value='/usr/bin/mpy-cross')
+    @patch('mpytool.mpy_cross._find_mpy_cross', return_value='/usr/bin/mpy-cross')
     @patch('mpytool.mpy_cross._subprocess.run')
-    def test_init_version_match(self, mock_run, mock_which):
+    def test_init_version_match(self, mock_run, mock_find):
         """init should succeed when versions match"""
         mock_run.return_value = Mock(
             returncode=0,
@@ -930,9 +931,9 @@ class TestMpyCompilation(unittest.TestCase):
         self.assertEqual(self.compiler._ver, (6, 3))
         self.assertIn('-march=armv6m', self.compiler._args)
 
-    @patch('mpytool.mpy_cross._shutil.which', return_value='/usr/bin/mpy-cross')
+    @patch('mpytool.mpy_cross._find_mpy_cross', return_value='/usr/bin/mpy-cross')
     @patch('mpytool.mpy_cross._subprocess.run')
-    def test_init_version_mismatch_uses_b_flag(self, mock_run, mock_which):
+    def test_init_version_mismatch_uses_b_flag(self, mock_run, mock_find):
         """init should use -b flag on version mismatch"""
         mock_run.return_value = Mock(
             returncode=0,
@@ -947,8 +948,8 @@ class TestMpyCompilation(unittest.TestCase):
         self.assertIn('6.1', self.compiler._args)
         self.assertIn('-march=xtensawin', self.compiler._args)
 
-    @patch('mpytool.mpy_cross._shutil.which', return_value=None)
-    def test_init_not_found(self, mock_which):
+    @patch('mpytool.mpy_cross._find_mpy_cross', return_value=None)
+    def test_init_not_found(self, mock_find):
         """init should deactivate when mpy-cross not in PATH"""
         self.compiler._log = Mock()
         self.compiler.init({'mpy_ver': 6, 'mpy_sub': 3, 'version': '1.24.0'})
