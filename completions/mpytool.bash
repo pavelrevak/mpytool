@@ -170,6 +170,10 @@ _mpytool() {
         -a|--address)
             return
             ;;
+        --ssl-ca)
+            COMPREPLY=($(compgen -f -- "$cur"))
+            return
+            ;;
     esac
 
     # At command position

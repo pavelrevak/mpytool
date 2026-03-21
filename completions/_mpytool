@@ -133,6 +133,10 @@ _mpytool() {
         '--port[serial port]:port:_mpytool_ports' \
         '-a[network address]:address:' \
         '--address[network address]:address:' \
+        '--ssl[use SSL/TLS]' \
+        '--ssl-no-verify[disable SSL certificate verification]' \
+        '--ssl-ca[CA certificate file]:file:_files' \
+        '--ssl-no-hostname[disable SSL hostname verification]' \
         '-b[baud rate]:baud:(9600 19200 38400 57600 115200 230400 460800 921600)' \
         '--baud[baud rate]:baud:(9600 19200 38400 57600 115200 230400 460800 921600)' \
         '-d[debug level]' \

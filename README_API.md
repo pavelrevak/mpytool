@@ -107,25 +107,44 @@ conn.reconnect(timeout=5)   # Reconnect after device reset (USB-CDC)
 
 ### ConnSocket
 
-TCP socket connection for network-connected devices.
+TCP socket connection for network-connected devices with optional SSL/TLS.
 
 ```python
-mpytool.ConnSocket(address, log=None)
+mpytool.ConnSocket(address, log=None, ssl=False, ssl_verify=True,
+    ssl_ca=None, ssl_check_hostname=True)
 ```
 
 **Parameters:**
 - `address` (str): Host address with optional port (e.g., `192.168.1.100` or `192.168.1.100:8266`)
 - `log`: Optional logger instance
+- `ssl` (bool): Enable SSL/TLS encryption (default: `False`)
+- `ssl_verify` (bool): Verify server certificate (default: `True`). Set to `False` for self-signed certs.
+- `ssl_ca` (str): Path to CA certificate file for custom certificate authorities
+- `ssl_check_hostname` (bool): Verify hostname matches certificate (default: `True`). Set to `False` when one cert is shared across multiple hosts.
 
 Default port is 23 if not specified.
 
-**Example:**
+**Examples:**
 ```python
+# Plain TCP
 conn = mpytool.ConnSocket(address='192.168.1.100:8266')
+
+# SSL with system CA
+conn = mpytool.ConnSocket(address='server:8023', ssl=True)
+
+# SSL with custom CA
+conn = mpytool.ConnSocket(address='server:8023', ssl=True, ssl_ca='ca.pem')
+
+# SSL, verify cert but skip hostname check
+conn = mpytool.ConnSocket(address='192.168.1.100:8023',
+    ssl=True, ssl_ca='ca.pem', ssl_check_hostname=False)
+
+# SSL without any verification (insecure)
+conn = mpytool.ConnSocket(address='server:8023', ssl=True, ssl_verify=False)
 ```
 
 **Raises:**
-- `ConnError`: If unable to connect
+- `ConnError`: If unable to connect or SSL handshake fails
 
 ### Common Connection Methods
 

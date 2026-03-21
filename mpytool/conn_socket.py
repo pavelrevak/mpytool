@@ -1,11 +1,14 @@
 """MicroPython tool: socket connector"""
 
 import socket as _socket
+import ssl as _ssl
 import mpytool.conn as _conn
 
 
 class ConnSocket(_conn.Conn):
-    def __init__(self, address, log=None):
+    def __init__(
+            self, address, log=None, ssl=False, ssl_verify=True,
+            ssl_ca=None, ssl_check_hostname=True):
         super().__init__(log)
         self._socket = None
         sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
@@ -16,14 +19,31 @@ class ConnSocket(_conn.Conn):
         else:
             host = address
             port = 23
+        proto = "ssl" if ssl else "tcp"
         if log:
-            log.info(f"Connecting to: {host}:{port}")
+            log.info(f"Connecting to: {host}:{port} [{proto}]")
         try:
             sock.connect((host, port))
         except _socket.timeout as err:
+            sock.close()
             raise _conn.ConnError(f"Timeout connecting to {host}:{port}") from err
         except _socket.error as err:
+            sock.close()
             raise _conn.ConnError(f"Cannot connect to {host}:{port}: {err}") from err
+        if ssl:
+            try:
+                context = _ssl.create_default_context()
+                if not ssl_verify:
+                    context.check_hostname = False
+                    context.verify_mode = _ssl.CERT_NONE
+                elif not ssl_check_hostname:
+                    context.check_hostname = False
+                if ssl_ca:
+                    context.load_verify_locations(ssl_ca)
+                sock = context.wrap_socket(sock, server_hostname=host)
+            except (_ssl.SSLError, OSError) as err:
+                sock.close()
+                raise _conn.ConnError(f"SSL error: {err}") from err
         sock.settimeout(None)
         sock.setblocking(False)
         self._socket = sock
@@ -51,8 +71,12 @@ class ConnSocket(_conn.Conn):
             if data:
                 self._log.debug("RX: %r", data)
                 return data
-        except BlockingIOError:
+            # recv() returned b'' = peer closed connection
+            raise _conn.ConnError("Connection closed")
+        except (BlockingIOError, _ssl.SSLWantReadError):
             pass
+        except _conn.ConnError:
+            raise
         except OSError as err:
             raise _conn.ConnError(f"Connection lost: {err}") from err
         return None
@@ -64,5 +88,7 @@ class ConnSocket(_conn.Conn):
         self._log.debug("TX: %r", data)
         try:
             return self._socket.send(data)
+        except _ssl.SSLWantWriteError:
+            return 0
         except OSError as err:
             raise _conn.ConnError(f"Connection lost: {err}") from err

@@ -182,12 +182,17 @@ class MpyTool():
     def __init__(
             self, conn=None, log=None, verbose=None, exclude_dirs=None,
             force=False, compress=None, chunk_size=None,
-            port=None, address=None, baudrate=115200):
+            port=None, address=None, baudrate=115200,
+            ssl=False, ssl_verify=True, ssl_ca=None, ssl_check_hostname=True):
         # Connection can be provided directly or created lazily from parameters
         self._conn = conn
         self._port = port
         self._address = address
         self._baudrate = baudrate
+        self._ssl = ssl
+        self._ssl_verify = ssl_verify
+        self._ssl_ca = ssl_ca
+        self._ssl_check_hostname = ssl_check_hostname
         self._log = log if log is not None else _logger.SimpleColorLogger()
         self._verbose_out = verbose  # None = no verbose output (API mode)
         self._exclude_dirs = {'.*', '*.pyc', '__pycache__'}
@@ -226,9 +231,12 @@ class MpyTool():
                 self._log.verbose(f"Connected to {port_col} {desc}", level=2)
             elif self._address:
                 self._conn = _mpytool.ConnSocket(
-                    address=self._address, log=self._log)
+                    address=self._address, log=self._log,
+                    ssl=self._ssl, ssl_verify=self._ssl_verify,
+                    ssl_ca=self._ssl_ca, ssl_check_hostname=self._ssl_check_hostname)
+                proto = "ssl" if self._ssl else "socket"
                 self._log.verbose(
-                    f"Connected to {self._address} [socket]", level=2)
+                    f"Connected to {self._address} [{proto}]", level=2)
         return self._conn
 
     @property
@@ -1548,6 +1556,16 @@ def _build_main_parser():
     parser.add_argument('-p', '--port', help="serial port")
     parser.add_argument('-a', '--address', help="network address")
     parser.add_argument(
+        '--ssl', action='store_true', help='use SSL/TLS for network connection')
+    parser.add_argument(
+        '--ssl-no-verify', action='store_true',
+        help='disable SSL certificate verification (insecure)')
+    parser.add_argument(
+        '--ssl-ca', metavar='FILE', help='CA certificate file for SSL verification')
+    parser.add_argument(
+        '--ssl-no-hostname', action='store_true',
+        help='disable SSL hostname/IP verification (verify cert only)')
+    parser.add_argument(
         '-b', '--baud', type=int, default=115200, help="baud rate")
     parser.add_argument(
         '-d', '--debug', default=0, action='count', help='debug level')
@@ -1600,11 +1618,17 @@ def main():
         compress = False
     elif args.compress:
         compress = True
+    # SSL: --ssl-no-verify, --ssl-ca or --ssl-no-hostname implies --ssl
+    use_ssl = args.ssl or args.ssl_no_verify or args.ssl_ca or args.ssl_no_hostname
+    ssl_verify = not args.ssl_no_verify
+    ssl_check_hostname = not args.ssl_no_hostname
     # Create MpyTool with lazy connection initialization
     mpy_tool = MpyTool(
         log=log, verbose=log, exclude_dirs=args.exclude,
         force=args.force, compress=compress, chunk_size=args.chunk_size,
-        port=args.port, address=args.address, baudrate=args.baud)
+        port=args.port, address=args.address, baudrate=args.baud,
+        ssl=use_ssl, ssl_verify=ssl_verify, ssl_ca=args.ssl_ca,
+        ssl_check_hostname=ssl_check_hostname)
     command_groups = _utils.split_commands(args.commands)
     try:
         with_progress = args.verbose >= 1

@@ -27,7 +27,7 @@ It is an alternative to the official [mpremote](https://docs.micropython.org/en/
 - **Raw-paste mode** - flow-controlled code execution with reduced
   RAM usage (API)
 - **Shell completion** - ZSH and Bash with remote path completion
-- **Network support** - connect over TCP
+- **Network support** - connect over TCP with optional SSL/TLS
 - **Full Unicode support** - handles Unicode in file names and content
 
 See [README_mpremote.md](README_mpremote.md) for detailed comparison with mpremote.
@@ -522,8 +522,12 @@ TREE: /
 
 ### Connect over network (TCP, default port 23)
 ```
-$ mpytool -a 192.168.1.100 ls
-$ mpytool -a 192.168.1.100:8266 tree
+$ mpytool -a 192.168.1.100 ls                          # plain TCP
+$ mpytool -a 192.168.1.100:8266 tree                   # custom port
+$ mpytool -a 192.168.1.100:8023 --ssl ls               # SSL/TLS connection
+$ mpytool -a 192.168.1.100:8023 --ssl-ca ca.pem ls     # SSL with custom CA
+$ mpytool -a 192.168.1.100:8023 --ssl-no-hostname ls   # SSL, skip hostname check
+$ mpytool -a 192.168.1.100:8023 --ssl-no-verify ls     # SSL, skip all verification
 ```
 
 ### Set baudrate (default 115200)
